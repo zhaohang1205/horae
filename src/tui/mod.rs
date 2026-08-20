@@ -323,6 +323,7 @@ mod tests {
         app.handle_key(kc(KeyCode::Enter)).unwrap();
         let s = norm(&frame("8-organize", &mut term, &mut app, &mut out));
         assert!(s.contains("组织"), "回车进入组织/编辑模式");
+        assert!(s.contains("[语法]"), "编辑模式下语法提示常驻不消失");
         // 预填了当前标题，追加单个 token 时间后确认
         for c in " ~tomorrow".chars() {
             app.handle_key(key(c)).unwrap();
@@ -380,18 +381,11 @@ mod tests {
         assert!(s.contains("·收件箱"), "从 waiting 视图收集后跳到 Inbox");
         assert!(s.contains("Capturedfromwaiting"));
 
-        // 9) 标签 + 一句话排程
-        app.handle_key(key('t')).unwrap();
-        for c in "urgent".chars() {
-            app.handle_key(key(c)).unwrap();
-        }
-        app.handle_key(kc(KeyCode::Enter)).unwrap();
-        let s = norm(&frame("20-after-tag", &mut term, &mut app, &mut out));
-        assert!(s.contains("urgent"), "标签已添加");
-        app.handle_key(kc(KeyCode::Enter)).unwrap(); // 组织编辑器
-        let s = norm(&frame("20b-organize", &mut term, &mut app, &mut out));
+        // 9) 一句话编辑：加标签 + 排程
+        app.handle_key(kc(KeyCode::Enter)).unwrap(); // 组织编辑器（= e 全量编辑）
+        let s = norm(&frame("20-organize", &mut term, &mut app, &mut out));
         assert!(s.contains("组织"), "回车进入一句话编辑器");
-        for c in " ~tomorrow 15:30".chars() {
+        for c in " @urgent ~tomorrow 15:30".chars() {
             app.handle_key(key(c)).unwrap();
         }
         app.handle_key(kc(KeyCode::Enter)).unwrap();
@@ -451,7 +445,7 @@ mod tests {
         app.handle_key(key('j')).unwrap(); // Move down to select two items
         assert!(!app.selected_ids.is_empty(), "选中了多个任务");
         // Tag them in bulk
-        app.handle_key(key('t')).unwrap();
+        app.handle_key(key('T')).unwrap();
         assert!(app.mode == Mode::Tagging);
         for c in "bulk_tag".chars() {
             app.handle_key(key(c)).unwrap();
@@ -727,7 +721,7 @@ mod tests {
     }
 
     #[test]
-    fn a_edits_selected_inbox_task() {
+    fn a_always_captures_and_e_edits_selected_task() {
         crate::repo::pomodoro::set_pomo_idle_for_tests();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
@@ -744,9 +738,17 @@ mod tests {
         .unwrap();
 
         let mut app = App::new(&conn).unwrap();
-        // Inbox 视图选中该任务，按 a = 与 capture 同一入口再编辑
+        // Inbox 视图选中该任务，按 a = 一律新建捕获，绝不修改选中任务
         app.handle_key(key('a')).unwrap();
-        assert_eq!(app.mode, Mode::Capturing, "a 打开同一句话编辑器");
+        assert_eq!(app.mode, Mode::Capturing, "a 打开快速录入");
+        assert_eq!(app.organizing_id, None, "a 不进入编辑模式");
+        assert!(app.input.is_empty(), "a 不预填选中任务: {}", app.input);
+        app.handle_key(kc(KeyCode::Esc)).unwrap();
+        assert_eq!(app.mode, Mode::Normal);
+
+        // e = 全量编辑选中任务：与 capture 同源的一句话编辑器，预填标题与标签
+        app.handle_key(key('e')).unwrap();
+        assert_eq!(app.mode, Mode::Capturing, "e 打开一句话编辑器");
         assert_eq!(app.organizing_id.as_deref(), Some(rec.id.as_str()));
         assert!(
             app.input.contains("滞留任务") && app.input.contains("@health"),
@@ -755,6 +757,7 @@ mod tests {
         );
 
         app.input.clear();
+        app.input_cursor = 0;
         for c in "滞留任务 @work ~tomorrow *d".chars() {
             app.handle_key(key(c)).unwrap();
         }
@@ -794,6 +797,7 @@ mod tests {
 
         // 直接替换为完整一句话：标题 + @标签 + ~时间 + *周期
         app.input.clear();
+        app.input_cursor = 0;
         for c in "跑5公里 @home ~tomorrow *d".chars() {
             app.handle_key(key(c)).unwrap();
         }
@@ -1121,16 +1125,36 @@ mod tests {
         // 空 Inbox 无任务操作 → 动态条为空（渲染层隐藏整块）
         assert!(keys(View::Inbox, false).is_empty(), "无选中→任务操作条为空");
 
-        // 归档箱：u/D 需要选中
-        assert!(keys(View::Archived, false).is_empty());
+        // 归档箱：u/D 需要选中；v（多选）是全局键，空选也可提示
+        let arch_no_sel = keys(View::Archived, false);
+        assert!(
+            arch_no_sel.iter().any(|(k, _)| *k == "v"),
+            "空选也可提示 v 多选"
+        );
+        assert!(
+            !arch_no_sel.iter().any(|(k, _)| *k == "u" || *k == "D"),
+            "u/D 需选中"
+        );
         let arch_sel = keys(View::Archived, true);
         assert!(arch_sel.iter().any(|(k, _)| *k == "u"));
         assert!(arch_sel.iter().any(|(k, _)| *k == "D"));
+        assert!(arch_sel.iter().any(|(k, _)| *k == "v"));
+
+        // 周回顾视图（未进行中）：提示 r 开启回顾，不提示失效的 R
+        let review = keys(View::Review, true);
+        assert!(
+            review.iter().any(|(k, _)| *k == "r"),
+            "Review 提示 r 开启回顾"
+        );
+        assert!(
+            !review.iter().any(|(k, _)| *k == "R"),
+            "Review 未进行中不提示 R"
+        );
 
         // 非任务视图：任务操作键不出现（即使有选中行）
         let tags_sel = keys(View::Tags, true);
         assert!(!tags_sel.iter().any(|(k, _)| *k == "Enter"));
-        assert!(tags_sel.iter().any(|(k, _)| *k == "a"), "Tags 有新增标签");
+        assert!(tags_sel.iter().any(|(k, _)| *k == "c"), "Tags 有新增标签");
         assert!(tags_sel.iter().any(|(k, _)| *k == "D"), "Tags 有删除标签");
 
         // 周回顾进行中才出现 R
@@ -1379,6 +1403,146 @@ mod tests {
     }
 
     #[test]
+    fn normal_mode_space_batch_ops_use_all_selected() {
+        // 回归：普通模式下用 Space 点选多项后批量操作，应作用于全部选中项，
+        // 而非仅当前光标行（此前归档/删除/状态变更被 Mode::Visual 门控误伤）。
+        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        for i in 0..3 {
+            let t = tasks::create_capture(
+                &conn,
+                &CaptureInput {
+                    title: format!("normal-batch-{i}"),
+                    status: task::Status::Inbox,
+                    tag_names: vec![],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            tasks::archive(&conn, &t.id).unwrap();
+        }
+
+        let mut app = App::new(&conn).unwrap();
+        app.popup = None;
+        app.handle_key(key('8')).unwrap(); // 归档箱视图
+        app.handle_key(key('l')).unwrap(); // 焦点移到列表栏（否则 j/k 是切视图）
+        let top_two: Vec<String> = tasks::list_archived(&conn)
+            .unwrap()
+            .into_iter()
+            .take(2)
+            .map(|t| t.id)
+            .collect();
+        assert_eq!(top_two.len(), 2, "归档箱至少两条用于批量测试");
+
+        // 普通模式：Space 点选第一行，j 移动，Space 点选第二行（不进入可视模式）。
+        app.handle_key(key(' ')).unwrap();
+        app.handle_key(key('j')).unwrap();
+        app.handle_key(key(' ')).unwrap();
+        assert_eq!(app.mode, Mode::Normal, "Space 点选不进入可视模式");
+        assert_eq!(app.selected_ids.len(), 2, "普通模式选中 2 项");
+
+        // D 触发批量永久删除确认：应收集全部 2 项。
+        app.handle_key(key('D')).unwrap();
+        assert_eq!(app.mode, Mode::ConfirmPurge);
+        assert_eq!(app.pending_purge_ids.len(), 2, "普通模式批量删除收集 2 项");
+        app.handle_key(key('y')).unwrap();
+        for id in &top_two {
+            assert!(tasks::get(&conn, id).is_err(), "选中项已删除: {}", id);
+        }
+        let remaining: Vec<_> = tasks::list_archived(&conn).unwrap();
+        assert_eq!(remaining.len(), 1, "只剩未被选中的任务");
+        assert!(app.selected_ids.is_empty(), "批量操作后选择集已清空");
+
+        // 状态批量变更（x = Done）同样应作用于全部选中项，且操作后清空选择集。
+        let mut conn2 = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn2).unwrap();
+        for i in 0..2 {
+            tasks::create_capture(
+                &conn2,
+                &CaptureInput {
+                    title: format!("status-batch-{i}"),
+                    status: task::Status::Next,
+                    tag_names: vec![],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        let mut app2 = App::new(&conn2).unwrap();
+        app2.popup = None;
+        app2.handle_key(key('2')).unwrap(); // Next 视图
+        app2.handle_key(key('l')).unwrap(); // 焦点移到列表栏
+        app2.handle_key(key(' ')).unwrap();
+        app2.handle_key(key('j')).unwrap();
+        app2.handle_key(key(' ')).unwrap();
+        assert_eq!(app2.selected_ids.len(), 2, "普通模式选中 2 项");
+        app2.handle_key(key('x')).unwrap(); // 批量完成
+        let nexts = tasks::list(
+            &conn2,
+            &ListFilter {
+                status: Some(task::Status::Next),
+                tags: vec![],
+                query: None,
+                review_stale: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(nexts.len(), 0, "批量状态变更作用于全部 2 项");
+        assert!(app2.selected_ids.is_empty(), "批量状态变更后清空选择集");
+    }
+
+    #[test]
+    fn archived_view_can_restore_multiple_selected() {
+        // 回归：普通模式 Space 多选后按 u（恢复）应恢复全部选中项，而非仅当前行。
+        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        for i in 0..3 {
+            let t = tasks::create_capture(
+                &conn,
+                &CaptureInput {
+                    title: format!("restore-batch-{i}"),
+                    status: task::Status::Inbox,
+                    tag_names: vec![],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            tasks::archive(&conn, &t.id).unwrap();
+        }
+
+        let mut app = App::new(&conn).unwrap();
+        app.popup = None;
+        app.handle_key(key('8')).unwrap(); // 归档箱视图
+        app.handle_key(key('l')).unwrap(); // 焦点移到列表栏
+        let top_two: Vec<String> = tasks::list_archived(&conn)
+            .unwrap()
+            .into_iter()
+            .take(2)
+            .map(|t| t.id)
+            .collect();
+        assert_eq!(top_two.len(), 2, "归档箱至少两条用于批量恢复测试");
+
+        // 普通模式：Space 点选前两行。
+        app.handle_key(key(' ')).unwrap();
+        app.handle_key(key('j')).unwrap();
+        app.handle_key(key(' ')).unwrap();
+        assert_eq!(app.selected_ids.len(), 2, "普通模式选中 2 项");
+
+        app.handle_key(key('u')).unwrap(); // 批量恢复
+        for id in &top_two {
+            let t = tasks::get(&conn, id).unwrap();
+            assert!(t.archived_at.is_none(), "选中项已恢复: {}", id);
+        }
+        assert!(app.selected_ids.is_empty(), "批量恢复后清空选择集");
+
+        // 只剩 1 条仍归档。
+        let remaining = tasks::list_archived(&conn).unwrap();
+        assert_eq!(remaining.len(), 1, "只剩未被选中的任务仍归档");
+    }
+
+    #[test]
     fn biweekly_shorthand_reschedules_after_done() {
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
@@ -1482,5 +1646,246 @@ mod tests {
         app.handle_key(key('[')).unwrap();
         assert_eq!(app.mode, Mode::ConfiguringPomo, "'[' 进入番茄钟配置");
         app.handle_key(kc(KeyCode::Esc)).unwrap();
+    }
+
+    #[test]
+    fn input_cursor_edits_insert_delete_and_move() {
+        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        let mut app = App::new(&conn).unwrap();
+
+        // 打开快速录入：光标默认在末尾。
+        app.handle_key(key('a')).unwrap();
+        assert_eq!(app.mode, Mode::Capturing);
+        assert_eq!(app.input_cursor, 0);
+
+        for c in "ab".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        assert_eq!(app.input, "ab");
+        assert_eq!(app.input_cursor, 2);
+
+        // 光标移到中间，插入字符。
+        app.handle_key(kc(KeyCode::Left)).unwrap();
+        assert_eq!(app.input_cursor, 1);
+        app.handle_key(key('X')).unwrap();
+        assert_eq!(app.input, "aXb");
+        assert_eq!(app.input_cursor, 2);
+
+        // 光标处插入多字节（中文），光标保持在字符边界。
+        app.handle_key(key('测')).unwrap();
+        assert_eq!(app.input, "aX测b");
+        assert_eq!(&app.input[..app.input_cursor], "aX测");
+
+        // Delete 删除光标后一个字符。
+        app.handle_key(kc(KeyCode::Delete)).unwrap();
+        assert_eq!(app.input, "aX测");
+
+        // Backspace 删除光标前一个字符。
+        app.handle_key(kc(KeyCode::Backspace)).unwrap();
+        assert_eq!(app.input, "aX");
+
+        // Home / End。
+        app.handle_key(kc(KeyCode::Home)).unwrap();
+        assert_eq!(app.input_cursor, 0);
+        app.handle_key(key('S')).unwrap();
+        assert_eq!(app.input, "SaX");
+        app.handle_key(kc(KeyCode::End)).unwrap();
+        assert_eq!(app.input_cursor, 3);
+
+        // 光标始终是字符边界，Backspace 到开头不越界。
+        app.handle_key(kc(KeyCode::Home)).unwrap();
+        app.handle_key(kc(KeyCode::Backspace)).unwrap();
+        assert_eq!(app.input, "SaX");
+        assert_eq!(app.input_cursor, 0);
+
+        // Esc 退出并清空。
+        app.handle_key(kc(KeyCode::Esc)).unwrap();
+        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.input_cursor, 0);
+    }
+
+    #[test]
+    fn input_cursor_edits_mid_string_for_full_edit() {
+        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        seed(&conn);
+        let mut app = App::new(&conn).unwrap();
+        app.popup = None;
+
+        // 进入全量编辑（e = 一句话编辑器），预填当前任务，光标在末尾。
+        app.handle_key(key('e')).unwrap();
+        assert_eq!(app.mode, Mode::Capturing);
+        assert!(app.organizing_id.is_some(), "e 记录待编辑任务");
+        let input = app.input.clone();
+        assert_eq!(app.input_cursor, input.len());
+
+        // 光标移到开头，删除再插入，验证可修改预填内容。
+        app.handle_key(kc(KeyCode::Home)).unwrap();
+        app.handle_key(kc(KeyCode::Delete)).unwrap();
+        app.handle_key(key('P')).unwrap();
+        assert!(app.input.starts_with('P'));
+        assert_eq!(app.input_cursor, 1);
+    }
+
+    #[test]
+    fn tab_completion_works_at_cursor() {
+        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        let mut app = App::new(&conn).unwrap();
+
+        app.handle_key(key('a')).unwrap();
+        assert_eq!(app.mode, Mode::Capturing);
+
+        // 光标在末尾补全：输入 "buy " 后 @ho，再 Tab → @home。
+        for c in "buy ".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        for c in "@ho".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(kc(KeyCode::Tab)).unwrap();
+        assert!(app.input.contains("@home"), "末尾补全 @home: {}", app.input);
+        let before = &app.input[..app.input_cursor];
+        assert!(before.ends_with("@home "), "光标在补全后: {before}");
+
+        // 光标在中间时，Tab 补全光标所在词：把光标移回 "@ho" 词尾再补全。
+        app.input.clear();
+        app.input_cursor = 0;
+        for c in "buy @ho milk".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        // 光标回到行首后右移：经过 "buy " 和 "@ho"（按字符推进）。
+        app.handle_key(kc(KeyCode::Home)).unwrap();
+        for _ in "buy ".chars() {
+            app.handle_key(kc(KeyCode::Right)).unwrap();
+        }
+        for _ in "@ho".chars() {
+            app.handle_key(kc(KeyCode::Right)).unwrap();
+        }
+        app.handle_key(kc(KeyCode::Tab)).unwrap();
+        assert!(app.input.contains("@home"), "光标所在词补全: {}", app.input);
+    }
+
+    #[test]
+    fn visual_mode_does_not_render_input_overlay() {
+        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        seed(&conn);
+        let mut app = App::new(&conn).unwrap();
+        app.popup = None;
+
+        let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
+
+        // 进入可视模式：不应额外叠加输入弹层。三栏布局各有一个圆角边框，
+        // 若误渲染空输入框则会多出第 4 个圆角框。
+        app.handle_key(key('v')).unwrap();
+        assert_eq!(app.mode, Mode::Visual);
+        term.clear().unwrap();
+        term.draw(|f| app.render(f)).unwrap();
+        let visual_snap = snap(&term);
+        assert_eq!(
+            visual_snap.matches('╭').count(),
+            3,
+            "可视模式不应渲染第 4 个输入弹层框"
+        );
+    }
+
+    #[test]
+    fn space_toggles_and_ctrl_selects_non_contiguous() {
+        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        seed(&conn);
+        let mut app = App::new(&conn).unwrap();
+        app.popup = None;
+
+        // 普通模式下 Space 切换当前行加入选择集。
+        app.handle_key(key(' ')).unwrap();
+        assert_eq!(app.selected_ids.len(), 1, "Space 选中当前行");
+
+        // 普通模式下选中行应有可见标记 [v]（不进入可视模式也能看出已点选）。
+        let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
+        term.clear().unwrap();
+        term.draw(|f| app.render(f)).unwrap();
+        assert!(
+            norm(&snap(&term)).contains("[v]"),
+            "Space 选中后普通模式应显示 [v] 标记"
+        );
+
+        // j 移动后 Space 再选第二行（Inbox 视图两行），形成非连续/多点选择。
+        app.handle_key(key('j')).unwrap();
+        app.handle_key(key(' ')).unwrap();
+        assert_eq!(app.selected_ids.len(), 2, "多选: 行0,1");
+
+        // 再次 Space 切换当前行：从选择集移出。
+        app.handle_key(key(' ')).unwrap();
+        assert_eq!(app.selected_ids.len(), 1, "Space 再次切换移出当前行");
+
+        // Ctrl+a 全选。
+        let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        app.handle_key(ctrl_a).unwrap();
+        assert_eq!(
+            app.selected_ids.len(),
+            app.items.len(),
+            "Ctrl+a 全选当前视图所有行"
+        );
+
+        // Ctrl+u 反选：全选后再反选应为空。
+        let ctrl_u = KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL);
+        app.handle_key(ctrl_u).unwrap();
+        assert!(app.selected_ids.is_empty(), "Ctrl+u 反选后清空");
+
+        // 再反选一次 = 全选。
+        app.handle_key(ctrl_u).unwrap();
+        assert_eq!(app.selected_ids.len(), app.items.len(), "再反选=全选");
+
+        // Esc 清空选择集。
+        app.handle_key(kc(KeyCode::Esc)).unwrap();
+        assert!(app.selected_ids.is_empty(), "Esc 清空选择集");
+    }
+
+    #[test]
+    fn confirm_dialog_renders_centered_for_batch_ops() {
+        use crate::tui::app::Mode as M;
+        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        seed(&conn);
+        let mut app = App::new(&conn).unwrap();
+        app.popup = None;
+
+        let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
+
+        // 进入归档确认：应渲染居中确认弹层，而非底部仅文字提示。
+        app.handle_key(kc(KeyCode::Enter)).unwrap(); // 选中第一个 Inbox 任务 → 组织编辑
+        app.handle_key(kc(KeyCode::Esc)).unwrap(); // 取消编辑回 Normal
+        assert_eq!(app.mode, Mode::Normal);
+        app.handle_key(key('A')).unwrap();
+        assert_eq!(app.mode, M::ConfirmArchive);
+        term.clear().unwrap();
+        term.draw(|f| app.render(f)).unwrap();
+        let s = norm(&snap(&term));
+        assert!(s.contains("确认归档"), "确认弹层标题可见");
+        assert!(s.contains("y/Enter"), "确认键提示可见");
+        assert!(s.contains("n/Esc"), "取消键提示可见");
+        app.handle_key(key('y')).unwrap();
+
+        // 永久删除确认（归档箱视图）。
+        app.handle_key(key('8')).unwrap();
+        app.handle_key(key('D')).unwrap();
+        assert_eq!(app.mode, M::ConfirmPurge);
+        term.clear().unwrap();
+        term.draw(|f| app.render(f)).unwrap();
+        let s = norm(&snap(&term));
+        assert!(s.contains("确认永久删除"), "删除确认弹层标题可见");
+        assert!(
+            s.contains("y/Enter") && s.contains("n/Esc"),
+            "确认/取消提示可见"
+        );
     }
 }

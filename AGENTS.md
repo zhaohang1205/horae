@@ -12,7 +12,7 @@ GTD terminal task manager (`gtp`) — a Rust binary (edition 2021, **no lib targ
 ## Architecture (layers depend only inward)
 
 - `cli.rs` — clap `Command` enum, one variant per CLI action. Default command (no args) is `Tui`. `gtp completions <shell>` is intercepted in `main.rs` before the DB opens (zero side effects); the `commands::run` arm is intentionally unreachable.
-- `commands/` — thin handlers; `mod.rs::run` dispatches. `pomo.rs` handles the daemon/waybar logic.
+- `commands/` — thin handlers; `mod.rs::run` dispatches. `pomo.rs` handles the daemon/waybar logic. `watch.rs` is the phone bridge: polls a Syncthing-shared folder (default `~/.config/gtp/sync`) every few seconds, ingests `capture.txt` / executes `actions.txt`, rewrites `today.md`, drops `reminders/*.md` when tasks come due. It polls instead of using inotify because Syncthing writes via atomic tmp-file renames; the `.processing`/`.done` file dance gives crash-safe, dedup'd consumption (identical duplicate lines are deduped — a known trade-off).
 - `repo/` — rusqlite data access; `tasks.rs` holds most domain logic (`create_capture`, `transition`, `schedule`, `resolve_project`, `list`). `mod.rs::log_event` writes the audit timeline.
 - `model/` — plain structs + enums; `event.rs` holds event-type string consts.
 - `db/` — `conn.rs::open` resolves `~/.config/gtp/gtp.db` via `dirs::config_dir()`, then runs migrations keyed off SQLite `user_version`.

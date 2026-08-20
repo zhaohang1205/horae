@@ -266,33 +266,17 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         when: When::SelectionNot(NON_TASK_VIEWS),
     },
     KeyDef {
-        keys: "d",
-        zh: "截止",
-        en: "due",
-        group: KeyGroup::Task,
-        status: false,
-        when: When::SelectionNot(NON_TASK_VIEWS),
-    },
-    KeyDef {
-        keys: "L",
-        zh: "循环",
-        en: "rrule",
-        group: KeyGroup::Task,
-        status: false,
-        when: When::SelectionNot(NON_TASK_VIEWS),
-    },
-    KeyDef {
-        keys: "W",
-        zh: "委派",
-        en: "delegated",
+        keys: "T",
+        zh: "批量标签",
+        en: "bulk tag",
         group: KeyGroup::Task,
         status: false,
         when: When::SelectionNot(NON_TASK_VIEWS),
     },
     KeyDef {
         keys: "e",
-        zh: "标题",
-        en: "title",
+        zh: "编辑",
+        en: "edit",
         group: KeyGroup::Task,
         status: false,
         when: When::SelectionNot(NON_TASK_VIEWS),
@@ -301,14 +285,6 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         keys: "n",
         zh: "备注",
         en: "notes",
-        group: KeyGroup::Task,
-        status: false,
-        when: When::SelectionNot(NON_TASK_VIEWS),
-    },
-    KeyDef {
-        keys: "t",
-        zh: "标签",
-        en: "tags",
         group: KeyGroup::Task,
         status: false,
         when: When::SelectionNot(NON_TASK_VIEWS),
@@ -346,7 +322,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         when: When::ViewSel(View::Archived),
     },
     KeyDef {
-        keys: "a",
+        keys: "c",
         zh: "加标签",
         en: "add tag",
         group: KeyGroup::Task,
@@ -371,11 +347,43 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
     },
     KeyDef {
         keys: "Space",
-        zh: "勾选/续杯",
-        en: "tick/continue",
+        zh: "切换选择",
+        en: "toggle sel",
         group: KeyGroup::Task,
         status: false,
         when: When::SelectionNot(NON_TASK_VIEWS),
+    },
+    KeyDef {
+        keys: "Ctrl+a",
+        zh: "全选",
+        en: "select all",
+        group: KeyGroup::Task,
+        status: false,
+        when: When::SelectionNot(NON_TASK_VIEWS),
+    },
+    KeyDef {
+        keys: "Ctrl+u",
+        zh: "反选",
+        en: "invert",
+        group: KeyGroup::Task,
+        status: false,
+        when: When::SelectionNot(NON_TASK_VIEWS),
+    },
+    KeyDef {
+        keys: "=",
+        zh: "勾选检查单",
+        en: "tick checklist",
+        group: KeyGroup::Task,
+        status: false,
+        when: When::SelectionNot(NON_TASK_VIEWS),
+    },
+    KeyDef {
+        keys: "P",
+        zh: "专注/续杯",
+        en: "focus/continue",
+        group: KeyGroup::Task,
+        status: false,
+        when: When::PomoActive,
     },
     KeyDef {
         keys: "P",
@@ -427,25 +435,32 @@ fn view_task_keys(c: &Ctx, lang: Lang) -> Vec<(&'static str, &'static str)> {
         &["R"]
     } else {
         match c.view {
-            View::Inbox => &["Enter", "x", "t"],
-            View::Today | View::Tomorrow => &["Enter", "x", "Space"],
-            View::Next => &["Enter", "Space", "x"],
+            View::Inbox => &["Enter", "x", "e", "Space", "T"],
+            View::Today | View::Tomorrow => &["Enter", "x"],
+            View::Next => &["Enter", "x"],
             View::Waiting => &["w", "x"],
-            View::Scheduled => &["d", "L", "x"],
+            View::Scheduled => &["Enter", "x"],
             View::Someday => &["s", "x"],
-            View::Reference => &["e", "n", "t"],
+            View::Reference => &["e", "n"],
             View::Done => &["A/D", "e", "n"],
-            View::Review => &["R"],
-            View::Archived => &["u", "D", "v"],
-            View::Tags => &["a", "D"],
+            // 周回顾视图里 R 只在回顾向导进行中生效，但向导不会停留在此视图；可执行的是 r（开启回顾）。
+            View::Review => &["r"],
+            View::Archived => &["u", "D", "Space", "v"],
+            View::Tags => &["c", "D"],
         }
     };
     curated
         .iter()
         .filter_map(|label| {
+            // 优先任务操作键；v（多选）/ r（周回顾）等全局键在特定视图同样相关，兜底查找。
             KEY_TABLE
                 .iter()
                 .find(|k| k.group == KeyGroup::Task && k.keys == *label && k.applies(c))
+                .or_else(|| {
+                    KEY_TABLE
+                        .iter()
+                        .find(|k| k.group == KeyGroup::Global && k.keys == *label && k.applies(c))
+                })
         })
         .map(|k| (k.keys, k.desc(lang)))
         .collect()

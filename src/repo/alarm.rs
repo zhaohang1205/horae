@@ -6,12 +6,18 @@ use std::path::PathBuf;
 /// Persisted alarm bookkeeping, keyed by `task_id:occurrence_ms`.
 /// - `rung`: occurrences whose alarm already fired (dedup, doesn't affect the window).
 /// - `skipped`: occurrences the user dismissed via `gtp alarm next` (leave the window).
+/// - `last_window`: last published window (occurrence keys). `gtp alarm waybar`
+///   compares the freshly computed window against it; when the window rolls, the
+///   slot which noticed it pokes waybar (SIGRTMIN+12) so both slots re-render in
+///   the same frame. Only slot 1 writes it.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AlarmState {
     #[serde(default)]
     pub rung: Vec<String>,
     #[serde(default)]
     pub skipped: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub last_window: Vec<String>,
 }
 
 pub fn alarm_file_path() -> PathBuf {

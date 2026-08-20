@@ -106,14 +106,19 @@ pub fn waybar() -> Result<()> {
         Phase::Idle => "idle",
     };
     let tooltip = format!("{} - {:?}", title, state.phase);
-    println!(
-        "{}",
-        serde_json::json!({
-            "text": text,
-            "class": class,
-            "tooltip": tooltip
-        })
-    );
+    let mut obj = serde_json::json!({
+        "text": text,
+        "class": class,
+        "tooltip": tooltip
+    });
+    // 供状态栏识别当前聚焦任务：任务窗口据此把正在做的任务置顶高亮
+    if let Some(ref id) = state.task_id {
+        obj["id"] = serde_json::json!(id);
+    }
+    if !title.is_empty() {
+        obj["title"] = serde_json::json!(title);
+    }
+    println!("{}", obj);
     Ok(())
 }
 

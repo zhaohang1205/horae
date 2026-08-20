@@ -4,7 +4,6 @@ use ratatui::{
     widgets::ListItem,
 };
 
-use crate::tui::app::Mode;
 use crate::tui::App;
 
 use crate::model::task::Status;
@@ -65,7 +64,7 @@ pub fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
         .iter()
         .map(|r| {
             let status_enum = r.status.parse::<Status>().unwrap_or(Status::Inbox);
-            let is_selected = app.mode == Mode::Visual && app.selected_ids.contains(&r.id);
+            let is_selected = app.selected_ids.contains(&r.id);
             let is_focus_task = active_pomo_task_id.as_deref() == Some(&r.id);
             let is_done = status_enum == Status::Done;
             // 归档箱：用归档原因取代状态语义，不再显示"已完成/逾期"。

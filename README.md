@@ -75,16 +75,19 @@ id-prefix, or an exact title.
 | `⇧J` / `⇧K` | 今日 / 明日 · today / tomorrow |
 | `/` | 全局搜索 · global search |
 | `f` | 情境过滤 · tag filter |
-| `a` | 快速捕获 · quick capture |
-| `Enter` | 组织/编辑：一句话补全 @标签 ~时间 *周期 · organize/edit (@tags ~time *rrule) |
+| `a` | 快速捕获（任意视图）· quick capture (any view) |
+| `Space` | 切换选择当前行（非连续多选）· toggle-select current row |
+| `Ctrl+a` / `Ctrl+u` | 全选 / 反选 · select all / invert |
+| `Enter` / `e` | 全量编辑：一句话补全标题 @标签 ~时间 *周期 · full edit (title @tags ~time *rrule) |
 | `x` / `w` / `s` | 已完成 / 等待中 / 将来也许 · done / waiting / someday |
 | `C` | 新增检查单 · add checklist item |
-| `Space` | 勾选检查单 / 继续番茄 · tick / continue pomodoro |
-| `e` / `d` / `L` / `W` | 编辑标题 / 截止 / 循环 / 委派 · edit title/due/rrule/delegated |
+| `=` | 勾选检查单 / 重置 · tick / reset checklist |
+| `T` | 批量打标签（可视模式多选）· bulk tag (visual multi-select) |
 | `n` | 编辑长备注（`$EDITOR`）· edit notes |
-| `P` / `S` / `[` | 开始 / 停止番茄 / 番茄时长配置 · pomodoro start/stop/config |
+| `P` / `S` / `[` | 开始/续杯 / 停止番茄 / 番茄时长配置 · pomodoro start/continue/stop/config |
 | `A` / `D` | 归档（y 确认 / n 取消）· archive (y/n) |
-| `u` | 恢复归档 · restore from archive |
+| `u` | 恢复归档（支持批量）· restore from archive (batch-capable) |
+| `c` | 标签库视图新增标签 · add tag (Tags view) |
 | `r` / `R` | 周回顾（开始 / 下一步）· weekly review (start/next) |
 | `F5` / `F6` | 主题 / 语言 · theme / language |
 | `F1` 或 `?` | 快捷键帮助 · shortcut help |
@@ -102,7 +105,7 @@ HH:MM                             当日时刻（已过则视为明日）/ same-
 2026-07-24 [HH:MM]                绝对日期时间 / absolute date & time
 ```
 
-一句话里的 `~time` 设**排程起点**（`scheduled_start_at`，状态进入已排程，只设起点不设终点）；`d` 键/`--due` 设软截止（`due_at`）。
+一句话里的 `~time` 设**排程起点**（`scheduled_start_at`，状态进入已排程，只设起点不设终点）；`--due` 设软截止（`due_at`）。
 
 循环 RRULE（一句话里 `*` 简写）：`FREQ=DAILY|WEEKLY|MONTHLY`、`INTERVAL=2`、
 `BYDAY=SA,SU`、`BYMONTHDAY=1,-1`（-1=月末最后一天）、`COUNT=10` / `UNTIL=YYYY-MM-DD`。
@@ -121,6 +124,38 @@ gtp import --replace ~/gtd.json                # 清空当前数据，精确还�
 标签、设置与番茄钟状态。备份即"拷贝这一个文件"，可放进 git、网盘或 cron 定时导出。
 The backup is one self-contained JSON file — copy it to git/cloud/cron for free
 redundancy. `--replace` is the true restore path; plain `import` merges.
+
+## 手机同步 / Phone sync (`gtp watch`)
+
+用 Syncthing（或任意双向同步云盘）把 `~/.config/gtp/sync` 同步到手机，然后在电脑上
+常驻运行 `gtp watch`，即可在手机上采集、查看与完成任务的闭环——零服务器、零 App。
+
+Bridge the phone–computer gap with Syncthing: sync `~/.config/gtp/sync` to your phone
+and run `gtp watch` on the computer. No server, no app.
+
+```sh
+gtp watch                  # 常驻对账（systemd/tmux/autostart 后台运行）
+gtp watch --once           # 手动跑一轮
+gtp watch --dir ~/gtd-sync # 自定义同步目录
+```
+
+文件夹协议 / Folder protocol（手机写 / phone writes，电脑执行 / computer consumes）:
+
+| 文件 / File | 用途 / Purpose |
+| --- | --- |
+| `capture.txt` | 每行一条采集，quick-add 语法 `标题 @tag ~time *rrule !p` / one capture per line |
+| `actions.txt` | `done <id\|标题>` · `set <id\|标题> status next` · `set <id\|标题> due <time>` |
+| `today.md` | 电脑生成的活动任务快照（Next / Scheduled / Waiting / 逾期）/ active snapshot |
+| `reminders/` | 电脑生成的任务到期提醒（同步时手机 App 会收到文件变更通知）/ due reminders |
+| `*.done` | 已处理回执（去重依据）/ receipts of consumed lines |
+
+采集用手机上的任意笔记 App（Obsidian / Markor 等）指向该目录，写一行存盘即采集；
+任务到期提醒仅在电脑开机期间触发——关机时到期，开机后补发。用任一免费 PaaS 部署
+`gtp serve`（中继）可获得真正实时的推送，此为可选升级路径。
+
+Capture on the phone with any notes app pointed at this folder. Due reminders only fire
+while the computer is on (catch-up on boot after downtime). A later relay (`gtp serve`)
+on any free PaaS unlocks real-time push — an optional upgrade path.
 
 ## 开发 / Development
 

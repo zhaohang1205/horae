@@ -298,20 +298,6 @@ pub fn set_rrule(conn: &Connection, id: &str, rrule: Option<String>) -> Result<T
     Ok(t)
 }
 
-/// Set/clear the delegated-to field (the "waiting for" person/thing).
-pub fn set_delegated(conn: &Connection, id: &str, who: Option<String>) -> Result<Task> {
-    let mut t = get(conn, id)?;
-    t.delegated_to = who;
-    t.updated_at = time::now_ms();
-    let tx = conn.unchecked_transaction()?;
-    tx.execute(
-        "UPDATE tasks SET delegated_to=?1, updated_at=?2 WHERE id=?3",
-        rusqlite::params![t.delegated_to, t.updated_at, id],
-    )?;
-    tx.commit()?;
-    Ok(t)
-}
-
 /// Schedule a task: set planned start/end + optional recurrence, move to
 /// `scheduled`, and record a `scheduled` event.
 pub fn schedule(

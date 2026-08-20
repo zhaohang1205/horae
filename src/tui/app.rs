@@ -107,7 +107,6 @@ impl View {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Mode {
     Normal,
-    EditingTitle,
     Capturing,
     Tagging,
     WaitingWho,
@@ -120,12 +119,6 @@ pub(crate) enum Mode {
     ConfirmArchive,
     /// 永久删除确认：等待 y/Enter 确认或 n/Esc 取消。
     ConfirmPurge,
-    /// 编辑截止时间 (due)
-    EditingDue,
-    /// 编辑循环规则 (rrule)
-    EditingRrule,
-    /// 编辑委派对象 (delegated_to)
-    EditingDelegated,
     /// 新增自定义标签
     CreatingTag,
     /// 配置番茄钟时长 (工作;短休;长休)
@@ -187,6 +180,8 @@ pub(crate) struct App<'a> {
     pub(crate) mode: Mode,
     pub(crate) pane: Pane,
     pub(crate) input: String,
+    /// 输入光标位置（`input` 的字节偏移，始终落在字符边界）。
+    pub(crate) input_cursor: usize,
     /// 组织/编辑模式正在编辑的任务 id。
     pub(crate) organizing_id: Option<String>,
     pub(crate) status_message: String,
@@ -250,6 +245,7 @@ impl<'a> App<'a> {
             mode: Mode::Normal,
             pane: Pane::Left,
             input: String::new(),
+            input_cursor: 0,
             organizing_id: None,
             status_message: crate::tr!(lang, "按 '?' 或 F1 查看帮助", "Press '?' or F1 for help")
                 .to_string(),
@@ -393,6 +389,81 @@ impl<'a> App<'a> {
         if old_mode.is_input() && !new_mode.is_input() {
             self.switch_to_english_ime();
         }
+        // 进入输入模式时，把光标定位到末尾（预填内容后默认在尾部继续输入）。
+        if !old_mode.is_input() && new_mode.is_input() {
+            self.input_cursor = self.input.len();
+        }
+    }
+
+    /// 输入光标前一个字符的字节偏移；已在开头则返回 0。
+    fn cursor_prev(&self) -> usize {
+        self.input[..self.input_cursor]
+            .char_indices()
+            .next_back()
+            .map(|(i, _)| i)
+            .unwrap_or(0)
+    }
+
+    /// 输入光标后一个字符的字节偏移；已在结尾则返回 len。
+    fn cursor_next(&self) -> usize {
+        self.input[self.input_cursor..]
+            .char_indices()
+            .nth(1)
+            .map(|(i, _)| self.input_cursor + i)
+            .unwrap_or(self.input.len())
+    }
+
+    /// 在光标处插入一个字符。
+    pub(crate) fn input_insert_char(&mut self, c: char) {
+        self.input.insert(self.input_cursor, c);
+        self.input_cursor += c.len_utf8();
+    }
+
+    /// 在光标处插入一个字符串。
+    pub(crate) fn input_insert_str(&mut self, s: &str) {
+        self.input.insert_str(self.input_cursor, s);
+        self.input_cursor += s.len();
+    }
+
+    /// 退格：删除光标前一个字符。
+    pub(crate) fn input_backspace(&mut self) {
+        if self.input_cursor == 0 {
+            return;
+        }
+        let prev = self.cursor_prev();
+        self.input.remove(prev);
+        self.input_cursor = prev;
+    }
+
+    /// Delete：删除光标处一个字符。
+    pub(crate) fn input_delete(&mut self) {
+        if self.input_cursor >= self.input.len() {
+            return;
+        }
+        let next = self.cursor_next();
+        self.input.drain(self.input_cursor..next);
+    }
+
+    pub(crate) fn input_move_left(&mut self) {
+        self.input_cursor = self.cursor_prev();
+    }
+
+    pub(crate) fn input_move_right(&mut self) {
+        self.input_cursor = self.cursor_next();
+    }
+
+    pub(crate) fn input_home(&mut self) {
+        self.input_cursor = 0;
+    }
+
+    pub(crate) fn input_end(&mut self) {
+        self.input_cursor = self.input.len();
+    }
+
+    /// 清空输入并复位光标。
+    pub(crate) fn input_clear(&mut self) {
+        self.input.clear();
+        self.input_cursor = 0;
     }
 
     /// 执行用户触发的操作：失败时把错误写入状态栏并返回 `false`，供调用方据此
@@ -451,6 +522,32 @@ impl<'a> App<'a> {
                         self.selected_ids.insert(row.id.clone());
                     }
                 }
+            }
+        }
+    }
+
+    /// 切换当前行是否在选择集内（普通模式下 Space 使用，支持非连续多选）。
+    pub(crate) fn toggle_selected(&mut self) {
+        if let Some(row) = self.items.get(self.selected).cloned() {
+            if !self.selected_ids.remove(&row.id) {
+                self.selected_ids.insert(row.id);
+            }
+        }
+    }
+
+    /// 全选当前视图所有行。
+    pub(crate) fn select_all(&mut self) {
+        self.selected_ids.clear();
+        for row in &self.items {
+            self.selected_ids.insert(row.id.clone());
+        }
+    }
+
+    /// 反选当前视图所有行。
+    pub(crate) fn invert_selection(&mut self) {
+        for row in &self.items {
+            if !self.selected_ids.remove(&row.id) {
+                self.selected_ids.insert(row.id.clone());
             }
         }
     }
@@ -824,7 +921,7 @@ impl<'a> App<'a> {
 
     pub(crate) fn act_on_selected(&mut self, to: task::Status) -> Result<()> {
         let mut ids = vec![];
-        if self.mode == Mode::Visual && !self.selected_ids.is_empty() {
+        if !self.selected_ids.is_empty() {
             ids.extend(self.selected_ids.iter().cloned());
         } else if let Some(row) = self.items.get(self.selected).cloned() {
             ids.push(row.id);
@@ -911,7 +1008,7 @@ impl<'a> App<'a> {
                 crate::tr!(self.lang, "批量 {} {} 项", "Bulk {} {} items", to, count);
         }
 
-        if self.mode == Mode::Visual {
+        if !self.selected_ids.is_empty() {
             self.set_mode(Mode::Normal);
             self.selected_ids.clear();
             self.visual_start_idx = None;

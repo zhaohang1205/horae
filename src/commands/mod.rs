@@ -14,6 +14,7 @@ mod review;
 mod show;
 mod status;
 mod tagging;
+mod watch;
 
 pub fn run(cmd: Command, conn: &Connection) -> Result<()> {
     let result = run_inner(cmd, conn);
@@ -89,12 +90,29 @@ fn run_inner(cmd: Command, conn: &Connection) -> Result<()> {
             "waybar" => pomo::waybar(),
             _ => anyhow::bail!("unknown pomo action"),
         },
-        Command::Alarm { action, slot } => match action.as_str() {
-            "waybar" => alarm::waybar(slot),
-            "next" => alarm::next(slot),
+        Command::Alarm {
+            action,
+            slot,
+            limit,
+            all,
+        } => match action.as_str() {
+            "waybar" => alarm::waybar(slot, limit, all),
+            "next" => alarm::next(slot, limit),
             _ => anyhow::bail!("unknown alarm action"),
         },
         Command::Tui => crate::tui::run(conn),
+        Command::Watch {
+            dir,
+            interval,
+            once,
+        } => watch::run(
+            conn,
+            watch::WatchArgs {
+                dir: dir.unwrap_or_else(watch::default_sync_dir),
+                interval_secs: interval.unwrap_or(watch::DEFAULT_INTERVAL_SECS),
+                once,
+            },
+        ),
         Command::Export { file } => backup::run_export(conn, file.as_deref()),
         Command::Import { file, replace } => backup::run_import(conn, &file, replace),
         Command::Completions { .. } => {

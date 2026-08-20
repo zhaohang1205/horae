@@ -1,5 +1,6 @@
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
@@ -148,9 +149,52 @@ pub enum Command {
         action: String,
         /// Slot 1/2: positions multiple waybar alarm modules; `next` skips that many
         slot: Option<usize>,
+        #[arg(
+            long,
+            value_name = "N",
+            help = "How many alarm tasks the window shows (default 2)"
+        )]
+        limit: Option<usize>,
+        #[arg(
+            long,
+            help = "waybar: emit the whole window as a JSON array instead of a single slot"
+        )]
+        all: bool,
     },
     /// Launch the interactive TUI
     Tui,
+    /// Watch a Syncthing-shared folder (phone <-> computer bridge)
+    #[command(
+        long_about = "Watch a folder synced with the phone (e.g. via Syncthing) and reconcile \
+        it against the local database. Every few seconds it: ingests new lines from \
+        capture.txt into the inbox (quick-add syntax), executes action lines from \
+        actions.txt, rewrites today.md with the active task list, and drops reminder \
+        files into reminders/ when tasks come due.\n\
+        Run it in the background (systemd / tmux / autostart); pass --once to do a single pass.",
+        after_help = "Folder protocol (phone writes, computer consumes):\n\
+            capture.txt   one quick-add line per capture: title @tag ~time *rrule !p\n\
+            actions.txt   done <id|title> | set <id|title> status next | set <id|title> due <time>\n\
+        Computer writes back:\n\
+            today.md          active-task snapshot (Next / Scheduled / Waiting / overdue)\n\
+            reminders/*.md    due/overdue task reminders (Syncthing pushes a file-change notice to the phone)\n\
+            *.done            receipts of consumed lines"
+    )]
+    Watch {
+        #[arg(
+            long,
+            value_name = "PATH",
+            help = "Synced folder to watch (default: ~/.config/gtp/sync)"
+        )]
+        dir: Option<PathBuf>,
+        #[arg(
+            long,
+            value_name = "SECS",
+            help = "Poll interval in seconds (default: 5)"
+        )]
+        interval: Option<u64>,
+        #[arg(long, help = "Process once and exit instead of running forever")]
+        once: bool,
+    },
     /// Export a full backup (tasks, events, tags, settings, pomodoro) to JSON
     #[command(
         long_about = "Export every task, event, tag, setting and the pomodoro state \

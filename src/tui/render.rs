@@ -69,11 +69,12 @@ impl<'a> AppRender for App<'a> {
 
         self.render_status_bar(f, chunks[1]);
 
-        if self.mode != Mode::Normal
-            && self.mode != Mode::ConfirmArchive
-            && self.mode != Mode::ConfirmPurge
-        {
-            self.render_input_overlay(f, size);
+        match self.mode {
+            Mode::ConfirmArchive | Mode::ConfirmPurge => {
+                self.render_confirm_overlay(f, size);
+            }
+            Mode::Normal | Mode::Visual => {}
+            _ => self.render_input_overlay(f, size),
         }
 
         if self.show_syntax {
@@ -524,7 +525,6 @@ impl<'a> App<'a> {
         if prev < input.len() {
             spans.push(Span::raw(input[prev..].to_string()));
         }
-        spans.push(Span::raw("_"));
         Line::from(spans)
     }
 }
@@ -731,7 +731,6 @@ impl<'a> App<'a> {
                     " Search Tasks (Title / Notes) "
                 )
             }
-            Mode::EditingTitle => crate::tr!(self.lang, " 编辑标题 ", " Edit title "),
             Mode::Capturing => {
                 if self.organizing_id.is_some() {
                     crate::tr!(
@@ -771,23 +770,6 @@ impl<'a> App<'a> {
                 " 新增自定义标签 (输入标签名称，按 Enter 保存) ",
                 " Create custom tag (enter name, Enter to save) "
             ),
-            Mode::EditingDue => crate::tr!(
-                self.lang,
-                " 截止时间? (空=清除, 如 +3d, tomorrow 10:00) ",
-                " Due time? (empty=clear, e.g. +3d, tomorrow 10:00) "
-            ),
-            Mode::EditingRrule => crate::tr!(
-                self.lang,
-                " 循环规则? (空=清除, 如 *2w[1,3] 每两周周一周三, 或 FREQ=WEEKLY;BYDAY=SA,SU) ",
-                " Recurrence rule? (empty=clear, e.g. *2w[1,3] or FREQ=WEEKLY;BYDAY=SA,SU) "
-            ),
-            Mode::EditingDelegated => {
-                crate::tr!(
-                    self.lang,
-                    " 委派给? (空=清除) ",
-                    " Delegated to? (empty=clear) "
-                )
-            }
             Mode::ConfiguringPomo => crate::tr!(
                 self.lang,
                 " 自定义番茄钟时长 (格式: 工作分钟;短休分钟;长休分钟, 如 25;5;15) ",
@@ -799,58 +781,144 @@ impl<'a> App<'a> {
         let mut text_lines: Vec<Line> = Vec::new();
         let width = if self.mode == Mode::Capturing { 70 } else { 50 };
 
+        // 输入行（首行）：快速录入带语法高亮，其余为纯文本行。行首固定一个空格。
+        let input_line_display = if self.mode == Mode::Capturing {
+            self.capture_input_line()
+        } else {
+            Line::from(format!(" {}", self.input))
+        };
+
         if self.mode == Mode::Capturing {
-            text_lines.push(self.capture_input_line());
+            text_lines.push(input_line_display);
             text_lines.push(Line::from(""));
             if self.input.trim().is_empty() {
-                text_lines.push(Line::from(Span::styled(
-                    crate::tr!(
-                        self.lang,
-                        " [语法] @标签 (如 @work)  |  ~时间 (如 ~tomorrow, ~+3d, ~18:00)  |  *循环 (如 *2w[1,3], *m[1,15])  |  !优先级 (如 !a)",
-                        " [syntax] @tag (@work)  |  ~time (~tomorrow, ~+3d, ~18:00)  |  *rrule (*2w[1,3], *m[1,15])  |  !priority (!a)"
-                    ),
-                    Style::default().fg(self.theme.text_dim),
-                )));
+                text_lines.push(self.capture_syntax_hint_line());
             } else {
                 text_lines.extend(self.capture_preview_lines());
+                // 语法提示常驻：输入/编辑过程中始终可见，便于快速学习语法。
+                text_lines.push(Line::from(""));
+                text_lines.push(self.capture_syntax_hint_line());
             }
         } else {
-            text_lines.push(Line::from(format!(" {}_", self.input)));
+            text_lines.push(input_line_display);
         }
 
         let height = text_lines.len() as u16 + 2;
 
-        if self.show_syntax {
-            // 当处于编辑/录入模式且按了 Ctrl+P 双开时，编辑输入框居左靠上绘制
-            let left_area = Rect {
+        // 输入框区域：show_syntax 时居左靠上，否则居中。
+        let area = if self.show_syntax {
+            Rect {
                 x: size.width / 20,
                 y: size.height / 10,
                 width: (size.width * 42 / 100).min(65),
                 height,
-            };
-            f.render_widget(ratatui::widgets::Clear, left_area);
-            let block = Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_set(border::ROUNDED)
-                .padding(ratatui::widgets::Padding::horizontal(1))
-                .border_style(Style::default().fg(if self.pane == Pane::Right {
-                    self.theme.border_active
-                } else {
-                    self.theme.border_inactive
-                }));
-            f.render_widget(Paragraph::new(text_lines).block(block), left_area);
+            }
         } else {
-            let area = self.centered_rect(width, height, size);
-            f.render_widget(ratatui::widgets::Clear, area);
-            let block = Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_set(border::ROUNDED)
-                .padding(ratatui::widgets::Padding::horizontal(1))
-                .border_style(Style::default().fg(self.theme.accent));
-            f.render_widget(Paragraph::new(text_lines).block(block), area);
-        }
+            self.centered_rect(width, height, size)
+        };
+
+        // 输入区可用宽度：框宽 - 左右边框 - 左右内边距。
+        let inner_width = area.width.saturating_sub(4) as usize;
+        // 光标所在列（含行首空格）的显示宽度。
+        let cursor_col =
+            1 + unicode_width::UnicodeWidthStr::width(&self.input[..self.input_cursor]);
+        // 横向滚动：保证光标始终可见。
+        let scroll_x = cursor_col.saturating_sub(inner_width) as u16;
+
+        f.render_widget(ratatui::widgets::Clear, area);
+        let block_style = if self.show_syntax {
+            if self.pane == Pane::Right {
+                self.theme.border_active
+            } else {
+                self.theme.border_inactive
+            }
+        } else {
+            self.theme.accent
+        };
+        let block = Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_set(border::ROUNDED)
+            .padding(ratatui::widgets::Padding::horizontal(1))
+            .border_style(Style::default().fg(block_style));
+        f.render_widget(
+            Paragraph::new(text_lines)
+                .block(block)
+                .scroll((0, scroll_x)),
+            area,
+        );
+
+        // 真实终端插入光标：定位到输入行，框内第一列 = area.x + 1(边框) + 1(内边距)。
+        let cursor_x = area.x + 2 + (cursor_col.saturating_sub(scroll_x as usize)) as u16;
+        let cursor_y = area.y + 1;
+        f.set_cursor_position((cursor_x, cursor_y));
+    }
+
+    /// 批量操作确认弹层：归档 / 永久删除的居中醒目确认框。
+    fn render_confirm_overlay(&mut self, f: &mut Frame, size: Rect) {
+        let (title, desc) = match self.mode {
+            Mode::ConfirmPurge => (
+                crate::tr!(
+                    self.lang,
+                    " ⚠ 确认永久删除 ",
+                    " ⚠ Confirm permanent delete "
+                ),
+                crate::tr!(
+                    self.lang,
+                    "将永久删除 {} 项，不可恢复。",
+                    "Permanently delete {} item(s). This cannot be undone.",
+                    self.pending_purge_ids.len()
+                ),
+            ),
+            _ => (
+                crate::tr!(self.lang, " ⚠ 确认归档 ", " ⚠ Confirm archive "),
+                crate::tr!(
+                    self.lang,
+                    "将归档 {} 项。",
+                    "Archive {} item(s).",
+                    self.pending_archive_ids.len()
+                ),
+            ),
+        };
+
+        let lines = vec![
+            Line::from(Span::styled(
+                format!(" {}", desc),
+                Style::default().fg(self.theme.fg),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(
+                    crate::tr!(self.lang, "  [y/Enter] ", "  [y/Enter] "),
+                    Style::default()
+                        .fg(self.theme.text_success)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(crate::tr!(self.lang, "确认  ", "Confirm  ")),
+                Span::styled(
+                    crate::tr!(self.lang, "[n/Esc] ", "[n/Esc] "),
+                    Style::default()
+                        .fg(self.theme.text_urgent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(crate::tr!(self.lang, "取消", "Cancel")),
+            ]),
+        ];
+        let height = lines.len() as u16 + 2;
+        let area = self.centered_rect(58, height, size);
+
+        f.render_widget(ratatui::widgets::Clear, area);
+        let block = Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_set(border::ROUNDED)
+            .padding(ratatui::widgets::Padding::horizontal(1))
+            .border_style(
+                Style::default()
+                    .fg(self.theme.text_urgent)
+                    .add_modifier(Modifier::BOLD),
+            );
+        f.render_widget(Paragraph::new(lines).block(block), area);
     }
 
     /// 快速录入实时解析预览（标题 / 标签 / 时间 / 循环 / 优先级）。
@@ -946,6 +1014,18 @@ impl<'a> App<'a> {
             ]));
         }
         text_lines
+    }
+
+    /// 快速录入语法提示行（常驻于输入/编辑弹层底部）。
+    fn capture_syntax_hint_line(&self) -> Line<'static> {
+        Line::from(Span::styled(
+            crate::tr!(
+                self.lang,
+                " [语法] @标签 (如 @work)  |  ~时间 (如 ~tomorrow, ~+3d, ~18:00)  |  *循环 (如 *2w[1,3], *m[1,15])  |  !优先级 (如 !a)",
+                " [syntax] @tag (@work)  |  ~time (~tomorrow, ~+3d, ~18:00)  |  *rrule (*2w[1,3], *m[1,15])  |  !priority (!a)"
+            ),
+            Style::default().fg(self.theme.text_dim),
+        ))
     }
 
     /// 弹出框：今日任务概览 / 任务到期提醒。
