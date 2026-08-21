@@ -5,11 +5,11 @@ use rusqlite::Connection;
 
 use crate::db::migrate;
 
-/// Open (creating if needed) the gtp SQLite database for a named profile and
+/// Open (creating if needed) the horae SQLite database for a named profile and
 /// run migrations. When `name` is `None`, the config's default profile is used.
 ///
-/// Database files live under the XDG config dir (`~/.config/gtp`); the legacy
-/// `gtp.db` is the default profile, so existing setups keep working.
+/// Database files live under the XDG config dir (`~/.config/horae`); the legacy
+/// `horae.db` is the default profile, so existing setups keep working.
 pub fn open(name: Option<&str>) -> anyhow::Result<Connection> {
     let config = crate::config::Config::load()?;
     let (_, profile) = config.resolve_profile(name)?;

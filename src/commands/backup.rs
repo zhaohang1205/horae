@@ -5,8 +5,8 @@ use crate::repo;
 use anyhow::Result;
 use std::path::Path;
 
-/// `gtp export [--file PATH]` — write a full backup JSON (default
-/// `gtp-backup-<YYYY-MM-DD>.json` in the current directory).
+/// `horae export [--file PATH]` — write a full backup JSON (default
+/// `horae-backup-<YYYY-MM-DD>.json` in the current directory).
 pub fn run_export(conn: &Connection, file: Option<&str>) -> Result<()> {
     let data = repo::backup::export_all(conn)?;
     let json = repo::backup::to_json(&data)?;
@@ -16,7 +16,7 @@ pub fn run_export(conn: &Connection, file: Option<&str>) -> Result<()> {
             let date = crate::time::format_local(Some(crate::time::now_ms()))
                 .replace(' ', "T")
                 .replace(':', "");
-            format!("gtp-backup-{}.json", &date[..10])
+            format!("horae-backup-{}.json", &date[..10])
         }
     };
     std::fs::write(&path, json)?;
@@ -30,7 +30,7 @@ pub fn run_export(conn: &Connection, file: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// `gtp import <FILE> [--replace]` — merge (or, with `--replace`, fully
+/// `horae import <FILE> [--replace]` — merge (or, with `--replace`, fully
 /// restore) a backup into the current database.
 pub fn run_import(conn: &Connection, file: &str, replace: bool) -> Result<()> {
     if !Path::new(file).exists() {
@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn import_missing_file_errors() {
         let (_dir, conn) = test_conn();
-        let err = run_import(&conn, "/nonexistent/gtp.json", false).unwrap_err();
+        let err = run_import(&conn, "/nonexistent/horae.json", false).unwrap_err();
         assert!(err.to_string().contains("not found"), "{}", err);
     }
 }

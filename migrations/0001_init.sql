@@ -1,4 +1,4 @@
--- gtp schema v1
+-- horae schema v1
 -- All timestamps stored as UTC milliseconds (INTEGER).
 
 CREATE TABLE IF NOT EXISTS tasks (

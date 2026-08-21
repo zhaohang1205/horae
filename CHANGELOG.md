@@ -9,12 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- 完整备份与还原：`gtp export [--file PATH]` 把全部任务（含所有列）、
+- 完整备份与还原：`horae export [--file PATH]` 把全部任务（含所有列）、
   `task_events` 时间线、标签、设置与番茄钟状态打包成一个 JSON 文件
-  （默认 `gtp-backup-<日期>.json`）；`gtp import <FILE> [--replace]` 默认按 id
+  （默认 `horae-backup-<日期>.json`）；`horae import <FILE> [--replace]` 默认按 id
   合并（已存在整行跳过），`--replace` 清空任务数据后精确还原。备份是纯文件，
   可随 git/网盘同步；导入为原始 INSERT，不伪造时间线事件。
-- Permanent delete for archived tasks: `gtp purge <id>` (CLI) and `D` in the
+- Permanent delete for archived tasks: `horae purge <id>` (CLI) and `D` in the
   Archived view (TUI, y/n confirm). Purge only works on archived tasks and
   cascade-deletes their events/tags via `ON DELETE CASCADE`; no event is logged.
 - Batch purge in the Archived view: enter visual mode with `v`, move with
@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   zero database queries per frame; one-pass today/tomorrow list computation
   (`day_lists`) with a single RRULE expansion per recurring task; batched tag
   fetch (`get_tags_for_tasks`) replacing per-row queries.
-- `gtp completions <bash|zsh|fish|...>` generates shell completion scripts via
+- `horae completions <bash|zsh|fish|...>` generates shell completion scripts via
   `clap_complete`, handled before the database is opened so it has no side
   effects.
 - Richer `--help` output: top-level `long_about` + usage examples, per-command
@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - RRULE 单字母简写：`*d`/`*w`/`*m`/`*y` 现在解析为完整的
-  `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`，不再把裸 `"d"` 存进数据库。`gtp capture`
+  `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`，不再把裸 `"d"` 存进数据库。`horae capture`
   也会保留 quick-add 里的 `*rrule` 令牌（此前只有 TUI 生效）。
 - 新增迁移 v6，把历史遗留的裸 `"d"`/`"w"`/`"m"`/`"y"` 循环规则规范化为完整 RRULE。
 
@@ -51,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `已打卡·下次:<time>` (its next occurrence), while a missed slot is treated as
   overdue and reported uniformly (`逾期X分钟/小时/天`). `effective_due` now
   returns the most recent missed occurrence for recurring tasks, so the alarm
-  window, `gtp list --due-before`, and the daily digest all count a missed
+  window, `horae list --due-before`, and the daily digest all count a missed
   today's slot as overdue.
 
 ### Fixed
@@ -62,7 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Due-notification checks mixed milliseconds and seconds, so 1h/10m/due-now
   desktop notifications never fired. The check now uses a consistent seconds
   scale and queries only tasks within the relevant window (`due_in_range`).
-- TUI tests read the live `pomo.json`, so a running `gtp pomo daemon` made the
+- TUI tests read the live `pomo.json`, so a running `horae pomo daemon` made the
   rendering tests fail. Added a test-only idle override
   (`set_pomo_idle_for_tests`).
 - `relative_due` / `relative_past` built strings via repeated `replace`;

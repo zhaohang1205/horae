@@ -1,4 +1,4 @@
--- gtp schema v10: drop dead columns the domain layer never writes.
+-- horae schema v10: drop dead columns the domain layer never writes.
 -- These columns were only ever read via the backup round-trip and are always
 -- NULL/default in live data:
 --   kind ('action'), parent_id (self-FK), organized_at, started_at, project_type

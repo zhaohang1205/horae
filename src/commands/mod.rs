@@ -116,10 +116,10 @@ fn run_inner(cmd: Command, conn: &Connection, profile: Option<&str>) -> Result<(
         Command::Export { file } => backup::run_export(conn, file.as_deref()),
         Command::Import { file, replace } => backup::run_import(conn, &file, replace),
         Command::Completions { .. } => {
-            anyhow::bail!("`gtp completions` is handled before the database is opened")
+            anyhow::bail!("`horae completions` is handled before the database is opened")
         }
         Command::Profile { .. } => {
-            anyhow::bail!("`gtp profile` is handled before the database is opened")
+            anyhow::bail!("`horae profile` is handled before the database is opened")
         }
     }
 }

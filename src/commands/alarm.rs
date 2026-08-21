@@ -21,7 +21,7 @@ const CLASS_OVERDUE: &str = "alarm-overdue";
 const CLASS_NONE: &str = "alarm-none";
 
 /// 两个 waybar 闹铃模块共享的刷新信号 (SIGRTMIN+12)。窗口滚动时 (点按跳过 /
-/// 数据库变更) 由 `gtp alarm` 发出, 让 slot 1 与 slot 2 同时重算、同帧刷新,
+/// 数据库变更) 由 `horae alarm` 发出, 让 slot 1 与 slot 2 同时重算、同帧刷新,
 /// 避免左右显示错位或重复。
 const WAYBAR_SYNC_SIGNAL: &str = "-RTMIN+12";
 
@@ -73,8 +73,8 @@ fn due_to_ring(tasks: &[Task], rung: &[String], now: i64, lead_ms: i64) -> Vec<(
 
 /// Waybar 多闹铃模块: 每个 slot 输出单个 JSON 对象。waybar v0.15 的 custom
 /// json 只支持单对象（数组会报 requires objectValue）, 因此用两个模块
-/// `gtp alarm waybar 1` / `gtp alarm waybar 2` 各渲染一个闹铃。
-/// 两个模块共享 SIGRTMIN+12 信号: 窗口滚动或点按跳过时 `gtp alarm` 发出该
+/// `horae alarm waybar 1` / `horae alarm waybar 2` 各渲染一个闹铃。
+/// 两个模块共享 SIGRTMIN+12 信号: 窗口滚动或点按跳过时 `horae alarm` 发出该
 /// 信号, 强制两个模块同一帧重算刷新, 保证左(第一件)/右(第二件)始终同步。
 /// 仅 slot 1 负责触发响铃与写状态文件, 避免两个进程并发写 alarm.json。
 /// 传 `emit_all = true` 时整窗作为 JSON 数组输出（供 omarchy/waybar 单次拉取多任务）。

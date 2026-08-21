@@ -605,7 +605,7 @@ impl<'a> App<'a> {
         main_area
     }
 
-    /// 状态栏（单行）：[MODE] + 内容区(消息 / F2 提示 / 全局条) | [gtp]。
+    /// 状态栏（单行）：[MODE] + 内容区(消息 / F2 提示 / 全局条) | [horae]。
     fn render_status_bar(&mut self, f: &mut Frame, area: Rect) {
         let mode_str = match self.mode {
             Mode::Normal => " NORMAL ",
@@ -693,7 +693,7 @@ impl<'a> App<'a> {
         );
         f.render_widget(
             Paragraph::new(Span::styled(
-                " gtp ",
+                " horae ",
                 Style::default()
                     .fg(self.theme.bg)
                     .bg(self.theme.accent)
@@ -1619,7 +1619,7 @@ impl<'a> App<'a> {
 
         if self.total_count() == 0 {
             lines.push(Line::from(Span::styled(
-                crate::tr!(self.lang, " 欢迎使用 gtp", "  Welcome to gtp"),
+                crate::tr!(self.lang, " 欢迎使用 horae", "  Welcome to horae"),
                 Style::default()
                     .fg(self.theme.accent)
                     .add_modifier(Modifier::BOLD),

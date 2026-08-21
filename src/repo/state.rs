@@ -7,7 +7,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 /// 测试隔离：置为 true 时 `JsonStateStore::new` 构造出的存储 `load`/`save`
-/// 均空操作，避免测试读到真实 `~/.config/gtp/*.json`（如运行中的 pomo daemon
+/// 均空操作，避免测试读到真实 `~/.config/horae/*.json`（如运行中的 pomo daemon
 /// 状态）。单一全局开关：alarm/notify/pomo 三个状态文件在测试里都不该碰真实
 /// 文件。开关在构造时采样（sticky），TUI/backup 测试开头置一次即可。
 static TEST_OVERRIDE: AtomicBool = AtomicBool::new(false);
@@ -18,7 +18,7 @@ pub fn set_test_override() {
     TEST_OVERRIDE.store(true, Ordering::Relaxed);
 }
 
-/// 一个 JSON 状态文件存储：`~/.config/gtp/<filename>` 的 load/save。
+/// 一个 JSON 状态文件存储：`~/.config/horae/<filename>` 的 load/save。
 /// 文件缺失时 `load` 返回 `T::default()`；写入用 tmp+rename 原子替换，
 /// 避免并发读方读到半写的文件。
 pub struct JsonStateStore<T> {
@@ -28,7 +28,7 @@ pub struct JsonStateStore<T> {
 }
 
 impl<T: Default + Serialize + DeserializeOwned> JsonStateStore<T> {
-    /// 构造指向 `~/.config/gtp/<filename>` 的存储（目录不存在则创建）。
+    /// 构造指向 `~/.config/horae/<filename>` 的存储（目录不存在则创建）。
     /// 测试期间（`TEST_OVERRIDE` 置位后）构造的存储 load/save 均为空操作。
     pub fn new(filename: &str) -> Self {
         let mut path = crate::config::config_dir();

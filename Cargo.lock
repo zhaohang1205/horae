@@ -649,26 +649,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gtp"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "clap_complete",
- "crossterm",
- "dirs",
- "ratatui",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "unicode-width",
- "uuid",
-]
-
-[[package]]
 name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -719,6 +699,26 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
+name = "horae"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "clap_complete",
+ "crossterm",
+ "dirs",
+ "ratatui",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "unicode-width",
+ "uuid",
+]
 
 [[package]]
 name = "iana-time-zone"

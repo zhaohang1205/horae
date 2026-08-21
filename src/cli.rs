@@ -4,12 +4,12 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
-    name = "gtp",
+    name = "horae",
     version,
     about = "GTD terminal task manager",
     long_about = "A GTD terminal task manager in Rust: SQLite data layer + CLI + ratatui TUI in one binary.\n\
     Every task state change is stamped with UTC-ms and appended to an append-only task_events timeline.",
-    after_help = "Examples:\n  gtp                       launch the TUI\n  gtp capture \"buy milk\" --tag home --p2\n  gtp list --status next\n  gtp show <id>\n  gtp completions bash\n\nTime syntax: now, +2h, +30m, +1d, today, tomorrow, 2026-07-24 14:30\nTask refs: full id, unique id-prefix, or exact title."
+    after_help = "Examples:\n  horae                       launch the TUI\n  horae capture \"buy milk\" --tag home --p2\n  horae list --status next\n  horae show <id>\n  horae completions bash\n\nTime syntax: now, +2h, +30m, +1d, today, tomorrow, 2026-07-24 14:30\nTask refs: full id, unique id-prefix, or exact title."
 )]
 pub struct Cli {
     /// Profile (data set) to use; defaults to the configured default profile.
@@ -22,7 +22,7 @@ pub struct Cli {
 
 impl Cli {
     /// Print a shell completion script to stdout. Handled before the database
-    /// is opened so `gtp completions bash` has no side effects.
+    /// is opened so `horae completions bash` has no side effects.
     pub fn print_completions(shell: Shell) {
         let mut cmd = Self::command();
         let name = cmd.get_name().to_string();
@@ -41,7 +41,7 @@ pub enum Command {
     /// Capture a new item into the inbox
     #[command(long_about = "Capture a new item into the inbox. Tags auto-create on first use; \
         quick-add syntax (@tag ~time *rrule !priority) is parsed in the title.",
-        after_help = "Examples:\n  gtp capture \"buy milk\" --tag home\n  gtp capture \"call mom\" --p2 --due tomorrow\n  gtp capture \"submit report\" --status scheduled --due +1d\n  gtp capture \"email boss ~today @work !a\"",
+        after_help = "Examples:\n  horae capture \"buy milk\" --tag home\n  horae capture \"call mom\" --p2 --due tomorrow\n  horae capture \"submit report\" --status scheduled --due +1d\n  horae capture \"email boss ~today @work !a\"",
         group = clap::ArgGroup::new("priority").args(["p1", "p2", "p3"]))]
     Capture {
         title: String,
@@ -72,7 +72,7 @@ pub enum Command {
     #[command(
         long_about = "List tasks with optional filters. Sorting uses the effective due: \
         for recurring tasks that is the next occurrence on or after now.",
-        after_help = "Examples:\n  gtp list\n  gtp list --status next\n  gtp list --status scheduled --tag work\n  gtp list --due-before +1d --json"
+        after_help = "Examples:\n  horae list\n  horae list --status next\n  horae list --status scheduled --tag work\n  horae list --due-before +1d --json"
     )]
     List {
         #[arg(long, value_name = "STATUS", help = "Filter by status")]
@@ -98,7 +98,7 @@ pub enum Command {
     /// Schedule with a planned start (and optional --rrule)
     #[command(
         long_about = "Schedule a task with a planned start/end and optional recurrence (RRULE).",
-        after_help = "Examples:\n  gtp schedule <id> --start tomorrow\n  gtp schedule <id> --start +1d --end +1d 14:00\n  gtp schedule <id> --start +1w --rrule 'FREQ=WEEKLY;BYDAY=MO,WE'"
+        after_help = "Examples:\n  horae schedule <id> --start tomorrow\n  horae schedule <id> --start +1d --end +1d 14:00\n  horae schedule <id> --start +1w --rrule 'FREQ=WEEKLY;BYDAY=MO,WE'"
     )]
     Schedule {
         id: String,
@@ -135,7 +135,7 @@ pub enum Command {
     #[command(
         long_about = "Pomodoro focus mode. `start` spawns a background daemon that ticks \
         every second, writes pomo.json and sends desktop notifications.",
-        after_help = "Examples:\n  gtp pomo start <task-id>\n  gtp pomo stop\n  gtp pomo daemon\n  gtp pomo waybar"
+        after_help = "Examples:\n  horae pomo start <task-id>\n  horae pomo stop\n  horae pomo daemon\n  horae pomo waybar"
     )]
     Pomo {
         #[arg(value_name = "ACTION", help = "start, stop, daemon, or waybar")]
@@ -187,7 +187,7 @@ pub enum Command {
         #[arg(
             long,
             value_name = "PATH",
-            help = "Synced folder to watch (default: ~/.config/gtp/sync)"
+            help = "Synced folder to watch (default: ~/.config/horae/sync)"
         )]
         dir: Option<PathBuf>,
         #[arg(
@@ -203,22 +203,22 @@ pub enum Command {
     #[command(
         long_about = "Export every task, event, tag, setting and the pomodoro state \
         to a single JSON file — a complete restore point for the database.",
-        after_help = "Examples:\n  gtp export\n  gtp export --file ~/backups/gtp.json"
+        after_help = "Examples:\n  horae export\n  horae export --file ~/backups/horae.json"
     )]
     Export {
         #[arg(
             long,
             value_name = "PATH",
-            help = "Output path (default: gtp-backup-<date>.json)"
+            help = "Output path (default: horae-backup-<date>.json)"
         )]
         file: Option<String>,
     },
     /// Import a backup, merging (or replacing) the database
     #[command(
-        long_about = "Import a backup created by `gtp export`. By default it merges: \
+        long_about = "Import a backup created by `horae export`. By default it merges: \
         tasks whose id already exists are left untouched, everything else is added. \
         Pass --replace to wipe the current task data and restore the backup exactly.",
-        after_help = "Examples:\n  gtp import gtp-backup-2026-08-15.json\n  gtp import --replace ~/backups/gtp.json"
+        after_help = "Examples:\n  horae import horae-backup-2026-08-15.json\n  horae import --replace ~/backups/horae.json"
     )]
     Import {
         #[arg(value_name = "FILE", help = "Path to a backup JSON file")]
@@ -228,15 +228,15 @@ pub enum Command {
     },
     /// Generate shell completion scripts (bash, elvish, fish, powershell, zsh)
     #[command(
-        after_help = "Usage:\n  gtp completions bash\n  gtp completions fish\n\nInstall into ~/.bashrc or ~/.config/fish/completions/"
+        after_help = "Usage:\n  horae completions bash\n  horae completions fish\n\nInstall into ~/.bashrc or ~/.config/fish/completions/"
     )]
     Completions { shell: Shell },
     /// Manage data-set profiles (list, create, delete, rename, set default)
     #[command(
         long_about = "Profiles let you keep separate data sets (e.g. work / personal / prod1) \
-        each in its own SQLite file, switched via `gtp --profile <name>` or the TUI settings view. \
-        This command edits the profile config (~/.config/gtp/config.json) without touching any data.",
-        after_help = "Examples:\n  gtp profile list\n  gtp profile new work\n  gtp profile new prod1 --db prod1.db\n  gtp profile rename work work2\n  gtp profile rm prod1\n  gtp profile set-default work\n  gtp --profile work capture \"buy milk\""
+        each in its own SQLite file, switched via `horae --profile <name>` or the TUI settings view. \
+        This command edits the profile config (~/.config/horae/config.json) without touching any data.",
+        after_help = "Examples:\n  horae profile list\n  horae profile new work\n  horae profile new prod1 --db prod1.db\n  horae profile rename work work2\n  horae profile rm prod1\n  horae profile set-default work\n  horae --profile work capture \"buy milk\""
     )]
     Profile {
         #[command(subcommand)]

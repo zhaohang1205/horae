@@ -9,7 +9,7 @@ use std::time::Duration;
 
 fn kill_daemon() {
     let _ = StdCommand::new("pkill")
-        .args(["-f", "gtp pomo daemon"])
+        .args(["-f", "horae pomo daemon"])
         .status();
     // 等待旧进程实际退出，防止新旧 daemon 同时写 pomo.json 导致文件损坏
     thread::sleep(Duration::from_millis(200));
@@ -29,7 +29,7 @@ pub fn start(conn: &Connection, task_id: &str) -> Result<()> {
     state.end_ts = Some(now + duration_ms);
     pomodoro::save_state(&state)?;
 
-    let exe_path = std::env::current_exe().unwrap_or_else(|_| "gtp".into());
+    let exe_path = std::env::current_exe().unwrap_or_else(|_| "horae".into());
     StdCommand::new(exe_path).args(["pomo", "daemon"]).spawn()?;
 
     notify(

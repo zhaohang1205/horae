@@ -6,7 +6,7 @@ use crate::model::task::ChecklistItem;
 /// Serialized identity of the backup file. `export` always writes `version: 2`;
 /// `import` refuses anything it does not understand, so future format changes
 /// can bump this instead of silently mis-parsing.
-pub const BACKUP_FORMAT: &str = "gtp-backup";
+pub const BACKUP_FORMAT: &str = "horae-backup";
 pub const BACKUP_VERSION: u32 = 2;
 
 /// Full-database backup: every `tasks` column the `Task` model maps, the

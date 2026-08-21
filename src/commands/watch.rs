@@ -25,7 +25,7 @@ const REMIND_LEAD_MS: i64 = 5 * 60 * 1000;
 const DONE_KEEP: usize = 2000;
 
 /// 提醒去重状态文件名（放在同步目录内，随 Syncthing 同步但无碍）。
-const WATCH_STATE_FILE: &str = ".gtp-watch.json";
+const WATCH_STATE_FILE: &str = ".horae-watch.json";
 
 const FILE_CAPTURE: &str = "capture";
 const FILE_ACTIONS: &str = "actions";
@@ -53,10 +53,10 @@ struct WatchState {
     reminded: Vec<String>,
 }
 
-/// 默认同步目录：`~/.config/gtp/sync`（与 DB 同根，加入 Syncthing 即可）。
+/// 默认同步目录：`~/.config/horae/sync`（与 DB 同根，加入 Syncthing 即可）。
 pub fn default_sync_dir() -> PathBuf {
     let mut p = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    p.push("gtp");
+    p.push("horae");
     p.push("sync");
     p
 }
@@ -74,7 +74,7 @@ pub fn run(conn: &Connection, args: WatchArgs) -> Result<()> {
         return Ok(());
     }
     eprintln!(
-        "gtp watch running on {} (every {}s). Ctrl-C to stop.",
+        "horae watch running on {} (every {}s). Ctrl-C to stop.",
         args.dir.display(),
         args.interval_secs
     );
@@ -313,7 +313,7 @@ fn write_today(conn: &Connection, dir: &Path) -> Result<bool> {
     let mut md = String::new();
     writeln!(
         md,
-        "# 今日待办 · {}\n> gtp watch 自动生成 · 采集写 capture.txt · 操作写 actions.txt\n",
+        "# 今日待办 · {}\n> horae watch 自动生成 · 采集写 capture.txt · 操作写 actions.txt\n",
         chrono::Local::now().format("%Y-%m-%d")
     )
     .unwrap();
@@ -380,7 +380,7 @@ fn render_section(
 }
 
 /// 到点/逾期的活动任务写 `reminders/*.md`（每个 occurrence 至多一次，去重状态
-/// 落在 `.gtp-watch.json`）。电脑关机期间到期的任务，开机后会补写（catch-up）。
+/// 落在 `.horae-watch.json`）。电脑关机期间到期的任务，开机后会补写（catch-up）。
 fn write_reminders(conn: &Connection, dir: &Path) -> Result<usize> {
     let state_path = dir.join(WATCH_STATE_FILE);
     let mut state: WatchState = match fs::read_to_string(&state_path) {

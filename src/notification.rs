@@ -4,9 +4,9 @@ use std::collections::HashSet;
 
 #[derive(Debug)]
 pub enum NotificationEvent {
-    DueInOneHour { title: String },
-    DueInTenMins { title: String },
-    DueNow { id: String, title: String },
+    InOneHour { title: String },
+    InTenMins { title: String },
+    Now { id: String, title: String },
 }
 
 #[derive(Hash, Eq, PartialEq)]
@@ -48,19 +48,19 @@ impl NotificationEngine {
                     let key = NotificationKey::OneHour { id: id.clone(), due };
                     if !self.notified_events.contains(&key) {
                         self.notified_events.insert(key);
-                        events.push(NotificationEvent::DueInOneHour { title });
+                        events.push(NotificationEvent::InOneHour { title });
                     }
                 } else if diff_ms > 540_000 && diff_ms <= 600_000 {
                     let key = NotificationKey::TenMins { id: id.clone(), due };
                     if !self.notified_events.contains(&key) {
                         self.notified_events.insert(key);
-                        events.push(NotificationEvent::DueInTenMins { title });
+                        events.push(NotificationEvent::InTenMins { title });
                     }
                 } else if diff_ms <= 0 && diff_ms > -60_000 {
                     let key = NotificationKey::Now { id: id.clone(), due };
                     if !self.notified_events.contains(&key) {
                         self.notified_events.insert(key);
-                        events.push(NotificationEvent::DueNow { id, title });
+                        events.push(NotificationEvent::Now { id, title });
                     }
                 }
             }

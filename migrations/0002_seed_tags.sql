@@ -1,4 +1,4 @@
--- gtp preset tags (v1, simplified scientific set)
+-- horae preset tags (v1, simplified scientific set)
 -- Idempotent: INSERT OR IGNORE so re-running migrations is safe.
 -- Categories: 'context' (where/which life area) and 'priority' (p1 highest).
 

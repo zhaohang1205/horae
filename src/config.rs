@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 const CONFIG_FILE: &str = "config.json";
 const DEFAULT_PROFILE: &str = "default";
-const DEFAULT_DB: &str = "gtp.db";
+const DEFAULT_DB: &str = "horae.db";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CloudConfig {
@@ -35,15 +35,15 @@ fn default_profile_name() -> String {
     DEFAULT_PROFILE.to_string()
 }
 
-/// gtp config dir: `~/.config/gtp` (falls back to `.` when no config dir).
-/// `GTP_CONFIG_DIR` env overrides it (used by tests / power users).
+/// horae config dir: `~/.config/horae` (falls back to `.` when no config dir).
+/// `HORAE_CONFIG_DIR` env overrides it (used by tests / power users).
 pub fn config_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("GTP_CONFIG_DIR") {
+    if let Some(dir) = std::env::var_os("HORAE_CONFIG_DIR") {
         return PathBuf::from(dir);
     }
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("gtp")
+        .join("horae")
 }
 
 impl Config {
@@ -52,7 +52,7 @@ impl Config {
     }
 
     /// Load config from disk. When the file is missing or malformed, fall back
-    /// to a single default profile pointing at `gtp.db` (backwards compatible).
+    /// to a single default profile pointing at `horae.db` (backwards compatible).
     pub fn load() -> anyhow::Result<Self> {
         let path = Self::path();
         let raw = match fs::read_to_string(&path) {
@@ -103,7 +103,7 @@ impl Config {
     }
 
     /// Absolute path of a profile's database file. Relative paths are resolved
-    /// against the gtp config dir.
+    /// against the horae config dir.
     pub fn db_path(&self, profile: &Profile) -> PathBuf {
         let p = PathBuf::from(&profile.db);
         if p.is_absolute() {
@@ -170,8 +170,8 @@ mod tests {
         assert_eq!(cfg.profile_names(), vec!["default"]);
         assert_eq!(
             cfg.profile("default").unwrap().db,
-            "gtp.db",
-            "默认 profile 指向旧 gtp.db，向后兼容"
+            "horae.db",
+            "默认 profile 指向旧 horae.db，向后兼容"
         );
     }
 
@@ -191,7 +191,7 @@ mod tests {
                 db: "profiles/personal.db".to_string(),
                 cloud: Some(CloudConfig {
                     url: "libsql://example.turso.io".to_string(),
-                    token_env: Some("GTP_TURSO_TOKEN".to_string()),
+                    token_env: Some("HORAE_TURSO_TOKEN".to_string()),
                 }),
             },
         );
@@ -242,7 +242,7 @@ mod tests {
         assert!(cfg.resolve_profile(Some("nope")).is_err());
         let (name, p) = cfg.resolve_profile(None).unwrap();
         assert_eq!(name, "default");
-        assert_eq!(p.db, "gtp.db");
+        assert_eq!(p.db, "horae.db");
     }
 
     #[test]
@@ -250,6 +250,6 @@ mod tests {
         let cfg = Config::default();
         let p = cfg.db_path(cfg.profile("default").unwrap());
         assert!(p.is_absolute());
-        assert!(p.to_string_lossy().ends_with("gtp/gtp.db"));
+        assert!(p.to_string_lossy().ends_with("horae/horae.db"));
     }
 }

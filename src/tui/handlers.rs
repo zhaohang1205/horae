@@ -588,7 +588,7 @@ impl<'a> App<'a> {
 
                         let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
                         let temp_path = std::env::temp_dir()
-                            .join(format!("gtp_notes_{}.md", uuid::Uuid::new_v4()));
+                            .join(format!("horae_notes_{}.md", uuid::Uuid::new_v4()));
                         use std::io::Write;
                         let mut file = std::fs::File::create(&temp_path)?;
                         file.write_all(task.notes.as_bytes())?;

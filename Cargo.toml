@@ -1,5 +1,5 @@
 [package]
-name = "gtp"
+name = "horae"
 version = "0.1.0"
 edition = "2021"
 description = "GTD terminal task manager (data layer + CLI), with time-datafication and a tag system"

@@ -49,7 +49,7 @@
 - 时间戳一律 UTC ms INTEGER，所有时间数学走 `time.rs`，展示走 `format_local`。
 - 迁移：不改已有 `migrations/*.sql`，新增文件 + `migrate.rs` 新版本块（当前 v1~v9）。
 - 新事件类型：`model/event.rs` 加 const + 同步 `migrations/0001_init.sql` 注释。
-- DB 路径全部由 `dirs::config_dir()` 派生，绝不硬编码；`GTP_CONFIG_DIR` 覆盖（测试用）。
+- DB 路径全部由 `dirs::config_dir()` 派生，绝不硬编码；`HORAE_CONFIG_DIR` 覆盖（测试用）。
 - 命令层返回 `anyhow::Result`，域错误用 `crate::error::Error`。
 - 架构词汇（/codebase-design）：module / interface / depth / seam / adapter / leverage / locality。领域词汇见 `CONTEXT.md`。
 - 无 ADR 目录；唯一设计文档 `docs/design-profiles-and-cloud.md`（profile 多库 + 云，未实现；`config.rs` 已落地 Phase 1）。

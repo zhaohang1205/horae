@@ -1,13 +1,13 @@
 # 设计文档：Profile 多库 + 前端化配置 + 云数据库
 
 > 状态：设计讨论稿（未实现）
-> 适用项目：`gtp`（GTD 终端任务管理器，Rust，SQLite 本地优先）
+> 适用项目：`horae`（GTD 终端任务管理器，Rust，SQLite 本地优先）
 
 ## 1. 需求与现状
 
 用户的诉求可归纳为三点：
 
-1. **多场景多数据库**：用户在不同场景需要连接不同的数据库（如生产/测试、生产1/生产2、工作/个人）。对 gtp 而言，"数据库"本质是**数据集合（Profile）**，不是传统意义的部署环境。
+1. **多场景多数据库**：用户在不同场景需要连接不同的数据库（如生产/测试、生产1/生产2、工作/个人）。对 horae 而言，"数据库"本质是**数据集合（Profile）**，不是传统意义的部署环境。
 2. **配置前端化**：Profile/连接配置不应靠手改文件，而应在 TUI 内可视化管理。
 3. **云数据库**：提供云端数据库能力（备份、多端、异地容灾）。
 
@@ -15,7 +15,7 @@
 
 | 位置 | 现状 |
 |---|---|
-| `src/db/conn.rs:10` | `open()` 写死 `~/.config/gtp/gtp.db`，唯一数据库 |
+| `src/db/conn.rs:10` | `open()` 写死 `~/.config/horae/horae.db`，唯一数据库 |
 | `src/main.rs:23` | `db::conn::open()` 后执行 `commands::run` |
 | `src/db/migrate.rs` | 基于 `user_version` 的增量迁移，幂等 |
 | `migrations/0006_settings.sql` | `settings` 键值表（`lang`/`theme`/`quotes`），已由 TUI F5/F6/F7 读写 |
@@ -41,11 +41,11 @@
 
 Profile = 一个独立的 SQLite 数据库文件 + 元数据（名称、云同步目标、默认标记）。
 
-目录布局（`dirs::config_dir()/gtp/`）：
+目录布局（`dirs::config_dir()/horae/`）：
 ```
-~/.config/gtp/
+~/.config/horae/
   config.json            # 前端化配置（Profile 列表、默认、云目标）  ← 新增
-  gtp.db                 # 默认 Profile（向后兼容，等价于"默认"Profile）
+  horae.db                 # 默认 Profile（向后兼容，等价于"默认"Profile）
   profiles/
     work.db
     personal.db
@@ -58,15 +58,15 @@ Profile = 一个独立的 SQLite 数据库文件 + 元数据（名称、云同�
 {
   "default_profile": "default",
   "profiles": {
-    "default":  { "db": "gtp.db" },
-    "work":     { "db": "profiles/work.db", "cloud": { "url": "libsql://xxx.turso.io", "token_env": "GTP_TURSO_TOKEN" } },
+    "default":  { "db": "horae.db" },
+    "work":     { "db": "profiles/work.db", "cloud": { "url": "libsql://xxx.turso.io", "token_env": "HORAE_TURSO_TOKEN" } },
     "personal": { "db": "profiles/personal.db" }
   }
 }
 ```
 
 - `config.json` 由 `db::conn` 上移一层的新的 `config` 模块负责读写（`src/config.rs`）。
-- 缺失时自动生成，`default_profile` 指回 `gtp.db`，保证零配置向后兼容。
+- 缺失时自动生成，`default_profile` 指回 `horae.db`，保证零配置向后兼容。
 - 云凭据走环境变量（`token_env`），**绝不写入 config.json**（安全）。
 
 ### 3.3 代码改动点
@@ -76,7 +76,7 @@ Profile = 一个独立的 SQLite 数据库文件 + 元数据（名称、云同�
 | `src/db/conn.rs` | `open()` → `open(profile: &Profile) -> Connection`，解析 profile 的 db 路径 |
 | `src/main.rs` | 读 `--profile` 参数 → 解析 profile → 传入 `open` |
 | `src/config.rs`（新） | `Config::load()/save()`，`resolve_profile(name)`，CRUD |
-| `src/cli.rs` | 新增全局 `--profile <name>` 参数；新增 `gtp profile` 子命令（`list`/`new`/`rm`/`rename`/`set-default`/`switch`）|
+| `src/cli.rs` | 新增全局 `--profile <name>` 参数；新增 `horae profile` 子命令（`list`/`new`/`rm`/`rename`/`set-default`/`switch`）|
 | `src/repo/` | **不感知 Profile**——它只操作 `Connection`，Profile 是"打开哪个文件"的问题，域逻辑不变 |
 | pomo/alarm/watch | `pomo.rs:126`、`alarm.rs:84/165`、`watch.rs` 内部 `conn::open()` 也要走 profile 解析（用默认/当前 profile）|
 
@@ -85,11 +85,11 @@ Profile = 一个独立的 SQLite 数据库文件 + 元数据（名称、云同�
 ### 3.4 CLI 形态
 
 ```
-gtp --profile work capture "buy milk"
-gtp profile list                  # 列出所有 profile
-gtp profile new work               # 新建
-gtp profile set-default work
-gtp profile switch work            # 改 config.json 默认（影响后续无 --profile 调用）
+horae --profile work capture "buy milk"
+horae profile list                  # 列出所有 profile
+horae profile new work               # 新建
+horae profile set-default work
+horae profile switch work            # 改 config.json 默认（影响后续无 --profile 调用）
 ```
 
 TUI 内（`--profile` 或默认）打开后，可在设置页切换当前 profile 并**热重载**（重开 Connection，刷新视图）。
@@ -140,13 +140,13 @@ TUI 内（`--profile` 或默认）打开后，可在设置页切换当前 profil
 
 - **数据库 schema 零改动**：Profile 只是文件层面，`user_version` 迁移逻辑不变（`migrate.rs` 已幂等，适合任意新文件）。
 - `config.json` 是唯一新配置文件；缺失即生成默认，旧用户无感。
-- `gtp.db` 就是默认 profile 文件，老配置/脚本继续有效。
+- `horae.db` 就是默认 profile 文件，老配置/脚本继续有效。
 
 ## 7. 风险与取舍
 
 | 风险 | 应对 |
 |---|---|
-| 多 profile 文件之间数据不同步（同一任务分散在不同库） | GTD 语境下这是特性：工作/个人数据天然隔离；合并用 `gtp export/import` 已有能力 |
+| 多 profile 文件之间数据不同步（同一任务分散在不同库） | GTD 语境下这是特性：工作/个人数据天然隔离；合并用 `horae export/import` 已有能力 |
 | 热重载 Connection 时 TUI 状态失效 | 切换 profile 时重建 `App` 视图状态（复用现有 `App::new`） |
 | libSQL 引入网络依赖、离线场景 | 保持本地主库优先，云仅同步层；断网照常使用 |
 | `config.json` 写坏导致无法启动 | 启动时容错：解析失败回退默认 profile 并提示；写操作先写临时文件再 rename（原子） |
@@ -155,7 +155,7 @@ TUI 内（`--profile` 或默认）打开后，可在设置页切换当前 profil
 
 1. `src/config.rs` + `config.json` 读写与默认回退。
 2. `db::conn::open(profile)` + `main.rs`/`cli.rs` 接 `--profile`。
-3. `gtp profile` 子命令（CLI 侧完成 Profile CRUD，可先行验证）。
+3. `horae profile` 子命令（CLI 侧完成 Profile CRUD，可先行验证）。
 4. TUI 设置页 `View::Settings`（前端化）。
 5. pomo/alarm/watch 内部 `open()` 改走 profile。
 6. Phase 2：可选 Profile 云同步（libSQL）。

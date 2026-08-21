@@ -267,7 +267,7 @@ mod tests {
         seed(&conn);
         let mut app = App::new(&conn).unwrap();
         let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
-        let mut out = std::fs::File::create("/tmp/gtp_tui_frames.txt").unwrap();
+        let mut out = std::fs::File::create("/tmp/horae_tui_frames.txt").unwrap();
         let frame = |label: &str,
                      term: &mut Terminal<TestBackend>,
                      app: &mut App,
@@ -508,11 +508,11 @@ mod tests {
         let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
         term.draw(|f| app.render(f)).unwrap();
         let raw = snap(&term);
-        let mut out = std::fs::File::create("/tmp/gtp_empty_guide.txt").unwrap();
+        let mut out = std::fs::File::create("/tmp/horae_empty_guide.txt").unwrap();
         out.write_all(raw.as_bytes()).unwrap();
         let s = norm(&raw);
         assert!(
-            s.contains("欢迎使用gtp"),
+            s.contains("欢迎使用horae"),
             "empty db should show welcome guide"
         );
         assert!(s.contains("Active"), "guide shows groups");
@@ -1242,7 +1242,7 @@ mod tests {
         use crate::config::Config;
 
         let tmp = tempfile::tempdir().unwrap();
-        std::env::set_var("GTP_CONFIG_DIR", tmp.path());
+        std::env::set_var("HORAE_CONFIG_DIR", tmp.path());
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         let mut app = App::new(&conn).unwrap();
@@ -1258,7 +1258,7 @@ mod tests {
         assert!(app
             .items
             .iter()
-            .any(|r| r.tags.iter().any(|t| t == "gtp.db")));
+            .any(|r| r.tags.iter().any(|t| t == "horae.db")));
 
         // n → 新建 work
         app.handle_key(key('n')).unwrap();
@@ -1313,7 +1313,7 @@ mod tests {
             "删除默认后保留剩余 default"
         );
 
-        std::env::remove_var("GTP_CONFIG_DIR");
+        std::env::remove_var("HORAE_CONFIG_DIR");
     }
 
     #[test]

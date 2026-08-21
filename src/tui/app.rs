@@ -367,13 +367,13 @@ impl<'a> App<'a> {
         let events = self.notification_engine.tick(self.conn);
         for event in events {
             match event {
-                crate::notification::NotificationEvent::DueInOneHour { title, .. } => {
+                crate::notification::NotificationEvent::InOneHour { title, .. } => {
                     crate::commands::notify::desktop("任务即将在1小时后开始", &title);
                 }
-                crate::notification::NotificationEvent::DueInTenMins { title, .. } => {
+                crate::notification::NotificationEvent::InTenMins { title, .. } => {
                     crate::commands::notify::desktop("任务即将在10分钟后开始", &title);
                 }
-                crate::notification::NotificationEvent::DueNow { id, title } => {
+                crate::notification::NotificationEvent::Now { id, title } => {
                     crate::commands::notify::desktop("任务现在开始!", &title);
                     self.popup = Some(Popup::TaskDueNow(id, title));
                     self.needs_clear = true; // force redraw to show popup

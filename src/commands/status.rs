@@ -16,7 +16,7 @@ pub fn to_status(conn: &Connection, id: &str, to: &str) -> Result<()> {
     if to == "next" {
         let missing_time = t.due_at.is_none() && t.scheduled_start_at.is_none();
         if missing_time {
-            println!("  tip: 建议补充时间 — `gtp schedule <id> --start <时间>`");
+            println!("  tip: 建议补充时间 — `horae schedule <id> --start <时间>`");
         }
     }
     Ok(())

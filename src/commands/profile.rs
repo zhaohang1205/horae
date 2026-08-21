@@ -4,7 +4,7 @@ use crate::cli::ProfileAction;
 use crate::config::{Config, Profile};
 
 /// Run a profile-management action. Operates only on config.json — no database
-/// is opened, so these are safe to run while other gtp processes are active.
+/// is opened, so these are safe to run while other horae processes are active.
 pub fn run(action: ProfileAction) -> anyhow::Result<()> {
     let mut config = Config::load()?;
     match action {
@@ -139,6 +139,6 @@ mod tests {
             },
         );
         let path = config.db_path(config.profile("p").unwrap());
-        assert!(path.to_string_lossy().ends_with("gtp/profiles/p.db"));
+        assert!(path.to_string_lossy().ends_with("horae/profiles/p.db"));
     }
 }

@@ -1,4 +1,4 @@
-# gtp — GTD 终端任务管理器 / GTD Terminal Task Manager
+# horae — GTD 终端任务管理器 / GTD Terminal Task Manager
 
 [![CI](https://github.com/zhaohang1205/gtd/actions/workflows/ci.yml/badge.svg)](https://github.com/zhaohang1205/gtd/actions/workflows/ci.yml)
 [![Release](https://github.com/zhaohang1205/gtd/actions/workflows/release.yml/badge.svg)](https://github.com/zhaohang1205/gtd/actions/workflows/release.yml)
@@ -33,15 +33,15 @@ git clone https://github.com/zhaohang1205/gtd.git && cd gtd
 cargo build --release
 ```
 
-数据目录：`~/.config/gtp/`（`gtp.db` + `pomo.json`）。Data lives in `~/.config/gtp/`.
+数据目录：`~/.config/horae/`（`horae.db` + `pomo.json`）。Data lives in `~/.config/horae/`.
 
 ## 快速开始 / Quick start
 
 ```sh
-gtp                                # 启动 TUI / launch the TUI
-gtp capture "买牛奶" --tag home     # 捕获进收件箱 / capture into the inbox
-gtp list --status next             # 列出下一步 / list next actions
-gtp show <task-id>                 # 查看完整时间线 / full event timeline
+horae                                # 启动 TUI / launch the TUI
+horae capture "买牛奶" --tag home     # 捕获进收件箱 / capture into the inbox
+horae list --status next             # 列出下一步 / list next actions
+horae show <task-id>                 # 查看完整时间线 / full event timeline
 ```
 
 任务引用支持完整 id、唯一 id 前缀（类似 git）、或精确标题。Task refs accept a full id, a unique
@@ -51,20 +51,20 @@ id-prefix, or an exact title.
 
 | 命令 / Command | 说明 / Description |
 | --- | --- |
-| `gtp` | 启动 TUI / Launch the TUI |
-| `gtp capture <title> [--tag T]... [--due TIME] [--status S] [--p1\|--p2\|--p3] [--json]` | 捕获新任务 / Capture |
-| `gtp list [--status S] [--tag T]... [--due-before TIME] [--json]` | 列出任务 / List tasks |
-| `gtp show <id> [--json]` | 任务详情 + 时间线 / Show with timeline |
-| `gtp next\|wait\|someday\|done <id>` | 流转状态 / Move between statuses |
-| `gtp schedule <id> [--start TIME] [--end TIME] [--rrule R]` | 排期（可加循环）/ Schedule (+recurrence) |
-| `gtp archive <id>` / `gtp restore <id>` | 软删除 / 恢复 / Soft delete / restore |
-| `gtp tag <id> <name>` / `gtp untag <id> <name>` | 增删标签 / Manage tags |
-| `gtp export [--file PATH]` | 备份到 JSON（任务/事件/标签/设置/番茄钟）· full backup |
-| `gtp import <FILE> [--replace]` | 合并还原；`--replace` 清空后精确还原 · merge / restore |
-| `gtp review` | 周回顾 / Weekly review |
-| `gtp tags` | 标签库 / List tags |
-| `gtp pomo start <id> \| stop \| daemon \| waybar` | 番茄钟 / Pomodoro |
-| `gtp alarm waybar [slot] \| next [slot]` | 到期提醒 / Upcoming-task reminders |
+| `horae` | 启动 TUI / Launch the TUI |
+| `horae capture <title> [--tag T]... [--due TIME] [--status S] [--p1\|--p2\|--p3] [--json]` | 捕获新任务 / Capture |
+| `horae list [--status S] [--tag T]... [--due-before TIME] [--json]` | 列出任务 / List tasks |
+| `horae show <id> [--json]` | 任务详情 + 时间线 / Show with timeline |
+| `horae next\|wait\|someday\|done <id>` | 流转状态 / Move between statuses |
+| `horae schedule <id> [--start TIME] [--end TIME] [--rrule R]` | 排期（可加循环）/ Schedule (+recurrence) |
+| `horae archive <id>` / `horae restore <id>` | 软删除 / 恢复 / Soft delete / restore |
+| `horae tag <id> <name>` / `horae untag <id> <name>` | 增删标签 / Manage tags |
+| `horae export [--file PATH]` | 备份到 JSON（任务/事件/标签/设置/番茄钟）· full backup |
+| `horae import <FILE> [--replace]` | 合并还原；`--replace` 清空后精确还原 · merge / restore |
+| `horae review` | 周回顾 / Weekly review |
+| `horae tags` | 标签库 / List tags |
+| `horae pomo start <id> \| stop \| daemon \| waybar` | 番茄钟 / Pomodoro |
+| `horae alarm waybar [slot] \| next [slot]` | 到期提醒 / Upcoming-task reminders |
 
 ## TUI 快捷键 / Keybindings
 
@@ -111,7 +111,7 @@ Quotes is an **opt-in** feature (off by default; `F7` toggles it, persisted in `
 - **随心记录**：金句视图内按 `a` 输入句子即直接入库（自动 `@quote`）。
 - **自动路由**：任何视图捕获时输入 `@quote`（如 `a灵感 @quote`）→ 直接创建为金句并跳转金句视图。
 - 金句视图内按 `"` = 移出金句（仅摘除标签）。回车/e 编辑、`n` 备注、`T` 打标签、`A` 归档等与普通任务一致。
-- CLI：`gtp capture "…" --tag quote --status reference` 可直接从命令行收藏金句。
+- CLI：`horae capture "…" --tag quote --status reference` 可直接从命令行收藏金句。
 
 ## 时间与循环语法 / Time & recurrence syntax
 
@@ -134,10 +134,10 @@ HH:MM                             当日时刻（已过则视为明日）/ same-
 ## 备份 / Backup
 
 ```sh
-gtp export                 # → gtp-backup-2026-08-15.json（当前目录）
-gtp export --file ~/gtd.json
-gtp import gtp-backup-2026-08-15.json          # 合并：已存在 id 整行跳过
-gtp import --replace ~/gtd.json                # 清空当前数据，精确还原
+horae export                 # → horae-backup-2026-08-15.json（当前目录）
+horae export --file ~/gtd.json
+horae import horae-backup-2026-08-15.json          # 合并：已存在 id 整行跳过
+horae import --replace ~/gtd.json                # 清空当前数据，精确还原
 ```
 
 导出文件是一个自包含 JSON（带格式/版本字段），包含全部任务列、`task_events` 时间线、
@@ -145,18 +145,18 @@ gtp import --replace ~/gtd.json                # 清空当前数据，精确还�
 The backup is one self-contained JSON file — copy it to git/cloud/cron for free
 redundancy. `--replace` is the true restore path; plain `import` merges.
 
-## 手机同步 / Phone sync (`gtp watch`)
+## 手机同步 / Phone sync (`horae watch`)
 
-用 Syncthing（或任意双向同步云盘）把 `~/.config/gtp/sync` 同步到手机，然后在电脑上
-常驻运行 `gtp watch`，即可在手机上采集、查看与完成任务的闭环——零服务器、零 App。
+用 Syncthing（或任意双向同步云盘）把 `~/.config/horae/sync` 同步到手机，然后在电脑上
+常驻运行 `horae watch`，即可在手机上采集、查看与完成任务的闭环——零服务器、零 App。
 
-Bridge the phone–computer gap with Syncthing: sync `~/.config/gtp/sync` to your phone
-and run `gtp watch` on the computer. No server, no app.
+Bridge the phone–computer gap with Syncthing: sync `~/.config/horae/sync` to your phone
+and run `horae watch` on the computer. No server, no app.
 
 ```sh
-gtp watch                  # 常驻对账（systemd/tmux/autostart 后台运行）
-gtp watch --once           # 手动跑一轮
-gtp watch --dir ~/gtd-sync # 自定义同步目录
+horae watch                  # 常驻对账（systemd/tmux/autostart 后台运行）
+horae watch --once           # 手动跑一轮
+horae watch --dir ~/gtd-sync # 自定义同步目录
 ```
 
 文件夹协议 / Folder protocol（手机写 / phone writes，电脑执行 / computer consumes）:
@@ -171,10 +171,10 @@ gtp watch --dir ~/gtd-sync # 自定义同步目录
 
 采集用手机上的任意笔记 App（Obsidian / Markor 等）指向该目录，写一行存盘即采集；
 任务到期提醒仅在电脑开机期间触发——关机时到期，开机后补发。用任一免费 PaaS 部署
-`gtp serve`（中继）可获得真正实时的推送，此为可选升级路径。
+`horae serve`（中继）可获得真正实时的推送，此为可选升级路径。
 
 Capture on the phone with any notes app pointed at this folder. Due reminders only fire
-while the computer is on (catch-up on boot after downtime). A later relay (`gtp serve`)
+while the computer is on (catch-up on boot after downtime). A later relay (`horae serve`)
 on any free PaaS unlocks real-time push — an optional upgrade path.
 
 ## 开发 / Development
