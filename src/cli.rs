@@ -45,7 +45,8 @@ pub enum Command {
         visible_alias = "c",
         group = clap::ArgGroup::new("priority").args(["p1", "p2", "p3"]))]
     Capture {
-        title: String,
+        #[arg(num_args = 1.., help = "Task title (quotes optional)")]
+        title: Vec<String>,
         #[arg(long = "tag", value_name = "TAG", help = "Tag to apply (repeatable)")]
         tag: Vec<String>,
         #[arg(long, help = "Priority 1 (high)")]

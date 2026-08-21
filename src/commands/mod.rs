@@ -37,7 +37,7 @@ fn run_inner(cmd: Command, conn: &Connection, profile: Option<&str>) -> Result<(
         } => capture::run(
             conn,
             capture::CaptureArgs {
-                title,
+                title: title.join(" "),
                 tags: tag,
                 p1,
                 p2,
