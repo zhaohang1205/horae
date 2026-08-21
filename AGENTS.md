@@ -20,7 +20,7 @@ GTD terminal task manager (`gtp`) — a Rust binary (edition 2021, **no lib targ
 - `time.rs` — `parse_time` (human input: `now`, `+2h`, `today`, `2026-07-24 14:30` → UTC ms), self-contained `rrule_occurrences` (no external crate), `format_local`.
 - `parser.rs` — `parse_quick_add`: splits input into `@tag` words and `~time` words.
 - `tui/` — `app.rs`, `handlers.rs` (key handling), `render.rs`, `ui.rs`, `calendar.rs`, `theme.rs` (Catppuccin), `i18n.rs`. **UI strings are Chinese by default and localized via `crate::tr!` / `Lang` (F6 toggles to English, F5 toggles theme); never hardcode UI text.**
-- `config.rs` (TUI): `GTP_CONFIG_DIR` env var overrides `dirs::config_dir()` (used by tests); Settings view (`,` key, side group `[Modules]`) manages profiles in `config.json` — n new / r rename / d delete (confirm) / s set default. The TUI session's `profile_name` is threaded in from `main.rs` via `commands::run`/`tui::run`; profile switching takes effect next launch (the `Connection` is borrowed, no hot-swap).
+- `config.rs` (TUI): `GTP_CONFIG_DIR` env var overrides `dirs::config_dir()` (used by tests); Settings view (`F8` key, side group `[Modules]`) manages profiles in `config.json` — n new / r rename / d delete (confirm) / s set default. The TUI session's `profile_name` is threaded in from `main.rs` via `commands::run`/`tui::run`; profile switching takes effect next launch (the `Connection` is borrowed, no hot-swap).
 
 ## Non-obvious rules (violating these breaks things)
 

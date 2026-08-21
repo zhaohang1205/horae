@@ -310,7 +310,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         heat: 56,
     },
     KeyDef {
-        keys: ",",
+        keys: "F8",
         zh: "设置",
         en: "settings",
         group: KeyGroup::Global,

@@ -433,7 +433,7 @@ impl<'a> App<'a> {
             }
             KeyCode::Char('J') => self.set_view(View::Today),
             KeyCode::Char('K') => self.set_view(View::Tomorrow),
-            KeyCode::Char(',') => self.set_view(View::Settings),
+            KeyCode::F(8) => self.set_view(View::Settings),
             KeyCode::Char('g') => self.move_sel(-10000),
             KeyCode::Char('G') => self.move_sel(10000),
             _ => return Ok(false),

@@ -1705,10 +1705,10 @@ impl<'a> App<'a> {
                 .add_modifier(Modifier::BOLD),
         )));
         for (key, v) in &[
-            ('8', View::Archived),
-            ('9', View::Tags),
-            ('r', View::Review),
-            (',', View::Settings),
+            ("8", View::Archived),
+            ("9", View::Tags),
+            ("r", View::Review),
+            ("F8", View::Settings),
         ] {
             let active = cur == *v;
             let (icon, label) = match v {
@@ -1733,7 +1733,7 @@ impl<'a> App<'a> {
             } else {
                 lines.push(Line::from(vec![
                     Span::styled(
-                        format!("   {} ", key),
+                        format!("   {:>3} ", key),
                         Style::default().fg(self.theme.text_dim),
                     ),
                     Span::raw(format!("{} {}     ", icon, padded_label)),

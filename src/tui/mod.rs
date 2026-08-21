@@ -1257,7 +1257,7 @@ mod tests {
         app.popup = None;
 
         // 进入设置视图：默认 profile 应在列表中
-        app.handle_key(key(',')).unwrap();
+        app.handle_key(kc(KeyCode::F(8))).unwrap();
         assert_eq!(app.view, View::Settings);
         assert!(
             app.items.iter().any(|r| r.id == "default"),
