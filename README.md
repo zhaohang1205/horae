@@ -18,6 +18,7 @@ an append-only `task_events` timeline, giving every task a full audit trail.
 - 循环任务：RRULE 支持 + 快捷简写（`*2w[1,3]`），完成后自动重排 · Recurring tasks auto-reschedule on Done
 - 标签系统：情境标签 + `p1/p2/p3` 优先级，自定义标签自动创建 · Tag system with auto-created custom tags
 - 检查单：一键勾选，全部完成自动重置 · Checklists with one-key tick and auto-reset
+- 金句（可选功能）：随心记录好句子/灵感/知识，一键入库，独立视图管理 · Quotes (opt-in): capture good sentences, ideas & knowledge into a dedicated view
 - 番茄钟专注模式：全屏倒计时环、连击、桌面通知、waybar 模块 · Pomodoro focus mode with progress ring, streaks and a waybar module
 - 中英双语界面（`F6` 切换）、Catppuccin 深/浅主题（`F5` 切换） · Bilingual UI (F6) and Catppuccin themes (F5)
 
@@ -71,11 +72,12 @@ id-prefix, or an exact title.
 | --- | --- |
 | `h` / `l` | 切换面板（引导/列表/详情）· switch pane |
 | `j` / `k` | 上下移动 · move up/down |
-| `1`-`9` | 切换视图（8=归档，9=标签库）· switch view |
+| `0`-`9` | 切换视图（8=归档，9=标签库，0=金句）· switch view |
 | `⇧J` / `⇧K` | 今日 / 明日 · today / tomorrow |
 | `/` | 全局搜索 · global search |
 | `f` | 情境过滤 · tag filter |
 | `a` | 快速捕获（任意视图）· quick capture (any view) |
+| `"` | 加入 / 移出金句（工作态任务自动转参考资料）· add to / remove from quotes |
 | `Space` | 切换选择当前行（非连续多选）· toggle-select current row |
 | `Ctrl+a` / `Ctrl+u` | 全选 / 反选 · select all / invert |
 | `Enter` / `e` | 全量编辑：一句话补全标题 @标签 ~时间 *周期 · full edit (title @tags ~time *rrule) |
@@ -90,8 +92,26 @@ id-prefix, or an exact title.
 | `c` | 标签库视图新增标签 · add tag (Tags view) |
 | `r` / `R` | 周回顾（开始 / 下一步）· weekly review (start/next) |
 | `F5` / `F6` | 主题 / 语言 · theme / language |
+| `F7` | 金句功能开关（默认关闭）· toggle quotes feature (default off) |
 | `F1` 或 `?` | 快捷键帮助 · shortcut help |
 | `q` | 退出 · quit |
+
+## 金句 / Quotes
+
+金句是一个**可选功能**（默认关闭，`F7` 开启，状态持久化到 `settings`）。用于随心收藏好句子、灵感与知识碎片——它们不是任务，不该占用收件箱/今日等行动流。
+
+Quotes is an **opt-in** feature (off by default; `F7` toggles it, persisted in `settings`). It's a notebook for quotes, inspirations and knowledge — not actionable tasks.
+
+**工作方式 / How it works**
+
+- 金句 = 带 `@quote` 系统标签、状态为 `参考资料(reference)` 的任务。A quote is a task tagged `@quote` with status `reference`, so it never surfaces in the inbox/action workflow.
+- **金句只出现在金句视图**：参考资料视图会过滤掉 `@quote` 任务（侧栏徽标同步）；功能关闭后 `@quote` 回归普通标签，这些任务重新出现在参考资料视图。Quotes live **only** in the Quotes view — the Reference view (and its badge) filters out `@quote` tasks; turning the feature off restores them to Reference.
+- `F7` 开启后侧栏出现 `[Library] 0 金句`，按 `0` 进入金句视图（按创建时间倒序，新的在前）。
+- **收件箱 → 金句**：选中条目按 `"`，自动加 `@quote` 并流转为参考资料，离开收件箱（留在当前视图）。
+- **随心记录**：金句视图内按 `a` 输入句子即直接入库（自动 `@quote`）。
+- **自动路由**：任何视图捕获时输入 `@quote`（如 `a灵感 @quote`）→ 直接创建为金句并跳转金句视图。
+- 金句视图内按 `"` = 移出金句（仅摘除标签）。回车/e 编辑、`n` 备注、`T` 打标签、`A` 归档等与普通任务一致。
+- CLI：`gtp capture "…" --tag quote --status reference` 可直接从命令行收藏金句。
 
 ## 时间与循环语法 / Time & recurrence syntax
 

@@ -158,6 +158,7 @@ pub fn parse_rrule_shorthand(s: &str) -> String {
     if lower.starts_with("freq=") {
         return s.to_string();
     }
+
     match lower.as_str() {
         // 单字母简写：`*d` → 每天, `*w` → 每周, `*m` → 每月, `*y` → 每年。
         "d" => return "FREQ=DAILY".to_string(),
@@ -251,6 +252,20 @@ pub fn parse_rrule_shorthand(s: &str) -> String {
 
     // fallback
     s.to_string()
+}
+
+/// 判定一个循环简写/标准 RRULE 是否有效。
+///
+/// 简写能映射成标准 RRULE（非原样 fallback），或已是 `FREQ=` 开头的 RRULE。
+/// 无法被任何分支识别的词（原样 fallback）视为无效。
+pub fn rrule_valid(rrule: &str) -> bool {
+    let trimmed = rrule.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let resolved = parse_rrule_shorthand(trimmed);
+    let looks_like_rrule = resolved.to_lowercase().starts_with("freq=");
+    resolved != trimmed || looks_like_rrule
 }
 
 /// Map a weekday token (name or number) to its two-letter RRULE code.
@@ -501,5 +516,24 @@ mod tests {
         // 无效星期号
         assert_eq!(parse_rrule_shorthand("2w[8]"), "2w[8]");
         assert_eq!(parse_rrule_shorthand("2w[1,x]"), "2w[1,x]");
+    }
+
+    #[test]
+    fn rrule_valid_accepts_known_rejects_garbage() {
+        assert!(rrule_valid("d"));
+        assert!(rrule_valid("w"));
+        assert!(rrule_valid("m"));
+        assert!(rrule_valid("y"));
+        assert!(rrule_valid("2w[1,3]"));
+        assert!(rrule_valid("m[1,15]"));
+        assert!(rrule_valid("weekday"));
+        assert!(rrule_valid("FREQ=DAILY"));
+        assert!(rrule_valid("FREQ=WEEKLY;BYDAY=MO,WE"));
+        assert!(rrule_valid("2d[1,3]") == false);
+        assert!(rrule_valid("2w[8]") == false);
+        assert!(rrule_valid("2w[1,x]") == false);
+        assert!(!rrule_valid("xx"));
+        assert!(!rrule_valid(""));
+        assert!(!rrule_valid("bogus"));
     }
 }

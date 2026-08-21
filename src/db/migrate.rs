@@ -57,6 +57,12 @@ pub fn run(conn: &mut Connection) -> anyhow::Result<()> {
         conn.pragma_update(None, "user_version", 8)?;
     }
 
+    if current_version < 9 {
+        let sql10 = include_str!("../../migrations/0010_seed_quote_tag.sql");
+        conn.execute_batch(sql10)?;
+        conn.pragma_update(None, "user_version", 9)?;
+    }
+
     Ok(())
 }
 
@@ -123,10 +129,34 @@ mod tests {
         let v: i32 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 8, "迁移版本推进到 8");
+        assert_eq!(v, 9, "迁移版本推进到 9");
 
         // 幂等：再次运行不改变任何值
         run(&mut conn).unwrap();
         assert_eq!(rrule_of(&conn, "t-d").as_deref(), Some("FREQ=DAILY"));
+    }
+
+    #[test]
+    fn migration_0010_seeds_quote_tag() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run(&mut conn).unwrap();
+        let (category, is_system): (String, i64) = conn
+            .query_row(
+                "SELECT category, is_system FROM tags WHERE name = 'quote'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(category, "context");
+        assert_eq!(is_system, 1, "quote 是系统标签，不可删除");
+
+        // 幂等：再次运行不重复插入
+        run(&mut conn).unwrap();
+        let c: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tags WHERE name = 'quote'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(c, 1);
     }
 }

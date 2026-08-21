@@ -51,6 +51,7 @@ pub(crate) fn view_label(lang: crate::i18n::Lang, v: View) -> &'static str {
         View::Review => crate::tr!(lang, "周回顾", "Review"),
         View::Archived => crate::tr!(lang, "归档箱", "Archived"),
         View::Tags => crate::tr!(lang, "标签库", "Tags"),
+        View::Quotes => crate::tr!(lang, "金句", "Quotes"),
     }
 }
 
@@ -1095,9 +1096,172 @@ mod tests {
     }
 
     #[test]
+    fn quotes_feature_toggle_and_shortcut() {
+        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        let t = tasks::create_capture(
+            &conn,
+            &CaptureInput {
+                title: "好的句子".into(),
+                status: task::Status::Inbox,
+                tag_names: vec![],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let mut app = App::new(&conn).unwrap();
+        app.popup = None;
+        // 默认关闭
+        assert!(!app.quotes_enabled, "金句功能默认关闭");
+        // 功能未启用：0 键与 " 键均无效
+        app.handle_key(key('0')).unwrap();
+        assert_eq!(app.view, View::Inbox, "未启用时 0 不切视图");
+        app.handle_key(key('"')).unwrap();
+        let tags = crate::repo::tags::get_task_tags(&conn, &t.id).unwrap();
+        assert!(tags.is_empty(), "未启用时 \" 不生效");
+
+        // F7 启用 + 持久化
+        app.handle_key(kc(KeyCode::F(7))).unwrap();
+        assert!(app.quotes_enabled, "F7 启用金句功能");
+        assert_eq!(
+            crate::repo::settings::get(&conn, "quotes")
+                .unwrap()
+                .as_deref(),
+            Some("1"),
+            "启用状态写入 settings"
+        );
+        // 侧栏出现 [Library] 金句分组
+        let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
+        term.draw(|f| app.render(f)).unwrap();
+        let s = norm(&snap(&term));
+        assert!(s.contains("金句"), "启用后侧栏显示金句分组");
+
+        // 0 → 金句视图（空）
+        app.handle_key(key('0')).unwrap();
+        assert_eq!(app.view, View::Quotes, "0 切换到金句视图");
+        assert!(app.items.is_empty(), "金句视图初始为空");
+
+        // 收件箱 → 金句：加 @quote + 流转 reference，离开收件箱，留在当前视图
+        app.handle_key(key('1')).unwrap();
+        app.selected = 0;
+        app.load_detail();
+        app.handle_key(key('"')).unwrap();
+        assert_eq!(app.view, View::Inbox, "快捷键留在当前视图");
+        let st = tasks::get(&conn, &t.id).unwrap();
+        assert_eq!(
+            st.status,
+            task::Status::Reference,
+            "移入金句后流转为 reference"
+        );
+        let tags = crate::repo::tags::get_task_tags(&conn, &t.id).unwrap();
+        assert!(
+            tags.iter().any(|g| g.name == crate::repo::tasks::QUOTE_TAG),
+            "移入金句后带有 @quote"
+        );
+        assert!(
+            app.items.iter().all(|r| r.id != t.id),
+            "移入金句后收件箱不再显示该任务"
+        );
+
+        // 金句仅在金句视图：Reference 视图与徽标排除 @quote
+        app.handle_key(key('6')).unwrap();
+        assert!(
+            app.items.iter().all(|r| r.id != t.id),
+            "Reference 视图不含金句"
+        );
+        assert_eq!(
+            app.context_count(View::Reference),
+            0,
+            "Reference 徽标排除金句"
+        );
+
+        // 金句视图内看到它，且按 " 移出（摘除标签）
+        app.handle_key(key('0')).unwrap();
+        assert!(
+            app.items.iter().any(|r| r.id == t.id),
+            "金句视图显示移入的金句"
+        );
+        app.handle_key(key('"')).unwrap();
+        let tags = crate::repo::tags::get_task_tags(&conn, &t.id).unwrap();
+        assert!(
+            tags.iter().all(|g| g.name != crate::repo::tasks::QUOTE_TAG),
+            "金句视图按 \" 移出金句"
+        );
+        assert!(app.items.is_empty(), "移出后金句视图为空");
+
+        // 金句视图内 a + @quote 直接入库，自动进入金句视图
+        app.handle_key(key('a')).unwrap();
+        assert_eq!(app.mode, Mode::Capturing);
+        for c in "灵感: 知行合一 @quote".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(kc(KeyCode::Enter)).unwrap();
+        assert_eq!(app.view, View::Quotes, "捕获 @quote 后自动进入金句视图");
+        let q = tasks::list_quotes(&conn, None, None).unwrap();
+        assert_eq!(q.len(), 1, "仅一条金句");
+        assert_eq!(q[0].status, task::Status::Reference);
+        assert_eq!(q[0].title, "灵感: 知行合一");
+
+        // 启用后视图环尾接金句
+        app.view = View::Review;
+        app.next_view(1);
+        assert_eq!(app.view, View::Quotes, "启用后环尾接金句");
+
+        // 重启恢复启用状态
+        drop(app);
+        let mut app = App::new(&conn).unwrap();
+        app.popup = None;
+        assert!(app.quotes_enabled, "重启后恢复启用");
+
+        // F7 停用：若在金句视图则跳回收件箱
+        app.handle_key(key('0')).unwrap();
+        app.handle_key(kc(KeyCode::F(7))).unwrap();
+        assert!(!app.quotes_enabled);
+        assert_eq!(app.view, View::Inbox, "停用时离开金句视图");
+        assert_eq!(
+            crate::repo::settings::get(&conn, "quotes")
+                .unwrap()
+                .as_deref(),
+            Some("0"),
+            "停用状态写入 settings"
+        );
+    }
+
+    #[test]
+    fn quote_tag_is_plain_when_feature_off() {
+        // 回归：功能关闭时 @quote 只是普通标签，参考资料视图照常显示。
+        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        let q = tasks::create_capture(
+            &conn,
+            &CaptureInput {
+                title: "普通引用".into(),
+                status: task::Status::Reference,
+                tag_names: vec![crate::repo::tasks::QUOTE_TAG.to_string()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut app = App::new(&conn).unwrap();
+        app.popup = None;
+        app.handle_key(key('6')).unwrap(); // Reference 视图
+        assert!(
+            app.items.iter().any(|r| r.id == q.id),
+            "功能关闭时 Reference 视图显示 @quote 任务"
+        );
+        assert_eq!(app.context_count(View::Reference), 1, "徽标计入");
+    }
+
+    #[test]
     fn key_table_respects_view_selection_and_mode() {
         use crate::i18n::Lang;
-        use crate::tui::keys::{status_strip, strip_keys, Ctx, KEY_TABLE, NON_TASK_VIEWS};
+        use crate::tui::keys::{
+            help_rows, status_strip, strip_keys, Ctx, KeyGroup, GROUP_ORDER, KEY_TABLE,
+            NON_TASK_VIEWS,
+        };
 
         let ctx = |v: View, sel: bool| Ctx {
             view: v,
@@ -1105,6 +1269,9 @@ mod tests {
             has_selection: sel,
             is_reviewing: false,
             pomo_active: false,
+            task_status: Some(task::Status::Inbox),
+            has_checklist: false,
+            quotes_enabled: false,
         };
         let keys = |v: View, sel: bool| strip_keys(&ctx(v, sel), Lang::Zh);
 
@@ -1122,8 +1289,97 @@ mod tests {
             !inbox_sel.iter().any(|(k, _)| *k == "q"),
             "全局退出键不进动态条"
         );
-        // 空 Inbox 无任务操作 → 动态条为空（渲染层隐藏整块）
-        assert!(keys(View::Inbox, false).is_empty(), "无选中→任务操作条为空");
+        // 空 Inbox 无任务操作 → 动态条只含捕获键 a（渲染层仍显示该条）
+        let inbox_empty = keys(View::Inbox, false);
+        assert!(
+            !inbox_empty.iter().any(|(k, _)| *k == "Enter"),
+            "无选中→不含任务操作键"
+        );
+        assert!(
+            inbox_empty.iter().any(|(k, _)| *k == "a"),
+            "无选中也提示捕获 a"
+        );
+        // 捕获键 a 在所有视图（含 Tags/Archived/Review）常驻提示
+        for v in [
+            View::Inbox,
+            View::Next,
+            View::Today,
+            View::Archived,
+            View::Tags,
+            View::Review,
+        ] {
+            assert!(
+                keys(v, true).iter().any(|(k, _)| *k == "a"),
+                "{:?} 视图含捕获 a",
+                v
+            );
+        }
+
+        // 任务状态驱动：x/w/s 对已完成任务不提示，w 对等待中不提示，s 对将来不提示
+        let done_ctx = Ctx {
+            task_status: Some(task::Status::Done),
+            ..ctx(View::Inbox, true)
+        };
+        let done_keys = strip_keys(&done_ctx, Lang::Zh);
+        assert!(!done_keys.iter().any(|(k, _)| *k == "x"), "Done→不含 x");
+        assert!(!done_keys.iter().any(|(k, _)| *k == "w"), "Done→不含 w");
+        assert!(!done_keys.iter().any(|(k, _)| *k == "s"), "Done→不含 s");
+        let waiting_keys = strip_keys(
+            &Ctx {
+                task_status: Some(task::Status::Waiting),
+                ..ctx(View::Inbox, true)
+            },
+            Lang::Zh,
+        );
+        assert!(
+            waiting_keys.iter().any(|(k, _)| *k == "x"),
+            "Waiting→仍含 x"
+        );
+        assert!(
+            !waiting_keys.iter().any(|(k, _)| *k == "w"),
+            "Waiting→不含 w"
+        );
+        let someday_keys = strip_keys(
+            &Ctx {
+                task_status: Some(task::Status::Someday),
+                ..ctx(View::Inbox, true)
+            },
+            Lang::Zh,
+        );
+        assert!(
+            !someday_keys.iter().any(|(k, _)| *k == "s"),
+            "Someday→不含 s"
+        );
+
+        // 检查单：仅当活动任务含检查单才提示 =
+        assert!(!inbox_sel.iter().any(|(k, _)| *k == "="), "无检查单→不含 =");
+        let chk_keys = strip_keys(
+            &Ctx {
+                has_checklist: true,
+                ..ctx(View::Inbox, true)
+            },
+            Lang::Zh,
+        );
+        assert!(chk_keys.iter().any(|(k, _)| *k == "="), "含检查单→含 =");
+
+        // 引导栏键按热度降序
+        let heats = |vs: &[(&'static str, &'static str)]| {
+            vs.iter()
+                .map(|(k, d)| {
+                    KEY_TABLE
+                        .iter()
+                        .find(|def| def.keys == *k && def.zh == *d)
+                        .map(|def| def.heat)
+                        .unwrap_or_else(|| panic!("找不到 {} ({})", k, d))
+                })
+                .collect::<Vec<_>>()
+        };
+        let h = heats(&inbox_sel);
+        assert!(
+            h.windows(2).all(|w| w[0] >= w[1]),
+            "引导栏按热度降序: {:?}",
+            inbox_sel
+        );
 
         // 归档箱：u/D 需要选中；v（多选）是全局键，空选也可提示
         let arch_no_sel = keys(View::Archived, false);
@@ -1180,19 +1436,83 @@ mod tests {
             "确认模式→含 y/Enter"
         );
 
+        // 金句：默认关闭 → " 不出现；启用 + 选中任务 → " 加入金句；
+        // 金句视图选中 → " 变为"移出金句"
+        let quotes_off = keys(View::Inbox, true);
+        assert!(
+            !quotes_off.iter().any(|(k, _)| *k == "\""),
+            "关闭时动态条不含金句键"
+        );
+        let quotes_on = strip_keys(
+            &Ctx {
+                quotes_enabled: true,
+                ..ctx(View::Inbox, true)
+            },
+            Lang::Zh,
+        );
+        let add_q = quotes_on.iter().find(|(k, _)| *k == "\"").unwrap();
+        assert_eq!(add_q.1, "加入金句");
+        let quotes_view = strip_keys(
+            &Ctx {
+                quotes_enabled: true,
+                ..ctx(View::Quotes, true)
+            },
+            Lang::Zh,
+        );
+        let rm_q = quotes_view.iter().find(|(k, _)| *k == "\"").unwrap();
+        assert_eq!(rm_q.1, "移出金句");
+
         // 状态栏全局条：含压缩后的 hjkl 与捕获/退出，不含低频键 g/G 与视图键
         let strip = status_strip(Lang::Zh);
         assert!(strip.iter().any(|(k, _)| *k == "hjkl"), "全局条含 hjkl");
         assert!(strip.iter().any(|(k, _)| *k == "q"), "全局条含 q");
         assert!(!strip.iter().any(|(k, _)| *k == "g/G"), "全局条不含 g/G");
-        assert!(!strip.iter().any(|(k, _)| *k == "1-9"), "全局条不含视图键");
+        assert!(!strip.iter().any(|(k, _)| *k == "0-9"), "全局条不含视图键");
+        assert!(
+            strip.iter().any(|(k, _)| *k == "F7"),
+            "全局条含 F7 金句开关"
+        );
+        // 状态栏全局条按热度降序
+        assert!(
+            heats(&strip).windows(2).all(|w| w[0] >= w[1]),
+            "全局条按热度降序: {:?}",
+            strip
+        );
 
-        // 表不变量：每条都有键与双语描述；NON_TASK_VIEWS 恰好是 Tags/Archived
+        // F1 面板：分组顺序全局→任务，组内按热度降序
+        let rows = help_rows(&ctx(View::Inbox, true), Lang::Zh);
+        let groups: Vec<KeyGroup> = rows.iter().map(|(g, _, _, _)| *g).collect();
+        let mut seen_task = false;
+        for g in &groups {
+            assert!(
+                !(seen_task && *g == KeyGroup::Global),
+                "全局组必须在任务组之前"
+            );
+            if *g == KeyGroup::Task {
+                seen_task = true;
+            }
+        }
+        for g in GROUP_ORDER {
+            let sub: Vec<(&'static str, &'static str)> = rows
+                .iter()
+                .filter(|(rg, _, _, _)| *rg == g)
+                .map(|(_, k, d, _)| (*k, *d))
+                .collect();
+            let gh = heats(&sub);
+            assert!(
+                gh.windows(2).all(|w| w[0] >= w[1]),
+                "F1 组内按热度降序: {:?}",
+                sub
+            );
+        }
+
+        // 表不变量：每条都有键与双语描述与热度；NON_TASK_VIEWS 恰好是 Tags/Archived
         assert!(!KEY_TABLE.is_empty());
         for k in KEY_TABLE {
             assert!(!k.keys.is_empty());
             assert!(!k.zh.is_empty());
             assert!(!k.en.is_empty());
+            assert!(k.heat > 0, "{} 必须有热度", k.keys);
         }
         assert_eq!(NON_TASK_VIEWS, &[View::Tags, View::Archived]);
     }
@@ -1740,25 +2060,58 @@ mod tests {
         app.handle_key(key('a')).unwrap();
         assert_eq!(app.mode, Mode::Capturing);
 
-        // 光标在末尾补全：输入 "buy " 后 @ho，再 Tab → @home。
-        for c in "buy ".chars() {
+        // 实时弹出：输入 @ho 无需按 Tab 即出现候选（唯一 home），输入保持 @ho，ghost=me。
+        for c in "buy @ho".chars() {
             app.handle_key(key(c)).unwrap();
         }
-        for c in "@ho".chars() {
-            app.handle_key(key(c)).unwrap();
-        }
-        app.handle_key(kc(KeyCode::Tab)).unwrap();
-        assert!(app.input.contains("@home"), "末尾补全 @home: {}", app.input);
-        let before = &app.input[..app.input_cursor];
-        assert!(before.ends_with("@home "), "光标在补全后: {before}");
+        assert!(app.completion_active(), "输入 @ho 即激活候选");
+        assert_eq!(app.input, "buy @ho", "ghost 模式不改输入");
+        let ghost = app.completion_ghost().unwrap();
+        assert_eq!(ghost.0, '@');
+        assert_eq!(ghost.1, "ho", "typed=ho");
+        assert_eq!(ghost.2, "me", "ghost=me");
 
-        // 光标在中间时，Tab 补全光标所在词：把光标移回 "@ho" 词尾再补全。
+        // Tab 接受候选：补齐完整 token + 追加空格。
+        app.handle_key(kc(KeyCode::Tab)).unwrap();
+        assert_eq!(
+            app.input, "buy @home ",
+            "接受候选补齐并加空格: {}",
+            app.input
+        );
+        assert_eq!(app.mode, Mode::Capturing, "接受不退出编辑");
+        assert!(!app.completion_active(), "接受后关闭候选");
+
+        // 多候选：*w 有 w/weekday/weekend，用 ↑↓ 与 Ctrl+n/p 循环，Esc 取消。
+        app.input.clear();
+        app.input_cursor = 0;
+        for c in "*w".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        assert!(app.completion_active(), "*w 实时激活候选");
+        assert_eq!(app.input, "*w", "首候选 w 以 ghost 显示");
+        app.handle_key(kc(KeyCode::Down)).unwrap();
+        assert_eq!(app.input, "*weekday", "Down 切到 weekday: {}", app.input);
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL))
+            .unwrap();
+        assert_eq!(app.input, "*weekend", "Ctrl+n 切到 weekend: {}", app.input);
+        app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL))
+            .unwrap();
+        assert_eq!(app.input, "*weekday", "Ctrl+p 切回 weekday: {}", app.input);
+        app.handle_key(kc(KeyCode::Up)).unwrap();
+        assert_eq!(app.input, "*w", "Up 回到首候选: {}", app.input);
+        app.handle_key(kc(KeyCode::Down)).unwrap();
+        assert_eq!(app.input, "*weekday", "Down 再切: {}", app.input);
+        app.handle_key(kc(KeyCode::Esc)).unwrap();
+        assert!(!app.completion_active(), "Esc 取消候选");
+        assert_eq!(app.input, "*weekday", "取消保留当前输入");
+        assert_eq!(app.mode, Mode::Capturing, "取消不退出编辑");
+
+        // 光标在中间时：Tab 补全光标所在词。
         app.input.clear();
         app.input_cursor = 0;
         for c in "buy @ho milk".chars() {
             app.handle_key(key(c)).unwrap();
         }
-        // 光标回到行首后右移：经过 "buy " 和 "@ho"（按字符推进）。
         app.handle_key(kc(KeyCode::Home)).unwrap();
         for _ in "buy ".chars() {
             app.handle_key(kc(KeyCode::Right)).unwrap();
@@ -1768,6 +2121,85 @@ mod tests {
         }
         app.handle_key(kc(KeyCode::Tab)).unwrap();
         assert!(app.input.contains("@home"), "光标所在词补全: {}", app.input);
+    }
+
+    #[test]
+    fn completion_extends_to_time_and_rrule() {
+        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        let mut app = App::new(&conn).unwrap();
+
+        app.handle_key(key('a')).unwrap();
+
+        // ~t → ghost today；Tab 采纳。
+        for c in "~t".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        assert!(app.completion_active(), "~t 实时激活候选");
+        let ghost = app.completion_ghost().unwrap();
+        assert_eq!(ghost.0, '~');
+        assert_eq!(ghost.2, "oday", "ghost=oday");
+        app.handle_key(kc(KeyCode::Tab)).unwrap();
+        assert!(
+            app.input.contains("~today"),
+            "~t 采纳为 ~today: {}",
+            app.input
+        );
+
+        // *we → ghost weekday
+        app.input.clear();
+        app.input_cursor = 0;
+        for c in "*we".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        assert!(app.completion_active(), "*we 实时激活候选");
+        let ghost = app.completion_ghost().unwrap();
+        assert_eq!(ghost.2, "ekday", "ghost=ekday");
+    }
+
+    #[test]
+    fn capture_rejects_invalid_rrule_and_preserves_input() {
+        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        let mut app = App::new(&conn).unwrap();
+
+        app.handle_key(key('a')).unwrap();
+        assert_eq!(app.mode, Mode::Capturing);
+
+        // 无效循环：提交被拦截，输入保留、仍处编辑模式。
+        for c in "买牛奶 *xx".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        let kept = app.input.clone();
+        app.handle_key(kc(KeyCode::Enter)).unwrap();
+        assert_eq!(app.mode, Mode::Capturing, "无效循环不退出编辑");
+        assert_eq!(app.input, kept, "无效循环保留输入");
+        assert!(
+            app.status_message.contains("循环无效"),
+            "提示循环无效: {}",
+            app.status_message
+        );
+
+        // 无任务被创建。
+        let filter = crate::repo::tasks::ListFilter {
+            status: None,
+            tags: vec![],
+            query: None,
+            review_stale: false,
+        };
+        assert_eq!(tasks::list(&conn, &filter).unwrap().len(), 0);
+
+        // 修正为有效循环后可提交。
+        app.input.clear();
+        app.input_cursor = 0;
+        for c in "买牛奶 *d".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(kc(KeyCode::Enter)).unwrap();
+        assert_eq!(app.mode, Mode::Normal, "有效循环提交成功");
+        assert_eq!(tasks::list(&conn, &filter).unwrap().len(), 1);
     }
 
     #[test]

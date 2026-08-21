@@ -410,7 +410,6 @@ impl<'a> AppRender for App<'a> {
     }
 
     fn render_detail(&mut self, f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
-        f.render_widget(ratatui::widgets::Clear, area);
         let border_color = if self.pane == Pane::Right {
             self.theme.accent
         } else {
@@ -425,23 +424,16 @@ impl<'a> AppRender for App<'a> {
 
         match &self.detail {
             None => {
-                let empty_para = Paragraph::new(crate::tr!(
-                    self.lang,
-                    "\n\n󰋔\n\n未选中任务",
-                    "\n\n󰋔\n\nNo task selected"
-                ))
-                .alignment(Alignment::Center)
-                .style(
-                    Style::default()
-                        .fg(self.theme.text_dim)
-                        .add_modifier(Modifier::ITALIC),
-                )
-                .block(block);
+                let empty_para =
+                    Paragraph::new(crate::tr!(self.lang, " 未选中任务", " No task selected"))
+                        .style(Style::default().fg(self.theme.text_dim))
+                        .block(block);
                 f.render_widget(empty_para, area);
             }
             Some(d) => {
                 let lines = self.detail_lines(d, area.width);
                 let para = Paragraph::new(lines)
+                    .style(Style::default().fg(self.theme.fg))
                     .block(block)
                     .wrap(ratatui::widgets::Wrap { trim: false });
                 f.render_widget(para, area);
@@ -613,7 +605,7 @@ impl<'a> App<'a> {
         main_area
     }
 
-    /// 状态栏（单行）：[MODE][视图] + 内容区(消息 / F2 提示 / 全局条) | [gtp]。
+    /// 状态栏（单行）：[MODE] + 内容区(消息 / F2 提示 / 全局条) | [gtp]。
     fn render_status_bar(&mut self, f: &mut Frame, area: Rect) {
         let mode_str = match self.mode {
             Mode::Normal => " NORMAL ",
@@ -686,22 +678,13 @@ impl<'a> App<'a> {
             }
         }
 
-        let mut status_spans = vec![
-            Span::styled(
-                mode_str,
-                Style::default()
-                    .fg(mode_fg)
-                    .bg(mode_bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!(" {} ", super::view_label(self.lang, self.view)),
-                Style::default()
-                    .fg(self.theme.fg)
-                    .bg(self.theme.status_bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ];
+        let mut status_spans = vec![Span::styled(
+            mode_str,
+            Style::default()
+                .fg(mode_fg)
+                .bg(mode_bg)
+                .add_modifier(Modifier::BOLD),
+        )];
         status_spans.extend(content_spans);
         f.render_widget(
             Paragraph::new(Line::from(status_spans))
@@ -737,6 +720,12 @@ impl<'a> App<'a> {
                         self.lang,
                         " 组织: 编辑 标题 @标签 ~时间 *周期 (空/Esc 跳过) ",
                         " Organize: edit title @tags ~time *rrule (empty/Esc to skip) "
+                    )
+                } else if self.view == View::Quotes && self.quotes_enabled {
+                    crate::tr!(
+                        self.lang,
+                        " 快速录入金句 (自动 @quote 入库, 支持 @标签 及 Tab 补全) ",
+                        " Quick capture quote (auto @quote, @tag and Tab to complete) "
                     )
                 } else {
                     crate::tr!(
@@ -782,11 +771,22 @@ impl<'a> App<'a> {
         let width = if self.mode == Mode::Capturing { 70 } else { 50 };
 
         // 输入行（首行）：快速录入带语法高亮，其余为纯文本行。行首固定一个空格。
-        let input_line_display = if self.mode == Mode::Capturing {
+        let mut input_line_display = if self.mode == Mode::Capturing {
             self.capture_input_line()
         } else {
             Line::from(format!(" {}", self.input))
         };
+        // ghost 建议：当前候选尚未输入的部分，以灰字追加在光标后。
+        if self.completion_active() {
+            if let Some((_, _, ghost)) = self.completion_ghost() {
+                if !ghost.is_empty() {
+                    input_line_display.spans.push(Span::styled(
+                        ghost,
+                        Style::default().fg(self.theme.text_dim),
+                    ));
+                }
+            }
+        }
 
         if self.mode == Mode::Capturing {
             text_lines.push(input_line_display);
@@ -848,10 +848,83 @@ impl<'a> App<'a> {
             area,
         );
 
+        // 补全候选下拉层：独立渲染在输入框下方，不抬高输入框本身。
+        if !self.completion_candidates.is_empty() {
+            self.render_completion_dropdown(f, area);
+        }
+
         // 真实终端插入光标：定位到输入行，框内第一列 = area.x + 1(边框) + 1(内边距)。
         let cursor_x = area.x + 2 + (cursor_col.saturating_sub(scroll_x as usize)) as u16;
         let cursor_y = area.y + 1;
         f.set_cursor_position((cursor_x, cursor_y));
+    }
+
+    /// 补全候选下拉层：紧贴输入框下方渲染，当前候选反色高亮。
+    /// 时间候选附解析结果、循环候选附展开 RRULE 作说明。
+    fn render_completion_dropdown(&mut self, f: &mut Frame, input_area: Rect) {
+        let prefix = self.completion_prefix;
+        let candidates = self.completion_candidates.clone();
+        let idx = self.completion_index;
+
+        let mut lines: Vec<Line> = Vec::new();
+        for (i, c) in candidates.iter().enumerate() {
+            let label = format!(" {}{} ", prefix, c);
+            let desc = match prefix {
+                '~' => time::parse_time(c)
+                    .ok()
+                    .map(|ms| time::format_local(Some(ms)))
+                    .unwrap_or_default(),
+                '*' => crate::parser::parse_rrule_shorthand(c),
+                _ => String::new(),
+            };
+            let is_sel = i == idx;
+            let key_style = if is_sel {
+                Style::default()
+                    .fg(self.theme.bg)
+                    .bg(self.theme.accent)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(self.theme.fg)
+            };
+            let mut spans = vec![Span::styled(
+                if is_sel {
+                    format!("❯{} ", label)
+                } else {
+                    format!("  {} ", label)
+                },
+                key_style,
+            )];
+            if !desc.is_empty() {
+                spans.push(Span::styled(desc, Style::default().fg(self.theme.text_dim)));
+            }
+            lines.push(Line::from(spans));
+        }
+
+        let width = input_area.width.max(30);
+        let height = lines.len() as u16 + 2;
+        let x = input_area.x;
+        let y = input_area.y + input_area.height;
+        let dd = Rect {
+            x,
+            y,
+            width,
+            height,
+        };
+        if dd.y + dd.height > f.area().height {
+            return; // 底部空间不足则不渲染，避免越界
+        }
+        f.render_widget(ratatui::widgets::Clear, dd);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_set(border::ROUNDED)
+            .padding(ratatui::widgets::Padding::horizontal(1))
+            .border_style(Style::default().fg(self.theme.accent))
+            .title(crate::tr!(
+                self.lang,
+                " 补全 (↑↓/Tab 选择 · Enter 选中 · Esc 取消) ",
+                " Complete (↑↓/Tab pick · Enter select · Esc cancel) "
+            ));
+        f.render_widget(Paragraph::new(lines).block(block), dd);
     }
 
     /// 批量操作确认弹层：归档 / 永久删除的居中醒目确认框。
@@ -954,9 +1027,10 @@ impl<'a> App<'a> {
             text_lines.push(Line::from(spans));
         }
         if let Some(ref ts) = parsed.time_str {
-            let (resolved_text, resolved_style) = match time::parse_time(ts) {
+            let parsed_ms = time::parse_time(ts);
+            let (resolved_text, resolved_style) = match &parsed_ms {
                 Ok(ms) => (
-                    time::format_local(Some(ms)),
+                    time::format_local(Some(*ms)),
                     Style::default().fg(self.theme.text_dim),
                 ),
                 Err(_) => (
@@ -971,7 +1045,11 @@ impl<'a> App<'a> {
                 ),
                 Span::styled(
                     format!("~{}", ts),
-                    Style::default().fg(self.theme.text_success),
+                    if parsed_ms.is_ok() {
+                        Style::default().fg(self.theme.text_success)
+                    } else {
+                        Style::default().fg(self.theme.text_urgent)
+                    },
                 ),
                 Span::raw(" → "),
                 Span::styled(resolved_text, resolved_style),
@@ -983,7 +1061,16 @@ impl<'a> App<'a> {
             .find(|t| t.kind == QuickAddKind::Rrule)
             .map(|t| t.text[1..].to_string())
         {
+            let valid = crate::parser::rrule_valid(&raw);
             let resolved = parse_rrule_shorthand(&raw);
+            let (resolved_text, resolved_style) = if valid {
+                (resolved, Style::default().fg(self.theme.text_dim))
+            } else {
+                (
+                    crate::tr!(self.lang, "[无效循环]", "[invalid rrule]").to_string(),
+                    Style::default().fg(self.theme.text_urgent),
+                )
+            };
             text_lines.push(Line::from(vec![
                 Span::styled(
                     crate::tr!(self.lang, " 循环: ", " Rrule: "),
@@ -991,10 +1078,14 @@ impl<'a> App<'a> {
                 ),
                 Span::styled(
                     format!("*{}", raw),
-                    Style::default().fg(self.theme.rrule_fg),
+                    if valid {
+                        Style::default().fg(self.theme.rrule_fg)
+                    } else {
+                        Style::default().fg(self.theme.text_urgent)
+                    },
                 ),
                 Span::raw(" → "),
-                Span::styled(resolved, Style::default().fg(self.theme.text_dim)),
+                Span::styled(resolved_text, resolved_style),
             ]));
         }
         if let Some(p) = &parsed.priority {
@@ -1537,6 +1628,7 @@ impl<'a> App<'a> {
                     View::Review => ("", super::view_label(self.lang, View::Review)),
                     View::Archived => ("", super::view_label(self.lang, View::Archived)),
                     View::Tags => ("", super::view_label(self.lang, View::Tags)),
+                    View::Quotes => ("", super::view_label(self.lang, View::Quotes)),
                 };
                 let padded_label = pad_right(label, 10);
 
@@ -1620,6 +1712,46 @@ impl<'a> App<'a> {
         }
         if spacious {
             lines.push(Line::from(""));
+        }
+
+        // 金句库：默认隐藏，F7 启用后出现（与 [Modules] 同一视觉风格）。
+        if self.quotes_enabled {
+            lines.push(Line::from(Span::styled(
+                "  [Library]",
+                Style::default()
+                    .fg(self.theme.text_dim)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            let active = cur == View::Quotes;
+            let padded_label = pad_right(super::view_label(self.lang, View::Quotes), 10);
+            if active {
+                let mut style = Style::default()
+                    .fg(self.theme.accent)
+                    .add_modifier(Modifier::BOLD);
+                if is_left_pane {
+                    style = style.add_modifier(Modifier::REVERSED);
+                }
+                lines.push(Line::from(Span::styled(
+                    format!(
+                        " 󰄾 0  {} {:>3} ",
+                        padded_label,
+                        self.context_count(View::Quotes)
+                    ),
+                    style,
+                )));
+            } else {
+                lines.push(Line::from(vec![
+                    Span::styled("   0 ", Style::default().fg(self.theme.text_dim)),
+                    Span::raw(format!(
+                        " {} {:>3} ",
+                        padded_label,
+                        self.context_count(View::Quotes)
+                    )),
+                ]));
+            }
+            if spacious {
+                lines.push(Line::from(""));
+            }
         }
 
         // 动态快捷键：按当前视图/选择态/模式过滤，并严格按剩余行数截断。

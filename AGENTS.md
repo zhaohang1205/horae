@@ -23,7 +23,7 @@ GTD terminal task manager (`gtp`) — a Rust binary (edition 2021, **no lib targ
 ## Non-obvious rules (violating these breaks things)
 
 - **Timestamps**: store UTC ms INTEGER, never formatted strings. All time math goes through `time.rs`; display via `format_local`.
-- **Migrations**: never edit existing `migrations/*.sql`. Add a new file plus a new version block in `migrate.rs` (currently v1 = 0001+0002, v2 = +0003, v3 = +0004, v4 = +0005, v5 = +0006). Migration SQL is idempotent (IF NOT EXISTS / INSERT OR IGNORE).
+- **Migrations**: never edit existing `migrations/*.sql`. Add a new file plus a new version block in `migrate.rs` (currently v1 = 0001+0002, v2 = +0003, v3 = +0004, v4 = +0005, v5 = +0006, v6 = +0007, v7 = +0008, v8 = +0009, v9 = +0010). Migration SQL is idempotent (IF NOT EXISTS / INSERT OR IGNORE).
 - **New event types**: add a const in `model/event.rs` AND keep the `task_events` comment in `migrations/0001_init.sql` in sync.
 - **DB paths**: `~/.config/gtp/gtp.db` and `~/.config/gtp/pomo.json` both derive from `dirs::config_dir()` — never hardcode.
 - **ID resolution**: commands accept a task id, a unique id-prefix, or an exact title (`resolve_project`).
@@ -33,6 +33,7 @@ GTD terminal task manager (`gtp`) — a Rust binary (edition 2021, **no lib targ
 - **Status lifecycle**: `Inbox → Next / Scheduled / Waiting / Someday / Reference → Done`; `transition` in `repo/tasks.rs` sets the matching `*_at` timestamp.
 - **Pomodoro**: `pomo start` spawns a background `gtp pomo daemon` (ticks every second, writes `pomo.json`, sends `notify-send`). `pomo waybar` emits JSON for a waybar module. `kill_daemon` (pomo.rs) deliberately waits for the old process to exit — concurrent daemons corrupt `pomo.json`; don't "optimize" that away.
 - **Tags**: system presets seeded in migrations (`home`, `work`, `learning`, `errands`, `calls`, `computer`, `quick`, `focus`; priorities `p1`/`p2`/`p3`). Custom tags auto-create on first use (`find_or_create_tag`).
+- **金句 (Quotes) feature**: a quote is a task tagged `@quote` (system tag, seeded in `0010`) with status `reference`, so it never surfaces in the inbox/action workflow. The Quotes view (`0` key, sidebar `[Library]`) lists them via `repo/tasks::list_quotes` (newest first; display due = `created_at`). **Quotes live only in the Quotes view**: when the feature is enabled, the Reference view and its sidebar badge exclude `@quote` tasks (`tasks::quote_task_ids` + `count_quotes_in_status`); when disabled, `@quote` is a plain tag again. Feature is gated by settings key `quotes` (`"1"`/`"0"`, TUI `F7` toggle, default off) — gate the `0` digit, the `"` shortcut, the sidebar group, and the `KeyDef`s on `app.quotes_enabled`. `"` toggles the tag in/out (work-status tasks are transitioned to `reference` when quoted); capturing with `@quote` in the input auto-creates as reference and jumps to the Quotes view. See `QUOTE_TAG` in `repo/tasks.rs`.
 
 ## Errors
 

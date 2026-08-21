@@ -5,9 +5,11 @@
 //! - 每一条 `KeyDef` 描述一个按键在某个上下文里的含义（含视图/选择/周回顾/番茄钟约束）。
 //! - 同一个物理键可有多个 `KeyDef`（如 `a` 在 Tags 视图=新增标签，其余=捕获任务）。
 //! - `hjkl` 压缩为一条，等价于上下左右方向键。
+//! - 每条带 `heat`（预设热度）：引导栏 / 状态栏 / F1 面板统一按热度降序展示。
 
 use super::app::{Mode, View};
 use crate::i18n::Lang;
+use crate::model::task::Status;
 
 /// 快捷键分区：`Global` 显示在状态栏（或仅 F1 参考），`Task` 显示在引导栏动态条。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -42,14 +44,41 @@ pub(crate) enum When {
     ViewSel(View),
     /// 仅周回顾进行中。
     Reviewing,
-    /// 番茄钟活动时。
+    /// 番茄钟活动时（需选中任务）。
     PomoActive,
-    /// 番茄钟空闲时。
+    /// 番茄钟空闲时（需选中任务）。
     PomoIdle,
+    /// 需要选中任务行，且该任务状态不在列内。
+    StatusNot(&'static [Status]),
+    /// 需要选中任务行，且该任务含检查单。
+    HasChecklist,
+    /// 金句功能启用且选中任务行（非 Tags/Archived/Quotes 视图）：加入金句。
+    QuoteAdd,
+    /// 金句功能启用且选中金句视图行：移出金句。
+    QuoteRemove,
 }
 
 /// 非任务视图：行不是任务，任务操作键不适用。
 pub(crate) const NON_TASK_VIEWS: &[View] = &[View::Tags, View::Archived];
+
+/// `~` 时间补全候选（Tab 补全用）。
+pub(crate) const TIME_CANDIDATES: &[&str] = &[
+    "now", "today", "tomorrow", "后天", "+1h", "+2h", "+3h", "+1d", "+2d", "+1w", "周一", "周二",
+    "周三", "周四", "周五", "周六", "周日",
+];
+
+/// `*` 循环简写补全候选（Tab 补全用）。
+pub(crate) const RRULE_CANDIDATES: &[&str] = &[
+    "d",
+    "w",
+    "m",
+    "y",
+    "weekday",
+    "weekend",
+    "2w[1,3]",
+    "m[1,15]",
+    "1w[mo,we]",
+];
 
 pub(crate) struct KeyDef {
     pub keys: &'static str,
@@ -59,6 +88,13 @@ pub(crate) struct KeyDef {
     /// 是否显示在状态栏全局键条（视图切换键已由侧栏展示，不重复进条）。
     pub status: bool,
     pub when: When,
+    /// 预设热度（越大越常用），引导栏 / 状态栏 / F1 面板均按热度降序展示。
+    pub heat: u8,
+}
+
+/// 当前选中行是否为任务行（有选中且视图非 Tags/Archived）。
+fn sel_task(c: &Ctx) -> bool {
+    c.has_selection && !NON_TASK_VIEWS.contains(&c.view)
 }
 
 impl KeyDef {
@@ -71,8 +107,19 @@ impl KeyDef {
             View(v) => c.view == v,
             ViewSel(v) => c.view == v && c.has_selection,
             Reviewing => c.is_reviewing,
-            PomoActive => c.pomo_active,
-            PomoIdle => !c.pomo_active,
+            PomoActive => c.pomo_active && sel_task(c),
+            PomoIdle => !c.pomo_active && sel_task(c),
+            StatusNot(ss) => sel_task(c) && c.task_status.is_some_and(|s| !ss.contains(&s)),
+            HasChecklist => sel_task(c) && c.has_checklist,
+            QuoteAdd => {
+                c.quotes_enabled
+                    && c.has_selection
+                    && !NON_TASK_VIEWS.contains(&c.view)
+                    && c.view != crate::tui::View::Quotes
+            }
+            QuoteRemove => {
+                c.quotes_enabled && c.view == crate::tui::View::Quotes && c.has_selection
+            }
         }
     }
 
@@ -89,16 +136,30 @@ pub(crate) struct Ctx {
     pub has_selection: bool,
     pub is_reviewing: bool,
     pub pomo_active: bool,
+    /// 当前选中任务的状态（非任务行 / 无法解析时为 None）。
+    pub task_status: Option<Status>,
+    /// 当前选中任务是否含检查单。
+    pub has_checklist: bool,
+    /// 金句视图功能是否启用（F7 开关）。
+    pub quotes_enabled: bool,
 }
 
 pub(crate) fn ctx_of(app: &super::App) -> Ctx {
     let pomo_active = app.pomo.phase != crate::model::pomodoro::Phase::Idle;
+    let (task_status, has_checklist) = app
+        .items
+        .get(app.selected)
+        .map(|r| (r.status.parse().ok(), r.done.is_some()))
+        .unwrap_or((None, false));
     Ctx {
         view: app.view,
         mode: app.mode,
         has_selection: app.selected < app.items.len(),
         is_reviewing: app.is_reviewing,
         pomo_active,
+        task_status,
+        has_checklist,
+        quotes_enabled: app.quotes_enabled,
     }
 }
 
@@ -111,6 +172,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Global,
         status: true,
         when: When::Always,
+        heat: 100,
     },
     KeyDef {
         keys: "v",
@@ -119,6 +181,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Global,
         status: true,
         when: When::Always,
+        heat: 96,
     },
     KeyDef {
         keys: "g/G",
@@ -127,14 +190,16 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Global,
         status: false,
         when: When::Always,
+        heat: 70,
     },
     KeyDef {
-        keys: "1-9",
+        keys: "0-9",
         zh: "切视图",
         en: "view",
         group: KeyGroup::Global,
         status: false,
         when: When::Always,
+        heat: 90,
     },
     KeyDef {
         keys: "J/K",
@@ -143,6 +208,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Global,
         status: false,
         when: When::Always,
+        heat: 85,
     },
     KeyDef {
         keys: "r",
@@ -151,6 +217,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Global,
         status: false,
         when: When::Always,
+        heat: 80,
     },
     KeyDef {
         keys: "/",
@@ -159,6 +226,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Global,
         status: true,
         when: When::General,
+        heat: 95,
     },
     KeyDef {
         keys: "f",
@@ -167,6 +235,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Global,
         status: true,
         when: When::General,
+        heat: 92,
     },
     KeyDef {
         keys: "a",
@@ -175,6 +244,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Global,
         status: true,
         when: When::General,
+        heat: 100,
     },
     KeyDef {
         keys: "Esc",
@@ -183,6 +253,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Global,
         status: true,
         when: When::Always,
+        heat: 88,
     },
     KeyDef {
         keys: "F1/?",
@@ -191,6 +262,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Global,
         status: true,
         when: When::Always,
+        heat: 75,
     },
     KeyDef {
         keys: "F2",
@@ -199,6 +271,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Global,
         status: false,
         when: When::Always,
+        heat: 55,
     },
     KeyDef {
         keys: "Ctrl+P",
@@ -207,6 +280,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Global,
         status: false,
         when: When::Always,
+        heat: 45,
     },
     KeyDef {
         keys: "F5",
@@ -215,6 +289,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Global,
         status: true,
         when: When::Always,
+        heat: 60,
     },
     KeyDef {
         keys: "F6",
@@ -223,6 +298,16 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Global,
         status: true,
         when: When::Always,
+        heat: 58,
+    },
+    KeyDef {
+        keys: "F7",
+        zh: "金句开关",
+        en: "quotes",
+        group: KeyGroup::Global,
+        status: true,
+        when: When::Always,
+        heat: 56,
     },
     KeyDef {
         keys: "q",
@@ -231,6 +316,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Global,
         status: true,
         when: When::Always,
+        heat: 82,
     },
     // ── Task ──
     KeyDef {
@@ -240,6 +326,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::SelectionNot(NON_TASK_VIEWS),
+        heat: 100,
     },
     KeyDef {
         keys: "x",
@@ -247,7 +334,8 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         en: "done",
         group: KeyGroup::Task,
         status: false,
-        when: When::SelectionNot(NON_TASK_VIEWS),
+        when: When::StatusNot(&[Status::Done]),
+        heat: 98,
     },
     KeyDef {
         keys: "w",
@@ -255,7 +343,8 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         en: "waiting",
         group: KeyGroup::Task,
         status: false,
-        when: When::SelectionNot(NON_TASK_VIEWS),
+        when: When::StatusNot(&[Status::Waiting, Status::Done]),
+        heat: 84,
     },
     KeyDef {
         keys: "s",
@@ -263,7 +352,8 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         en: "someday",
         group: KeyGroup::Task,
         status: false,
-        when: When::SelectionNot(NON_TASK_VIEWS),
+        when: When::StatusNot(&[Status::Someday, Status::Done]),
+        heat: 80,
     },
     KeyDef {
         keys: "T",
@@ -272,6 +362,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::SelectionNot(NON_TASK_VIEWS),
+        heat: 76,
     },
     KeyDef {
         keys: "e",
@@ -280,6 +371,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::SelectionNot(NON_TASK_VIEWS),
+        heat: 92,
     },
     KeyDef {
         keys: "n",
@@ -288,6 +380,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::SelectionNot(NON_TASK_VIEWS),
+        heat: 88,
     },
     KeyDef {
         keys: "C",
@@ -296,6 +389,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::SelectionNot(NON_TASK_VIEWS),
+        heat: 86,
     },
     KeyDef {
         keys: "A/D",
@@ -304,6 +398,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::SelectionNot(NON_TASK_VIEWS),
+        heat: 72,
     },
     KeyDef {
         keys: "u",
@@ -312,6 +407,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::ViewSel(View::Archived),
+        heat: 82,
     },
     KeyDef {
         keys: "D",
@@ -320,6 +416,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::ViewSel(View::Archived),
+        heat: 78,
     },
     KeyDef {
         keys: "c",
@@ -328,6 +425,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::View(View::Tags),
+        heat: 90,
     },
     KeyDef {
         keys: "D",
@@ -336,6 +434,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::ViewSel(View::Tags),
+        heat: 74,
     },
     KeyDef {
         keys: "R",
@@ -344,6 +443,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::Reviewing,
+        heat: 96,
     },
     KeyDef {
         keys: "Space",
@@ -352,6 +452,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::SelectionNot(NON_TASK_VIEWS),
+        heat: 70,
     },
     KeyDef {
         keys: "Ctrl+a",
@@ -360,6 +461,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::SelectionNot(NON_TASK_VIEWS),
+        heat: 60,
     },
     KeyDef {
         keys: "Ctrl+u",
@@ -368,6 +470,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::SelectionNot(NON_TASK_VIEWS),
+        heat: 58,
     },
     KeyDef {
         keys: "=",
@@ -375,7 +478,8 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         en: "tick checklist",
         group: KeyGroup::Task,
         status: false,
-        when: When::SelectionNot(NON_TASK_VIEWS),
+        when: When::HasChecklist,
+        heat: 64,
     },
     KeyDef {
         keys: "P",
@@ -384,6 +488,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::PomoActive,
+        heat: 66,
     },
     KeyDef {
         keys: "P",
@@ -392,6 +497,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::PomoIdle,
+        heat: 66,
     },
     KeyDef {
         keys: "S",
@@ -400,6 +506,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::PomoActive,
+        heat: 62,
     },
     KeyDef {
         keys: "[",
@@ -407,17 +514,38 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         en: "pomo cfg",
         group: KeyGroup::Task,
         status: false,
-        when: When::Always,
+        when: When::SelectionNot(NON_TASK_VIEWS),
+        heat: 50,
+    },
+    KeyDef {
+        keys: "\"",
+        zh: "加入金句",
+        en: "to quote",
+        group: KeyGroup::Task,
+        status: false,
+        when: When::QuoteAdd,
+        heat: 64,
+    },
+    KeyDef {
+        keys: "\"",
+        zh: "移出金句",
+        en: "unquote",
+        group: KeyGroup::Task,
+        status: false,
+        when: When::QuoteRemove,
+        heat: 64,
     },
 ];
 
-/// 状态栏全局键条：Global 且 `status=true` 的条目，压缩展示。
+/// 状态栏全局键条：Global 且 `status=true` 的条目，压缩展示，按热度降序。
 pub(crate) fn status_strip(lang: Lang) -> Vec<(&'static str, &'static str)> {
-    KEY_TABLE
+    let mut v: Vec<(&KeyDef, u8)> = KEY_TABLE
         .iter()
         .filter(|k| k.group == KeyGroup::Global && k.status)
-        .map(|k| (k.keys, k.desc(lang)))
-        .collect()
+        .map(|k| (k, k.heat))
+        .collect();
+    v.sort_by_key(|b| std::cmp::Reverse(b.1));
+    v.into_iter().map(|(k, _)| (k.keys, k.desc(lang))).collect()
 }
 
 /// 引导栏动态条：Normal/Visual 显示按视图精选的任务操作键；输入/确认模式显示模式键。
@@ -428,53 +556,61 @@ pub(crate) fn strip_keys(c: &Ctx, lang: Lang) -> Vec<(&'static str, &'static str
     view_task_keys(c, lang)
 }
 
-/// 按视图精选少量高相关任务操作键；desc 从 KEY_TABLE 的 Task 组按标签+上下文取回。
+/// 引导栏动态任务键：枚举全部对当前活动任务可用的 Task 组快捷键，
+/// 追加少量上下文相关的全局键（多选 v、周回顾 r），按热度降序展示。
 fn view_task_keys(c: &Ctx, lang: Lang) -> Vec<(&'static str, &'static str)> {
     // 周回顾向导进行中，只提示下一步。
-    let curated: &[&str] = if c.is_reviewing {
-        &["R"]
-    } else {
-        match c.view {
-            View::Inbox => &["Enter", "x", "e", "Space", "T"],
-            View::Today | View::Tomorrow => &["Enter", "x"],
-            View::Next => &["Enter", "x"],
-            View::Waiting => &["w", "x"],
-            View::Scheduled => &["Enter", "x"],
-            View::Someday => &["s", "x"],
-            View::Reference => &["e", "n"],
-            View::Done => &["A/D", "e", "n"],
-            // 周回顾视图里 R 只在回顾向导进行中生效，但向导不会停留在此视图；可执行的是 r（开启回顾）。
-            View::Review => &["r"],
-            View::Archived => &["u", "D", "Space", "v"],
-            View::Tags => &["c", "D"],
-        }
-    };
-    curated
+    if c.is_reviewing {
+        return vec![("R", lang.tr("下一步", "next step"))];
+    }
+
+    let mut picked: Vec<&KeyDef> = KEY_TABLE
         .iter()
-        .filter_map(|label| {
-            // 优先任务操作键；v（多选）/ r（周回顾）等全局键在特定视图同样相关，兜底查找。
-            KEY_TABLE
-                .iter()
-                .find(|k| k.group == KeyGroup::Task && k.keys == *label && k.applies(c))
-                .or_else(|| {
-                    KEY_TABLE
-                        .iter()
-                        .find(|k| k.group == KeyGroup::Global && k.keys == *label && k.applies(c))
-                })
-        })
-        .map(|k| (k.keys, k.desc(lang)))
-        .collect()
+        .filter(|k| k.group == KeyGroup::Task && k.applies(c))
+        .collect();
+
+    // 上下文相关的全局键：v（多选）在归档箱或任务视图有选中时提示；r（周回顾）仅 Review 视图。
+    if c.view == View::Archived || (c.has_selection && !NON_TASK_VIEWS.contains(&c.view)) {
+        if let Some(k) = KEY_TABLE
+            .iter()
+            .find(|k| k.group == KeyGroup::Global && k.keys == "v" && k.applies(c))
+        {
+            picked.push(k);
+        }
+    }
+    if c.view == View::Review {
+        if let Some(k) = KEY_TABLE
+            .iter()
+            .find(|k| k.group == KeyGroup::Global && k.keys == "r" && k.applies(c))
+        {
+            picked.push(k);
+        }
+    }
+    // 捕获键 a：任何视图都可新建任务，常驻提示。
+    if let Some(k) = KEY_TABLE
+        .iter()
+        .find(|k| k.group == KeyGroup::Global && k.keys == "a" && k.applies(c))
+    {
+        picked.push(k);
+    }
+
+    // 按热度降序；同一物理键只保留最高热度的定义（如 P 专注/续杯 与 专注）。
+    picked.sort_by_key(|b| std::cmp::Reverse(b.heat));
+    picked.dedup_by(|a, b| a.keys == b.keys);
+
+    picked.iter().map(|k| (k.keys, k.desc(lang))).collect()
 }
 
-/// F1 面板全量行：按分组顺序，携带“当前是否可用”。
+/// F1 面板全量行：按分组顺序（全局→任务），组内按热度降序，携带“当前是否可用”。
 pub(crate) fn help_rows(c: &Ctx, lang: Lang) -> Vec<(KeyGroup, &'static str, &'static str, bool)> {
     GROUP_ORDER
         .iter()
         .flat_map(|g| {
-            KEY_TABLE
-                .iter()
-                .filter(move |k| k.group == *g)
+            let mut v: Vec<&KeyDef> = KEY_TABLE.iter().filter(|k| k.group == *g).collect();
+            v.sort_by_key(|b| std::cmp::Reverse(b.heat));
+            v.into_iter()
                 .map(|k| (*g, k.keys, k.desc(lang), k.applies(c)))
+                .collect::<Vec<_>>()
         })
         .collect()
 }

@@ -4,7 +4,7 @@ use ratatui::{
     widgets::ListItem,
 };
 
-use crate::tui::App;
+use crate::tui::{App, View};
 
 use crate::model::task::Status;
 use crate::time;
@@ -71,6 +71,9 @@ pub fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
             let is_archived = r.archive_reason.is_some();
             // 循环任务今日已打卡：✓ 标记 + 下一次执行时间。
             let is_checked_in = r.checked_in_today;
+            // 金句视图：@quote 行显示为引用（前缀 "、创建时间），不显示逾期。
+            let is_quote = app.view == View::Quotes
+                && r.tags.iter().any(|t| t == crate::repo::tasks::QUOTE_TAG);
 
             let indent = "  ".repeat(r.indent);
             let sel_prefix = if is_selected {
@@ -91,7 +94,7 @@ pub fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
             } else {
                 ""
             };
-            let due_text = if is_archived || is_done {
+            let due_text = if is_archived || is_done || is_quote {
                 time::relative_past(app.lang, r.due)
                     .map(|s| format!("~{}", s))
                     .unwrap_or_default()
@@ -105,7 +108,7 @@ pub fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
                     .map(|s| format!("~{}", s))
                     .unwrap_or_default()
             };
-            let due_color = if is_archived || is_done || is_checked_in {
+            let due_color = if is_archived || is_done || is_checked_in || is_quote {
                 Color::DarkGray
             } else if time::is_overdue(r.due) {
                 Color::Red
@@ -121,6 +124,8 @@ pub fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
                 }
             } else if is_checked_in {
                 ("✓", Color::Green)
+            } else if is_quote {
+                ("\"", app.theme.accent)
             } else {
                 (status_letter(&status_enum), status_color(&status_enum))
             };
@@ -163,15 +168,18 @@ pub fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
                 ));
             }
 
-            // 标签（优先级彩色）
-            if !r.tags.is_empty() {
+            // 标签（优先级彩色；金句视图隐藏冗余的 @quote）
+            let shown_tags: Vec<&String> = r
+                .tags
+                .iter()
+                .filter(|t| !(is_quote && t.as_str() == crate::repo::tasks::QUOTE_TAG))
+                .collect();
+            if !shown_tags.is_empty() {
                 spans.push(Span::raw(" "));
-                let mut first = true;
-                for t in &r.tags {
-                    if !first {
+                for (i, t) in shown_tags.iter().enumerate() {
+                    if i > 0 {
                         spans.push(Span::raw(","));
                     }
-                    first = false;
                     let c = priority_color(t).unwrap_or(app.theme.hl_fg);
                     spans.push(Span::styled(format!("@{}", t), Style::default().fg(c)));
                 }

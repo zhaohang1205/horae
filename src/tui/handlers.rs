@@ -93,12 +93,33 @@ impl<'a> AppHandlers for App<'a> {
         }
         match key.code {
             KeyCode::Esc => {
+                if self.completion_active() {
+                    // 候选列表打开：Esc 关闭并保留当前输入。
+                    self.cancel_completion();
+                    return Ok(());
+                }
                 self.organizing_id = None;
                 self.set_mode(Mode::Normal);
                 self.input_clear();
                 self.reload()?;
             }
+            KeyCode::Tab | KeyCode::Right if self.completion_active() => {
+                // 候选激活：Tab/→ 采纳 ghost 补全（补齐 token，留在编辑）。
+                self.accept_completion();
+                return Ok(());
+            }
             KeyCode::Enter => {
+                // 候选激活时先补齐当前候选，再提交（提交的是补全后的完整输入）。
+                if self.completion_active() {
+                    self.apply_current_completion();
+                }
+                if self.mode == Mode::Capturing {
+                    if let Err(msg) = self.validate_capture_input(&self.input) {
+                        self.status_message = msg;
+                        self.clear_completion();
+                        return Ok(());
+                    }
+                }
                 let input = self.input.clone();
                 let mode = self.mode;
                 self.set_mode(Mode::Normal);
@@ -107,6 +128,14 @@ impl<'a> AppHandlers for App<'a> {
             }
             KeyCode::Tab => {
                 self.handle_tab_completion();
+            }
+            KeyCode::Up => self.completion_up(),
+            KeyCode::Down => self.completion_down(),
+            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.completion_down();
+            }
+            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.completion_up();
             }
             KeyCode::Backspace => self.input_backspace(),
             KeyCode::Delete => self.input_delete(),
@@ -304,6 +333,39 @@ impl<'a> App<'a> {
                     };
                 }
             }
+            KeyCode::F(7) => {
+                self.quotes_enabled = !self.quotes_enabled;
+                let saved = crate::repo::settings::set(
+                    self.conn,
+                    "quotes",
+                    if self.quotes_enabled { "1" } else { "0" },
+                );
+                // 停用时若正停留在金句视图，跳回收件箱避免停留在隐藏视图。
+                if !self.quotes_enabled && self.view == View::Quotes {
+                    self.set_view(View::Inbox);
+                }
+                if self.note(saved) {
+                    self.status_message = if self.quotes_enabled {
+                        crate::tr!(
+                            self.lang,
+                            "金句功能已启用 (视图 0, 快捷键 \")",
+                            "Quotes enabled (view 0, key \")"
+                        )
+                        .to_string()
+                    } else {
+                        crate::tr!(
+                            self.lang,
+                            "金句功能已停用 (F7 再开)",
+                            "Quotes disabled (F7 to re-enable)"
+                        )
+                        .to_string()
+                    };
+                }
+                {
+                    let r = self.reload();
+                    self.note(r);
+                }
+            }
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.show_syntax = !self.show_syntax;
             }
@@ -350,6 +412,10 @@ impl<'a> App<'a> {
             }
             KeyCode::Char(d) if d.is_ascii_digit() => {
                 if let Some(v) = View::from_digit(d) {
+                    // 金句视图功能未启用时，数字 0 不响应。
+                    if v == View::Quotes && !self.quotes_enabled {
+                        return Ok(true);
+                    }
                     self.set_view(v);
                 }
             }
@@ -506,6 +572,10 @@ impl<'a> App<'a> {
                 self.move_sel(1);
             }
             KeyCode::Char('s') => self.act_on_selected(task::Status::Someday)?,
+            KeyCode::Char('"') if self.quotes_enabled => {
+                // 金句移入/移出：加/摘 @quote 标签，工作态流转为 reference。
+                self.toggle_quotes()?;
+            }
             KeyCode::Char('u') => {
                 let r = self.restore_selected();
                 self.note(r);
@@ -822,59 +892,67 @@ impl<'a> App<'a> {
         Ok(())
     }
 
-    /// Tab 补全标签：优先预设快捷标签，再动态合并数据库中的全部标签。
+    /// Tab：候选激活时向下推进；未激活时尝试补全当前词（正常情况下
+    /// 实时补全已在输入时填充候选，此处兜底）。
     fn handle_tab_completion(&mut self) {
-        if !matches!(
-            self.mode,
-            Mode::Tagging | Mode::FilteringTag | Mode::Capturing
-        ) {
-            return;
+        if self.completion_active() {
+            let n = self.completion_candidates.len();
+            if n > 0 {
+                self.completion_index = (self.completion_index + 1) % n;
+                self.apply_current_completion();
+            }
+        } else {
+            self.refresh_completion();
         }
-        // 以光标为界，取“光标所在词”（光标前最后一个词的一部分）作为补全对象，
-        // 这样在句中补全也能正确工作。
-        let head = &self.input[..self.input_cursor];
-        let word_start = head
-            .char_indices()
-            .rev()
-            .find(|(_, c)| c.is_whitespace())
-            .map(|(i, _)| i + 1)
-            .unwrap_or(0);
-        let last_word = &head[word_start..];
-        if last_word.is_empty() {
-            return;
-        }
-        let tag_token = last_word.strip_prefix('@').unwrap_or(last_word);
-        if tag_token.is_empty() {
-            return;
-        }
-        // 优先硬编码的核心 5 个快捷标签，再动态查询 DB 数据库中所有已知标签（包括自定义标签）
-        let default_tags = ["home", "work", "errands", "quick", "focus"];
-        let mut all_tag_names: Vec<String> = default_tags.iter().map(|s| s.to_string()).collect();
+    }
 
-        if let Ok(db_tags) = tags::list_tags(self.conn) {
-            for t in db_tags {
-                if !all_tag_names.contains(&t.name) {
-                    all_tag_names.push(t.name);
-                }
+    /// 候选激活时上移选择。
+    fn completion_up(&mut self) {
+        if !self.completion_active() {
+            return;
+        }
+        let n = self.completion_candidates.len();
+        if n > 0 {
+            self.completion_index = (self.completion_index + n - 1) % n;
+            self.apply_current_completion();
+        }
+    }
+
+    /// 候选激活时下移选择。
+    fn completion_down(&mut self) {
+        if !self.completion_active() {
+            return;
+        }
+        let n = self.completion_candidates.len();
+        if n > 0 {
+            self.completion_index = (self.completion_index + 1) % n;
+            self.apply_current_completion();
+        }
+    }
+
+    /// 是否正在补全（候选列表打开且光标落在被补全 token 内）。
+    pub(crate) fn completion_active(&self) -> bool {
+        !self.completion_candidates.is_empty()
+            && self
+                .completion_range
+                .map(|(s, e)| s <= self.input_cursor && self.input_cursor <= e)
+                .unwrap_or(false)
+    }
+
+    /// 接受当前候选：补全完整 token，若光标后无内容则追加一个空格避免粘连，随后关闭候选。
+    fn accept_completion(&mut self) {
+        if self.completion_active() {
+            self.apply_current_completion();
+            if self.input[self.input_cursor..].is_empty() {
+                self.input_insert_char(' ');
             }
         }
+        self.clear_completion();
+    }
 
-        if let Some(matched) = all_tag_names.iter().find(|p| p.starts_with(tag_token)) {
-            let prefix_len = tag_token.len();
-            if !last_word.starts_with('@') {
-                let tail = self.input[self.input_cursor..].to_string();
-                let base = word_start;
-                let word = last_word.to_string();
-                self.input.truncate(base);
-                self.input.push('@');
-                self.input.push_str(&word);
-                self.input.push_str(&tail);
-                self.input_cursor = base + 1 + word.len();
-            }
-            let completion = &matched[prefix_len..];
-            self.input_insert_str(completion);
-            self.input_insert_char(' ');
-        }
+    /// 取消补全：关闭候选（保留当前输入，由用户自行继续输入）。
+    fn cancel_completion(&mut self) {
+        self.clear_completion();
     }
 
     fn confirm_search(&mut self, input: &str) -> Result<()> {
@@ -899,6 +977,32 @@ impl<'a> App<'a> {
             self.status_message = crate::tr!(self.lang, "过滤标签: @{}", "Filter tag: @{}", t);
         }
         self.reload()
+    }
+
+    /// 提交前校验捕获/编辑输入：时间必须可解析，循环必须有效；
+    /// 时间解析为过去时刻却带循环时视为冲突。失败返回错误文案。
+    fn validate_capture_input(&self, input: &str) -> Result<(), String> {
+        let quick_add = crate::parser::parse_quick_add(input);
+        if let Some(rr) = &quick_add.rrule {
+            if !crate::parser::rrule_valid(rr) {
+                return Err(crate::tr!(self.lang, "循环无效: {}", "bad rrule: {}", rr).to_string());
+            }
+        }
+        if let Some(ts) = &quick_add.time_str {
+            let parsed = time::parse_time(ts).map_err(|e| {
+                crate::tr!(self.lang, "时间无效: {}", "bad time: {}", e).to_string()
+            })?;
+            if quick_add.rrule.is_some() && parsed < crate::time::now_ms() {
+                return Err(crate::tr!(
+                    self.lang,
+                    "循环任务的时间需在未来 ({} 已过去)",
+                    "recurring time must be in the future ({} is past)",
+                    ts
+                )
+                .to_string());
+            }
+        }
+        Ok(())
     }
 
     fn confirm_capture(&mut self, input: &str) -> Result<()> {
@@ -926,6 +1030,15 @@ impl<'a> App<'a> {
                 },
                 None => None,
             };
+            // 循环有效性校验。
+            if let Some(rr) = &quick_add.rrule {
+                if !crate::parser::rrule_valid(rr) {
+                    self.status_message =
+                        crate::tr!(self.lang, "循环无效: {}", "bad rrule: {}", rr);
+                    self.reload()?;
+                    return Ok(());
+                }
+            }
             let mut ok = true;
             if !quick_add.title.is_empty() {
                 ok &= self.note(tasks::rename(self.conn, &id, &quick_add.title));
@@ -946,8 +1059,16 @@ impl<'a> App<'a> {
             for name in &tag_names {
                 ok &= self.note(crate::repo::tags::add_tag_to_task(self.conn, &id, name));
             }
+            // @quote 路由：组织/编辑时出现金句标签 → 工作态任务流转为参考资料，离开收件箱。
+            let is_quote = self.quotes_enabled && new_set.contains(crate::repo::tasks::QUOTE_TAG);
+            if is_quote && !matches!(task.status, task::Status::Reference | task::Status::Done) {
+                ok &= self.note(tasks::transition(self.conn, &id, task::Status::Reference));
+            }
             // ~time → 排程起点（自动分类 Inbox→Scheduled）；无时间则仅改周期。
-            if let Some(start) = start_ms {
+            // 金句不参与排程：时间/周期让位给金句路由。
+            if is_quote {
+                // 金句保持 reference，忽略 ~time 与 *rrule 的排程效果。
+            } else if let Some(start) = start_ms {
                 if Some(start) != task.scheduled_start_at || quick_add.rrule != task.rrule {
                     ok &= self.note(tasks::schedule(
                         self.conn,
@@ -975,22 +1096,35 @@ impl<'a> App<'a> {
                     return Ok(());
                 }
             }
+            if let Some(rr) = &rrule {
+                if !crate::parser::rrule_valid(rr) {
+                    self.status_message =
+                        crate::tr!(self.lang, "循环无效: {}", "bad rrule: {}", rr);
+                    return Ok(());
+                }
+            }
             let mut tag_names = quick_add.tags;
             if let Some(p) = &quick_add.priority {
                 tag_names.push(p.clone());
             }
+            // @quote 路由：捕获输入含金句标签 → 直接创建为 reference + @quote，
+            // 自动进入金句视图，不落收件箱。~time/*rrule 让位给金句。
+            let is_quote =
+                self.quotes_enabled && tag_names.iter().any(|t| t == crate::repo::tasks::QUOTE_TAG);
             let t = tasks::create_capture(
                 self.conn,
                 &CaptureInput {
                     title: quick_add.title,
-                    status: if time_str.is_some() {
+                    status: if is_quote {
+                        task::Status::Reference
+                    } else if time_str.is_some() {
                         task::Status::Scheduled
                     } else {
                         task::Status::Inbox
                     },
                     due_at: None,
                     tag_names,
-                    rrule: if time_str.is_some() {
+                    rrule: if time_str.is_some() || is_quote {
                         None
                     } else {
                         rrule.clone()
@@ -998,16 +1132,26 @@ impl<'a> App<'a> {
                     ..Default::default()
                 },
             )?;
-            let scheduled_ok = if let Some(ts) = &time_str {
-                let start = time::parse_time(ts).unwrap();
-                self.note(tasks::schedule(self.conn, &t.id, start, None, rrule))
+            if is_quote {
+                self.set_view(View::Quotes);
+                self.status_message = crate::tr!(
+                    self.lang,
+                    "已加入金句 {}",
+                    "added to quotes {}",
+                    short_id(&t.id)
+                );
             } else {
-                true
-            };
-            self.set_view(View::Inbox);
-            if scheduled_ok {
-                self.status_message =
-                    crate::tr!(self.lang, "已捕获 {}", "captured {}", short_id(&t.id));
+                let scheduled_ok = if let Some(ts) = &time_str {
+                    let start = time::parse_time(ts).unwrap();
+                    self.note(tasks::schedule(self.conn, &t.id, start, None, rrule))
+                } else {
+                    true
+                };
+                self.set_view(View::Inbox);
+                if scheduled_ok {
+                    self.status_message =
+                        crate::tr!(self.lang, "已捕获 {}", "captured {}", short_id(&t.id));
+                }
             }
         }
         Ok(())

@@ -56,6 +56,7 @@ pub(crate) enum View {
     Review,
     Archived,
     Tags,
+    Quotes,
 }
 
 /// 有状态的 7 个主视图（Inbox..Done），用于按状态统计计数。
@@ -83,11 +84,16 @@ impl View {
             View::Someday => Some("someday"),
             View::Reference => Some("reference"),
             View::Done => Some("done"),
-            View::Today | View::Tomorrow | View::Review | View::Archived | View::Tags => None,
+            View::Today
+            | View::Tomorrow
+            | View::Review
+            | View::Archived
+            | View::Tags
+            | View::Quotes => None,
         }
     }
 
-    /// 数字键 1-7 映射到的视图。
+    /// 数字键 1-9 映射到的视图（0 = 金句，仅在功能启用时可用）。
     pub(crate) fn from_digit(d: char) -> Option<View> {
         match d {
             '1' => Some(View::Inbox),
@@ -99,6 +105,7 @@ impl View {
             '7' => Some(View::Done),
             '8' => Some(View::Archived),
             '9' => Some(View::Tags),
+            '0' => Some(View::Quotes),
             _ => None,
         }
     }
@@ -214,6 +221,16 @@ pub(crate) struct App<'a> {
     pub(crate) pomo: PomoState,
     /// 上次读取番茄状态的时间戳（毫秒），用于按 TTL 限频重读。
     pub(crate) pomo_loaded_ms: i64,
+    /// 当前补全候选列表（Tab 多候选循环用）。
+    pub(crate) completion_candidates: Vec<String>,
+    /// 当前高亮的候选下标。
+    pub(crate) completion_index: usize,
+    /// 被补全 token 的字节区间 `[start, end)`（含 `@`/`~`/`*` 前缀）。
+    pub(crate) completion_range: Option<(usize, usize)>,
+    /// 被补全 token 的前缀字符（`@`/`~`/`*`；Tagging 裸标签也视为 `@`）。
+    pub(crate) completion_prefix: char,
+    /// 金句视图是否启用（settings 键 `quotes`，F7 切换）。默认关闭。
+    pub(crate) quotes_enabled: bool,
 }
 
 impl<'a> App<'a> {
@@ -235,6 +252,13 @@ impl<'a> App<'a> {
             Some("latte") => crate::tui::theme::Theme::catppuccin_latte(),
             _ => crate::tui::theme::Theme::catppuccin_mocha(),
         };
+        let quotes_enabled = matches!(
+            crate::repo::settings::get(conn, "quotes")
+                .ok()
+                .flatten()
+                .as_deref(),
+            Some("1")
+        );
         let mut app = App {
             conn,
             view: View::Inbox,
@@ -273,6 +297,11 @@ impl<'a> App<'a> {
             rrule_cache: std::collections::HashMap::new(),
             pomo: crate::repo::pomodoro::get_state().unwrap_or_default(),
             pomo_loaded_ms: 0,
+            completion_candidates: Vec::new(),
+            completion_index: 0,
+            completion_range: None,
+            completion_prefix: '@',
+            quotes_enabled,
         };
         app.refresh()?;
 
@@ -417,12 +446,7 @@ impl<'a> App<'a> {
     pub(crate) fn input_insert_char(&mut self, c: char) {
         self.input.insert(self.input_cursor, c);
         self.input_cursor += c.len_utf8();
-    }
-
-    /// 在光标处插入一个字符串。
-    pub(crate) fn input_insert_str(&mut self, s: &str) {
-        self.input.insert_str(self.input_cursor, s);
-        self.input_cursor += s.len();
+        self.refresh_completion();
     }
 
     /// 退格：删除光标前一个字符。
@@ -433,6 +457,7 @@ impl<'a> App<'a> {
         let prev = self.cursor_prev();
         self.input.remove(prev);
         self.input_cursor = prev;
+        self.refresh_completion();
     }
 
     /// Delete：删除光标处一个字符。
@@ -442,28 +467,175 @@ impl<'a> App<'a> {
         }
         let next = self.cursor_next();
         self.input.drain(self.input_cursor..next);
+        self.refresh_completion();
     }
 
     pub(crate) fn input_move_left(&mut self) {
         self.input_cursor = self.cursor_prev();
+        self.refresh_completion();
     }
 
     pub(crate) fn input_move_right(&mut self) {
         self.input_cursor = self.cursor_next();
+        self.refresh_completion();
     }
 
     pub(crate) fn input_home(&mut self) {
         self.input_cursor = 0;
+        self.refresh_completion();
     }
 
     pub(crate) fn input_end(&mut self) {
         self.input_cursor = self.input.len();
+        self.refresh_completion();
     }
 
     /// 清空输入并复位光标。
     pub(crate) fn input_clear(&mut self) {
         self.input.clear();
         self.input_cursor = 0;
+        self.clear_completion();
+    }
+
+    /// 复位补全候选状态。
+    pub(crate) fn clear_completion(&mut self) {
+        self.completion_candidates.clear();
+        self.completion_index = 0;
+        self.completion_range = None;
+    }
+
+    /// 实时补全：以光标所在词为准，若以 @/~/* 开头则计算候选并填充。
+    /// 仅 Capturing / Tagging / FilteringTag 模式下生效。
+    pub(crate) fn refresh_completion(&mut self) {
+        self.completion_candidates.clear();
+        self.completion_index = 0;
+        self.completion_range = None;
+        if !matches!(
+            self.mode,
+            Mode::Capturing | Mode::Tagging | Mode::FilteringTag
+        ) {
+            return;
+        }
+        // 光标所在词。
+        let head = &self.input[..self.input_cursor];
+        let word_start = head
+            .char_indices()
+            .rev()
+            .find(|(_, c)| c.is_whitespace())
+            .map(|(i, _)| i + 1)
+            .unwrap_or(0);
+        let last_word = &head[word_start..];
+        if last_word.is_empty() {
+            return;
+        }
+        let (prefix, token) = if let Some(t) = last_word.strip_prefix('@') {
+            ('@', t)
+        } else if let Some(t) = last_word.strip_prefix('~') {
+            ('~', t)
+        } else if let Some(t) = last_word.strip_prefix('*') {
+            ('*', t)
+        } else if matches!(self.mode, Mode::Tagging | Mode::FilteringTag) {
+            // Tagging/FilteringTag 直接输入裸标签名 → 按标签补全。
+            ('@', last_word)
+        } else {
+            return;
+        };
+        if token.is_empty() {
+            return;
+        }
+        let candidates = match prefix {
+            '@' => self.tag_candidates(token),
+            '~' => crate::tui::keys::TIME_CANDIDATES
+                .iter()
+                .filter(|c| c.starts_with(token))
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>(),
+            '*' => crate::tui::keys::RRULE_CANDIDATES
+                .iter()
+                .filter(|c| c.starts_with(token))
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        if candidates.is_empty() {
+            return;
+        }
+        self.completion_candidates = candidates;
+        self.completion_prefix = prefix;
+        self.completion_range = Some((word_start, self.input_cursor));
+    }
+
+    /// 已输入 token 的正文（前缀字符之后的部分）。
+    fn completion_typed(&self) -> Option<&str> {
+        let (start, end) = self.completion_range?;
+        let bytes = self.input.as_bytes();
+        // 若词首是非字母前缀（@/~/*），正文从其后开始；裸标签则从词首开始。
+        let body_start = if bytes.get(start).is_some_and(|b| {
+            let c = *b as char;
+            c == '@' || c == '~' || c == '*'
+        }) {
+            start + 1
+        } else {
+            start
+        };
+        Some(&self.input[body_start..end])
+    }
+
+    /// 当前候选相对已输入 token 的 ghost 后缀（未插入输入，仅渲染用）。
+    pub(crate) fn completion_ghost(&self) -> Option<(char, String, String)> {
+        let (_, end) = self.completion_range?;
+        if self.input_cursor != end {
+            return None; // 光标已离开 token，不再显示 ghost。
+        }
+        let candidate = self.completion_candidates.get(self.completion_index)?;
+        let typed = self.completion_typed()?;
+        let ghost = candidate
+            .strip_prefix(typed)
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        Some((self.completion_prefix, typed.to_string(), ghost))
+    }
+
+    /// 把当前候选替换进输入（补齐完整 token），光标推进到词尾。
+    pub(crate) fn apply_current_completion(&mut self) {
+        let Some((start, _end)) = self.completion_range else {
+            return;
+        };
+        let Some(cand) = self.completion_candidates.get(self.completion_index) else {
+            return;
+        };
+        let prefix_char = self.completion_prefix;
+        // 词首是否已含前缀字符（@/~/*）：Tagging 裸标签词首是首字母，不插入前缀。
+        let has_prefix = self
+            .input
+            .as_bytes()
+            .get(start)
+            .is_some_and(|b| *b as char == prefix_char);
+        let tail = self.input[self.input_cursor..].to_string();
+        self.input.truncate(start);
+        if has_prefix {
+            self.input.push(prefix_char);
+        }
+        self.input.push_str(cand);
+        self.input.push_str(&tail);
+        self.input_cursor = start + cand.len() + usize::from(has_prefix);
+        self.completion_range = Some((start, self.input_cursor));
+    }
+
+    /// 标签候选：预设 + DB 全部标签（含自定义）。
+    fn tag_candidates(&self, token: &str) -> Vec<String> {
+        let default_tags = ["home", "work", "errands", "quick", "focus"];
+        let mut names: Vec<String> = default_tags.iter().map(|s| s.to_string()).collect();
+        if let Ok(db_tags) = crate::repo::tags::list_tags(self.conn) {
+            for t in db_tags {
+                if !names.contains(&t.name) {
+                    names.push(t.name);
+                }
+            }
+        }
+        // 前缀精确匹配的候选排最前（先按前缀，再按预设优先）。
+        names.sort_by_key(|n| !n.starts_with(token));
+        names.into_iter().filter(|n| n.starts_with(token)).collect()
     }
 
     /// 执行用户触发的操作：失败时把错误写入状态栏并返回 `false`，供调用方据此
@@ -733,11 +905,37 @@ impl<'a> App<'a> {
             .into_iter()
             .map(|t| (t, None))
             .collect(),
+            View::Quotes => tasks::list_quotes(
+                self.conn,
+                if self.search_query.is_empty() {
+                    None
+                } else {
+                    Some(self.search_query.as_str())
+                },
+                self.tag_filter.as_deref(),
+            )?
+            .into_iter()
+            // 金句行展示创建时间（"3天前"），而非 overdue/due。
+            .map(|t| {
+                let created = t.created_at;
+                (t, Some(created))
+            })
+            .collect(),
             _ => {
                 if let Some(s) = self.view.status() {
                     let target = s.parse::<task::Status>().unwrap_or(task::Status::Inbox);
+                    // 金句仅存在于金句视图：Reference 视图排除 @quote 任务
+                    //（功能关闭时回归普通标签行为）。
+                    let exclude_quotes = self.quotes_enabled && target == task::Status::Reference;
+                    let quote_ids: std::collections::HashSet<String> = if exclude_quotes {
+                        tasks::quote_task_ids(self.conn)?.into_iter().collect()
+                    } else {
+                        std::collections::HashSet::new()
+                    };
                     all.iter()
-                        .filter(|t| t.status == target)
+                        .filter(|t| {
+                            t.status == target && !(exclude_quotes && quote_ids.contains(&t.id))
+                        })
                         .cloned()
                         .map(|t| (t, None))
                         .collect()
@@ -774,6 +972,19 @@ impl<'a> App<'a> {
         self.counts
             .insert(View::Archived, tasks::count_archived(self.conn)?);
         self.counts.insert(View::Tags, tags::count_tags(self.conn)?);
+        if self.quotes_enabled {
+            self.counts.insert(
+                View::Quotes,
+                tasks::count_quotes(
+                    self.conn,
+                    if self.search_query.is_empty() {
+                        None
+                    } else {
+                        Some(self.search_query.as_str())
+                    },
+                )?,
+            );
+        }
         let query = if self.search_query.is_empty() {
             None
         } else {
@@ -784,6 +995,14 @@ impl<'a> App<'a> {
             let s = v.status().expect("status view");
             self.counts
                 .insert(v, by_status.get(s).copied().unwrap_or(0));
+        }
+        // 金句仅存在于金句视图：Reference 徽标排除带 @quote 的参考任务，
+        // 与列表保持一致。
+        if self.quotes_enabled {
+            let quotes_in_ref = tasks::count_quotes_in_status(self.conn, "reference", query)?;
+            let ref_badge = self.counts.get(&View::Reference).copied().unwrap_or(0);
+            self.counts
+                .insert(View::Reference, ref_badge.saturating_sub(quotes_in_ref));
         }
         Ok(())
     }
@@ -843,7 +1062,8 @@ impl<'a> App<'a> {
 
     pub(crate) fn next_view(&mut self, delta: isize) {
         // 方向键环与侧栏显示顺序完全一致（今日/明日也参与循环）。
-        let views = [
+        // 金句视图仅在其功能启用时参与循环。
+        let mut views = vec![
             View::Today,
             View::Tomorrow,
             View::Inbox,
@@ -857,6 +1077,9 @@ impl<'a> App<'a> {
             View::Tags,
             View::Review,
         ];
+        if self.quotes_enabled {
+            views.push(View::Quotes);
+        }
         let idx = views.iter().position(|v| *v == self.view).unwrap_or(0) as isize;
         let next_idx = (idx + delta).rem_euclid(views.len() as isize);
         self.set_view(views[next_idx as usize]);
@@ -1020,6 +1243,85 @@ impl<'a> App<'a> {
 
         self.refresh()?;
         self.load_detail();
+        Ok(())
+    }
+
+    /// 金句移入/移出（`"` 键）：加 `quote` 标签并把工作态任务流转为 reference，
+    /// 使条目离开收件箱等行动流；已有该标签则摘除（移出金句视图）。支持多选。
+    pub(crate) fn toggle_quotes(&mut self) -> Result<()> {
+        let mut ids = vec![];
+        if !self.selected_ids.is_empty() {
+            ids.extend(self.selected_ids.iter().cloned());
+        } else if let Some(row) = self.items.get(self.selected).cloned() {
+            ids.push(row.id);
+        }
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let mut added = 0;
+        let mut removed = 0;
+        for id in &ids {
+            let Ok(task) = tasks::get(self.conn, id) else {
+                continue;
+            };
+            if task.archived_at.is_some() {
+                continue;
+            }
+            let has_quote = crate::repo::tags::get_task_tags(self.conn, id)
+                .unwrap_or_default()
+                .iter()
+                .any(|t| t.name == crate::repo::tasks::QUOTE_TAG);
+            if has_quote {
+                if crate::repo::tags::remove_tag_from_task(
+                    self.conn,
+                    id,
+                    crate::repo::tasks::QUOTE_TAG,
+                )
+                .is_ok()
+                {
+                    removed += 1;
+                }
+            } else {
+                if crate::repo::tags::add_tag_to_task(self.conn, id, crate::repo::tasks::QUOTE_TAG)
+                    .is_ok()
+                {
+                    added += 1;
+                }
+                // 工作态（非 reference/done）→ 参考资料，让条目离开收件箱等行动流。
+                if !matches!(task.status, task::Status::Reference | task::Status::Done) {
+                    let _ = tasks::transition(self.conn, id, task::Status::Reference);
+                }
+            }
+        }
+        self.status_message = if added > 0 && removed == 0 {
+            crate::tr!(
+                self.lang,
+                "已加入金句 ({} 项)",
+                "added to quotes ({} item(s))",
+                added
+            )
+        } else if removed > 0 && added == 0 {
+            crate::tr!(
+                self.lang,
+                "已移出金句 ({} 项)",
+                "removed from quotes ({} item(s))",
+                removed
+            )
+        } else {
+            crate::tr!(
+                self.lang,
+                "金句: +{} / -{}",
+                "quotes: +{} / -{}",
+                added,
+                removed
+            )
+        };
+        if !self.selected_ids.is_empty() {
+            self.set_mode(Mode::Normal);
+            self.selected_ids.clear();
+            self.visual_start_idx = None;
+        }
+        self.reload()?;
         Ok(())
     }
 }
