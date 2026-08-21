@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn drive_tui() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         seed(&conn);
@@ -501,7 +501,7 @@ mod tests {
 
     #[test]
     fn empty_db_shows_guide() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         let mut app = App::new(&conn).unwrap();
@@ -616,7 +616,7 @@ mod tests {
 
     #[test]
     fn checked_in_habit_stays_in_today_with_next_time() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
 
@@ -666,7 +666,7 @@ mod tests {
 
     #[test]
     fn enter_opens_organize_on_scheduled() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
 
@@ -728,7 +728,7 @@ mod tests {
 
     #[test]
     fn a_always_captures_and_e_edits_selected_task() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
 
@@ -781,7 +781,7 @@ mod tests {
 
     #[test]
     fn organize_edit_sets_time_tags_rrule() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
 
@@ -826,7 +826,7 @@ mod tests {
 
     #[test]
     fn missed_habit_shows_overdue_in_today_view() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
 
@@ -868,7 +868,7 @@ mod tests {
 
     #[test]
     fn detail_planned_shows_next_occurrence_for_habit() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
 
@@ -921,7 +921,7 @@ mod tests {
 
     #[test]
     fn x_does_not_double_check_in_habit() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
 
@@ -1103,7 +1103,7 @@ mod tests {
 
     #[test]
     fn quotes_feature_toggle_and_shortcut() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         let t = tasks::create_capture(
@@ -1319,7 +1319,7 @@ mod tests {
     #[test]
     fn quote_tag_is_plain_when_feature_off() {
         // 回归：功能关闭时 @quote 只是普通标签，参考资料视图照常显示。
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         let q = tasks::create_capture(
@@ -1634,7 +1634,7 @@ mod tests {
 
     #[test]
     fn done_view_shows_completion_not_overdue() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         let t = tasks::create_capture(
@@ -1661,7 +1661,7 @@ mod tests {
 
     #[test]
     fn archived_view_shows_reason_not_status_or_overdue() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         let t = tasks::create_capture(
@@ -1715,7 +1715,7 @@ mod tests {
 
     #[test]
     fn archived_view_can_purge_task() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         let t = tasks::create_capture(
@@ -1763,7 +1763,7 @@ mod tests {
 
     #[test]
     fn archived_view_can_purge_multiple_in_visual_mode() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         for i in 0..3 {
@@ -1816,7 +1816,7 @@ mod tests {
     fn normal_mode_space_batch_ops_use_all_selected() {
         // 回归：普通模式下用 Space 点选多项后批量操作，应作用于全部选中项，
         // 而非仅当前光标行（此前归档/删除/状态变更被 Mode::Visual 门控误伤）。
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         for i in 0..3 {
@@ -1905,7 +1905,7 @@ mod tests {
     #[test]
     fn archived_view_can_restore_multiple_selected() {
         // 回归：普通模式 Space 多选后按 u（恢复）应恢复全部选中项，而非仅当前行。
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         for i in 0..3 {
@@ -1991,7 +1991,7 @@ mod tests {
 
     #[test]
     fn lang_and_theme_toggle_persist_to_settings() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
 
@@ -2060,7 +2060,7 @@ mod tests {
 
     #[test]
     fn input_cursor_edits_insert_delete_and_move() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         let mut app = App::new(&conn).unwrap();
@@ -2118,7 +2118,7 @@ mod tests {
 
     #[test]
     fn input_cursor_edits_mid_string_for_full_edit() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         seed(&conn);
@@ -2142,7 +2142,7 @@ mod tests {
 
     #[test]
     fn tab_completion_works_at_cursor() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         let mut app = App::new(&conn).unwrap();
@@ -2215,7 +2215,7 @@ mod tests {
 
     #[test]
     fn completion_extends_to_time_and_rrule() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         let mut app = App::new(&conn).unwrap();
@@ -2250,7 +2250,7 @@ mod tests {
 
     #[test]
     fn capture_rejects_invalid_rrule_and_preserves_input() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         let mut app = App::new(&conn).unwrap();
@@ -2294,7 +2294,7 @@ mod tests {
 
     #[test]
     fn visual_mode_does_not_render_input_overlay() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         seed(&conn);
@@ -2319,7 +2319,7 @@ mod tests {
 
     #[test]
     fn space_toggles_and_ctrl_selects_non_contiguous() {
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         seed(&conn);
@@ -2374,7 +2374,7 @@ mod tests {
     #[test]
     fn confirm_dialog_renders_centered_for_batch_ops() {
         use crate::tui::app::Mode as M;
-        crate::repo::pomodoro::set_pomo_idle_for_tests();
+        crate::repo::state::set_test_override();
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
         seed(&conn);

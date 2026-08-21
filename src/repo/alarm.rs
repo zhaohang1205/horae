@@ -1,7 +1,6 @@
+use crate::repo::state::JsonStateStore;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::PathBuf;
 
 /// Persisted alarm bookkeeping, keyed by `task_id:occurrence_ms`.
 /// - `rung`: occurrences whose alarm already fired (dedup, doesn't affect the window).
@@ -20,30 +19,14 @@ pub struct AlarmState {
     pub last_window: Vec<String>,
 }
 
-pub fn alarm_file_path() -> PathBuf {
-    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push("gtp");
-    let _ = fs::create_dir_all(&path);
-    path.push("alarm.json");
-    path
+fn store() -> JsonStateStore<AlarmState> {
+    JsonStateStore::new("alarm.json")
 }
 
 pub fn get_state() -> Result<AlarmState> {
-    let path = alarm_file_path();
-    if !path.exists() {
-        return Ok(AlarmState::default());
-    }
-    let content = fs::read_to_string(&path)?;
-    let state = serde_json::from_str(&content)?;
-    Ok(state)
+    store().load()
 }
 
 pub fn save_state(state: &AlarmState) -> Result<()> {
-    let path = alarm_file_path();
-    let content = serde_json::to_string_pretty(state)?;
-    // 先写临时文件再 rename, 避免并发读方读到半写的文件
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, content)?;
-    fs::rename(&tmp, &path)?;
-    Ok(())
+    store().save(state)
 }

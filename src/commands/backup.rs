@@ -69,7 +69,7 @@ pub fn run_import(conn: &Connection, file: &str, replace: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repo::pomodoro::set_pomo_idle_for_tests;
+    use crate::repo::state::set_test_override;
     use crate::repo::{tags, tasks};
     use crate::testutil::test_conn;
 
@@ -107,13 +107,13 @@ mod tests {
     #[test]
     fn roundtrip_preserves_everything() {
         let (_dir, conn) = test_conn();
-        set_pomo_idle_for_tests();
+        set_test_override();
         let (live, archived) = seed(&conn);
         let data = export_roundtrip(&conn);
 
         // 导入到全新的空库，模拟换机还原
         let (_dir2, conn2) = test_conn();
-        set_pomo_idle_for_tests();
+        set_test_override();
         let stats = repo::backup::import_all(&conn2, &data, false).unwrap();
         assert_eq!(stats.tasks_skipped, 0, "空库合并不应跳过任何任务");
         assert_eq!(stats.events_imported, data.events.len());
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn merge_skips_existing_and_adds_new() {
         let (_dir, conn) = test_conn();
-        set_pomo_idle_for_tests();
+        set_test_override();
         seed(&conn);
         let data = export_roundtrip(&conn);
 
@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn replace_restores_exactly() {
         let (_dir, conn) = test_conn();
-        set_pomo_idle_for_tests();
+        set_test_override();
         let (live, _archived) = seed(&conn);
         let data = export_roundtrip(&conn);
 

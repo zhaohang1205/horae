@@ -3,6 +3,7 @@ pub mod backup;
 pub mod notify;
 pub mod pomodoro;
 pub mod settings;
+pub mod state;
 pub mod tags;
 pub mod tasks;
 
