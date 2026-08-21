@@ -9,9 +9,16 @@ pub enum NotificationEvent {
     DueNow { id: String, title: String },
 }
 
+#[derive(Hash, Eq, PartialEq)]
+pub enum NotificationKey {
+    OneHour { id: String, due: i64 },
+    TenMins { id: String, due: i64 },
+    Now { id: String, due: i64 },
+}
+
 pub struct NotificationEngine {
     last_tick_ms: i64,
-    notified_events: HashSet<String>,
+    notified_events: HashSet<NotificationKey>,
 }
 
 impl NotificationEngine {
@@ -24,38 +31,33 @@ impl NotificationEngine {
 
     /// Evaluates due tasks and returns a list of events to be notified.
     pub fn tick(&mut self, conn: &Connection) -> Vec<NotificationEvent> {
-        let now = chrono::Local::now().timestamp();
-        if now - self.last_tick_ms < 10 {
+        let now_ms = crate::time::now_ms();
+        if now_ms - self.last_tick_ms < 10_000 {
             return vec![];
         }
-        self.last_tick_ms = now;
-
-        // 每日心智维护摘要（合并成一条，同一天至多一次）。
-        // We will move this logic out of the engine, or keep it here and let it just run as a side effect?
-        // Actually, check() already handles deduplication internally.
-        let _ = crate::commands::notify::check(conn);
+        self.last_tick_ms = now_ms;
 
         let mut events = Vec::new();
 
-        if let Ok(rows) = tasks::due_in_range(conn, (now - 60) * 1000, (now + 3600) * 1000) {
+        if let Ok(rows) = tasks::due_in_range(conn, now_ms - 60_000, now_ms + 3_600_000) {
             for (id, title, due) in rows {
                 let Some(due) = due else { continue };
-                let diff = due / 1000 - now;
+                let diff_ms = due - now_ms;
 
-                if diff > 3540 && diff <= 3600 {
-                    let key = format!("{id}-{due}-1h");
+                if diff_ms > 3_540_000 && diff_ms <= 3_600_000 {
+                    let key = NotificationKey::OneHour { id: id.clone(), due };
                     if !self.notified_events.contains(&key) {
                         self.notified_events.insert(key);
                         events.push(NotificationEvent::DueInOneHour { title });
                     }
-                } else if diff > 540 && diff <= 600 {
-                    let key = format!("{id}-{due}-10m");
+                } else if diff_ms > 540_000 && diff_ms <= 600_000 {
+                    let key = NotificationKey::TenMins { id: id.clone(), due };
                     if !self.notified_events.contains(&key) {
                         self.notified_events.insert(key);
                         events.push(NotificationEvent::DueInTenMins { title });
                     }
-                } else if diff <= 0 && diff > -60 {
-                    let key = format!("{id}-{due}-now");
+                } else if diff_ms <= 0 && diff_ms > -60_000 {
+                    let key = NotificationKey::Now { id: id.clone(), due };
                     if !self.notified_events.contains(&key) {
                         self.notified_events.insert(key);
                         events.push(NotificationEvent::DueNow { id, title });

@@ -361,6 +361,9 @@ impl<'a> App<'a> {
     }
 
     pub(crate) fn check_notifications(&mut self) {
+        // 每日心智维护摘要（合并成一条，同一天至多一次）。
+        let _ = crate::commands::notify::check(self.conn);
+
         let events = self.notification_engine.tick(self.conn);
         for event in events {
             match event {

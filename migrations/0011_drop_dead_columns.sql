@@ -8,9 +8,8 @@
 -- disable foreign keys around the column drops (SQLite rejects dropping a
 -- column that is named in an index or FK constraint).
 
-PRAGMA foreign_keys=OFF;
-
 DROP INDEX IF EXISTS idx_tasks_parent;
+PRAGMA foreign_keys=OFF;
 
 ALTER TABLE tasks DROP COLUMN kind;
 ALTER TABLE tasks DROP COLUMN parent_id;
