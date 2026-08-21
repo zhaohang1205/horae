@@ -258,14 +258,29 @@ pub fn parse_rrule_shorthand(s: &str) -> String {
 ///
 /// 简写能映射成标准 RRULE（非原样 fallback），或已是 `FREQ=` 开头的 RRULE。
 /// 无法被任何分支识别的词（原样 fallback）视为无效。
+/// `FREQ=YEARLY`（`*y` / `4y` / `yearly`）暂不支持：展开引擎只接受
+/// DAILY/WEEKLY/MONTHLY，解析层在此拒绝，避免年循环习惯静默退化成一次性任务。
 pub fn rrule_valid(rrule: &str) -> bool {
     let trimmed = rrule.trim();
     if trimmed.is_empty() {
         return false;
     }
+    if rrule_contains_yearly(trimmed) {
+        return false;
+    }
     let resolved = parse_rrule_shorthand(trimmed);
     let looks_like_rrule = resolved.to_lowercase().starts_with("freq=");
     resolved != trimmed || looks_like_rrule
+}
+
+fn rrule_contains_yearly(s: &str) -> bool {
+    let lower = s.to_lowercase();
+    lower.starts_with("freq=yearly")
+        || lower.contains(";freq=yearly")
+        || matches!(lower.as_str(), "y" | "yearly")
+        || (lower.ends_with('y')
+            && lower.len() > 1
+            && lower[..lower.len() - 1].chars().all(|c| c.is_ascii_digit()))
 }
 
 /// Map a weekday token (name or number) to its two-letter RRULE code.
@@ -523,7 +538,10 @@ mod tests {
         assert!(rrule_valid("d"));
         assert!(rrule_valid("w"));
         assert!(rrule_valid("m"));
-        assert!(rrule_valid("y"));
+        assert!(!rrule_valid("y"), "YEARLY 引擎不支持，解析层拒绝");
+        assert!(!rrule_valid("4y"), "间隔年循环同样拒绝");
+        assert!(!rrule_valid("yearly"));
+        assert!(!rrule_valid("FREQ=YEARLY"));
         assert!(rrule_valid("2w[1,3]"));
         assert!(rrule_valid("m[1,15]"));
         assert!(rrule_valid("weekday"));

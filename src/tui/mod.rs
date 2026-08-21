@@ -68,15 +68,7 @@ pub(crate) fn row_from(t: &Task, indent: usize, conn: &Connection) -> Result<Row
 /// 循环任务会展开一次 rrule 来算展示用到期时间；批量刷新请改用
 /// [`row_from_tags_with_due`] 传入预计算值。
 pub(crate) fn row_from_tags(t: &Task, indent: usize, tags: Vec<String>) -> Row {
-    let due = if t.archived_at.is_some() {
-        t.archived_at
-    } else if t.status == task::Status::Done {
-        t.completed_at.or(t.due_at).or(t.scheduled_start_at)
-    } else {
-        // 循环任务用 effective_due：错过 slot 即显示其时间（逾期），
-        // 已打卡后锚点已推进为下次执行时间。
-        crate::commands::effective_due(t)
-    };
+    let due = crate::schedule::display_due(t, None);
     row_from_tags_with_due(t, indent, tags, due)
 }
 
@@ -910,7 +902,7 @@ mod tests {
         let s = norm(&snap(&term));
 
         let task = tasks::get(&conn, &rec.id).unwrap();
-        let next = crate::commands::effective_due(&task).unwrap();
+        let next = crate::schedule::effective_due(&task).unwrap();
         let next_str = norm(&crate::time::format_local(Some(next)));
         let anchor_str = norm(&crate::time::format_local(Some(anchor)));
         assert!(

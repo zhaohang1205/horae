@@ -223,7 +223,7 @@ pub(crate) struct App<'a> {
     /// 各视图计数缓存：`refresh` 时一次性算好，渲染帧内零 DB 查询。
     pub(crate) counts: std::collections::HashMap<View, usize>,
     /// 循环任务展开结果缓存（task_id -> 发生序列）：一次刷新内每个循环规则只
-    /// 展开一次，列表行与今日/明日视图复用，避免重复 `rrule_occurrences`。
+    /// 展开一次，列表行与今日/明日视图复用，避免重复展开。
     pub(crate) rrule_cache: std::collections::HashMap<String, Vec<i64>>,
     /// 番茄钟状态缓存：每帧渲染只读这一份快照，避免每帧多次读 `pomo.json`。
     pub(crate) pomo: PomoState,
@@ -770,7 +770,7 @@ impl<'a> App<'a> {
             let anchor = t.scheduled_start_at.or(t.due_at);
             let occs = match &t.rrule {
                 Some(rr) => {
-                    let occ = anchor.and_then(|a| crate::time::rrule_occurrences(rr, a, 366).ok());
+                    let occ = anchor.and_then(|a| crate::schedule::occurrences(rr, a).ok());
                     if let Some(ref v) = occ {
                         self.rrule_cache.insert(t.id.clone(), v.clone());
                     }
@@ -812,21 +812,8 @@ impl<'a> App<'a> {
     /// 任务的展示用到期时间：归档用归档时间，已完成用完成时间，循环任务优先用
     /// 缓存的展开结果算 effective_due（避免重复展开），否则回退到自由函数。
     fn row_due(&self, t: &Task) -> Option<i64> {
-        if t.archived_at.is_some() {
-            return t.archived_at;
-        }
-        if t.status == task::Status::Done {
-            return t.completed_at.or(t.due_at).or(t.scheduled_start_at);
-        }
-        if t.rrule.is_some() {
-            if let Some(occs) = self.rrule_cache.get(&t.id) {
-                if let Some(d) = crate::commands::effective_due_from_occurrences(occs) {
-                    return Some(d);
-                }
-                return t.scheduled_start_at.or(t.due_at);
-            }
-        }
-        crate::commands::effective_due(t)
+        let cached = self.rrule_cache.get(&t.id).map(|v| v.as_slice());
+        crate::schedule::display_due(t, cached)
     }
 
     pub(crate) fn refresh(&mut self) -> Result<()> {

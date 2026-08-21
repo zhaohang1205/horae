@@ -2,10 +2,10 @@ use rusqlite::Connection;
 use serde_json::json;
 use std::process::Command as StdCommand;
 
-use crate::commands::effective_due;
 use crate::model::task::{Status, Task};
 use crate::repo::alarm;
 use crate::repo::{tags, tasks};
+use crate::schedule::effective_due;
 use crate::time;
 use anyhow::Result;
 

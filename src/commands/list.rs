@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use crate::commands::effective_due;
+use crate::schedule::effective_due;
 
 use crate::repo::{tags, tasks};
 use crate::time;

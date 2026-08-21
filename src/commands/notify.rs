@@ -1,8 +1,8 @@
 use rusqlite::Connection;
 
-use crate::commands::effective_due;
 use crate::model::task::Status;
 use crate::repo::{notify, tasks};
+use crate::schedule::effective_due;
 use crate::time;
 use anyhow::Result;
 use chrono::{Duration, NaiveDate};

@@ -1889,7 +1889,7 @@ impl<'a> App<'a> {
         {
             let planned = if d.task.rrule.is_some() {
                 // 循环任务：错过 slot 取最近一次已错过（逾期），否则下一次执行
-                match crate::commands::effective_due(&d.task) {
+                match crate::schedule::effective_due(&d.task) {
                     Some(ms) => time::format_local(Some(ms)),
                     None => "-".to_string(),
                 }

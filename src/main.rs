@@ -7,6 +7,7 @@ mod i18n;
 mod model;
 mod parser;
 mod repo;
+mod schedule;
 #[cfg(test)]
 mod testutil;
 mod time;

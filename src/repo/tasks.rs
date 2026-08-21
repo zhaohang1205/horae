@@ -192,37 +192,35 @@ pub fn transition(conn: &Connection, id: &str, to_status: task::Status) -> Resul
         if let Some(rrule) = &t.rrule {
             let anchor = t.scheduled_start_at.or(t.due_at);
             if let Some(start) = anchor {
-                if let Ok(occ) = time::rrule_occurrences(rrule, start, 366) {
-                    if let Some(next) = occ.into_iter().find(|m| *m > start) {
-                        let duration = t.scheduled_end_at.unwrap_or(start) - start;
+                if let Some((next, next_end)) =
+                    crate::schedule::next_window(rrule, start, t.scheduled_end_at)
+                {
+                    log_event(
+                        &tx,
+                        id,
+                        event::EV_HABIT_COMPLETED,
+                        Some(&from.to_string()),
+                        Some(&task::Status::Done.to_string()),
+                        None,
+                        now,
+                    )?;
 
-                        log_event(
-                            &tx,
-                            id,
-                            event::EV_HABIT_COMPLETED,
-                            Some(&from.to_string()),
-                            Some(&task::Status::Done.to_string()),
-                            None,
-                            now,
-                        )?;
-
-                        if t.scheduled_start_at.is_some() {
-                            t.scheduled_start_at = Some(next);
-                            t.scheduled_end_at = Some(next + duration);
-                        }
-                        if t.scheduled_start_at.is_none() && t.due_at.is_some() {
-                            t.due_at = Some(next);
-                        }
-                        t.status = task::Status::Scheduled;
-                        t.updated_at = now;
-
-                        tx.execute(
-                            "UPDATE tasks SET status=?1, clarified_at=?2, completed_at=?3, updated_at=?4, started_at=?5, scheduled_start_at=?6, scheduled_end_at=?7, due_at=?8 WHERE id=?9",
-                            rusqlite::params![t.status.to_string(), t.clarified_at, t.completed_at, t.updated_at, t.started_at, t.scheduled_start_at, t.scheduled_end_at, t.due_at, id],
-                        )?;
-                        tx.commit()?;
-                        return Ok(t);
+                    if t.scheduled_start_at.is_some() {
+                        t.scheduled_start_at = Some(next);
+                        t.scheduled_end_at = Some(next_end);
                     }
+                    if t.scheduled_start_at.is_none() && t.due_at.is_some() {
+                        t.due_at = Some(next);
+                    }
+                    t.status = task::Status::Scheduled;
+                    t.updated_at = now;
+
+                    tx.execute(
+                        "UPDATE tasks SET status=?1, clarified_at=?2, completed_at=?3, updated_at=?4, started_at=?5, scheduled_start_at=?6, scheduled_end_at=?7, due_at=?8 WHERE id=?9",
+                        rusqlite::params![t.status.to_string(), t.clarified_at, t.completed_at, t.updated_at, t.started_at, t.scheduled_start_at, t.scheduled_end_at, t.due_at, id],
+                    )?;
+                    tx.commit()?;
+                    return Ok(t);
                 }
             }
         }
@@ -837,7 +835,7 @@ mod tests {
             },
         )
         .unwrap();
-        let eff = crate::commands::effective_due(&t);
+        let eff = crate::schedule::effective_due(&t);
         assert_eq!(eff, Some(anchor), "错过 slot 即逾期，返回该 slot");
     }
 

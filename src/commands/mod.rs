@@ -1,7 +1,6 @@
 use rusqlite::Connection;
 
 use crate::cli::Command;
-use crate::model::task::Task;
 use anyhow::Result;
 
 mod alarm;
@@ -123,34 +122,4 @@ fn run_inner(cmd: Command, conn: &Connection, profile: Option<&str>) -> Result<(
             anyhow::bail!("`gtp profile` is handled before the database is opened")
         }
     }
-}
-
-/// The "effective due" of a task: for recurring tasks the slot that the human
-/// currently cares about — the most recent occurrence that has already passed
-/// without a check-in (missed ⇒ overdue), else the next occurrence on or after
-/// now. Otherwise `due_at` or `scheduled_start_at`. Used for sorting/filtering,
-/// the alarm window, and the daily digest.
-pub(crate) fn effective_due(task: &Task) -> Option<i64> {
-    if let Some(rr) = &task.rrule {
-        let anchor = task.scheduled_start_at.or(task.due_at);
-        if let Some(start) = anchor {
-            if let Ok(occ) = crate::time::rrule_occurrences(rr, start, 366) {
-                if let Some(d) = effective_due_from_occurrences(&occ) {
-                    return Some(d);
-                }
-            }
-            return Some(start);
-        }
-    }
-    task.due_at.or(task.scheduled_start_at)
-}
-
-/// 从已经展开的发生序列里挑出「最近一次已错过（逾期）的 slot，否则下一个」。
-/// 供缓存了展开结果的路径复用，避免重复展开循环规则。
-pub(crate) fn effective_due_from_occurrences(occ: &[i64]) -> Option<i64> {
-    let now = crate::time::now_ms();
-    if let Some(missed) = occ.iter().rev().find(|m| **m <= now).copied() {
-        return Some(missed);
-    }
-    occ.iter().find(|m| **m >= now).copied()
 }
