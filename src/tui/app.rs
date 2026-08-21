@@ -218,8 +218,7 @@ pub(crate) struct App<'a> {
     pub(crate) hide_pomo_banner: bool,
     pub(crate) theme: crate::tui::theme::Theme,
     pub(crate) popup: Option<Popup>,
-    pub(crate) last_tick_ms: i64,
-    pub(crate) notified_events: std::collections::HashSet<String>,
+    pub(crate) notification_engine: crate::notification::NotificationEngine,
     /// 各视图计数缓存：`refresh` 时一次性算好，渲染帧内零 DB 查询。
     pub(crate) counts: std::collections::HashMap<View, usize>,
     /// 循环任务展开结果缓存（task_id -> 发生序列）：一次刷新内每个循环规则只
@@ -303,8 +302,7 @@ impl<'a> App<'a> {
             hide_pomo_banner: false,
             theme,
             popup: None,
-            last_tick_ms: 0,
-            notified_events: std::collections::HashSet::new(),
+            notification_engine: crate::notification::NotificationEngine::new(),
             counts: std::collections::HashMap::new(),
             rrule_cache: std::collections::HashMap::new(),
             pomo: crate::repo::pomodoro::get_state().unwrap_or_default(),
@@ -363,55 +361,21 @@ impl<'a> App<'a> {
     }
 
     pub(crate) fn check_notifications(&mut self) {
-        let now = chrono::Local::now().timestamp();
-        if now - self.last_tick_ms < 10 {
-            return;
-        }
-        self.last_tick_ms = now;
-
-        // 每日心智维护摘要（合并成一条，同一天至多一次）。
-        let _ = crate::commands::notify::check(self.conn);
-
-        // 只拉取即将到期（±1h 窗口）的任务，不再全表扫描。
-        if let Ok(rows) = tasks::due_in_range(self.conn, (now - 60) * 1000, (now + 3600) * 1000) {
-            for (id, title, due) in rows {
-                let Some(due) = due else { continue };
-                let diff = due / 1000 - now;
-
-                // 1 hour
-                if diff > 3540 && diff <= 3600 {
-                    let key = format!("{id}-{due}-1h");
-                    if !self.notified_events.contains(&key) {
-                        self.notified_events.insert(key);
-                        crate::commands::notify::desktop("任务即将在1小时后开始", &title);
-                    }
+        let events = self.notification_engine.tick(self.conn);
+        for event in events {
+            match event {
+                crate::notification::NotificationEvent::DueInOneHour { title, .. } => {
+                    crate::commands::notify::desktop("任务即将在1小时后开始", &title);
                 }
-
-                // 10 mins
-                if diff > 540 && diff <= 600 {
-                    let key = format!("{id}-{due}-10m");
-                    if !self.notified_events.contains(&key) {
-                        self.notified_events.insert(key);
-                        crate::commands::notify::desktop("任务即将在10分钟后开始", &title);
-                    }
+                crate::notification::NotificationEvent::DueInTenMins { title, .. } => {
+                    crate::commands::notify::desktop("任务即将在10分钟后开始", &title);
                 }
-
-                // Due now
-                if diff <= 0 && diff > -60 {
-                    let key = format!("{id}-{due}-now");
-                    if !self.notified_events.contains(&key) {
-                        self.notified_events.insert(key);
-                        crate::commands::notify::desktop("任务现在开始!", &title);
-                        self.popup = Some(Popup::TaskDueNow(id.clone(), title));
-                        self.needs_clear = true; // force redraw to show popup
-                    }
+                crate::notification::NotificationEvent::DueNow { id, title } => {
+                    crate::commands::notify::desktop("任务现在开始!", &title);
+                    self.popup = Some(Popup::TaskDueNow(id, title));
+                    self.needs_clear = true; // force redraw to show popup
                 }
             }
-        }
-
-        // 防止 key 无限增长（长会话中到期任务不断累积）。
-        if self.notified_events.len() > 1024 {
-            self.notified_events.clear();
         }
     }
 

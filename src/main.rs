@@ -5,6 +5,7 @@ mod db;
 mod error;
 mod i18n;
 mod model;
+mod notification;
 mod parser;
 mod repo;
 mod schedule;

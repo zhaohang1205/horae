@@ -36,35 +36,30 @@ pub fn export_all(conn: &Connection) -> Result<BackupData> {
 
 fn export_tasks(conn: &Connection) -> Result<Vec<BackupTask>> {
     let mut stmt = conn.prepare(
-        "SELECT id,title,notes,kind,parent_id,status,rrule,created_at,clarified_at,organized_at,\
-         due_at,scheduled_start_at,scheduled_end_at,started_at,completed_at,archived_at,updated_at,\
-         delegated_to,project_type,checklist,archive_reason \
+        "SELECT id,title,notes,status,rrule,created_at,clarified_at,due_at,\
+         scheduled_start_at,scheduled_end_at,completed_at,archived_at,updated_at,\
+         delegated_to,checklist,archive_reason \
          FROM tasks ORDER BY created_at, id",
     )?;
     let rows = stmt.query_map([], |r| {
-        let cl_str: String = r.get(19)?;
+        let cl_str: String = r.get(14)?;
         Ok(BackupTask {
             id: r.get(0)?,
             title: r.get(1)?,
             notes: r.get(2)?,
-            kind: r.get(3)?,
-            parent_id: r.get(4)?,
-            status: r.get(5)?,
-            rrule: r.get(6)?,
-            created_at: r.get(7)?,
-            clarified_at: r.get(8)?,
-            organized_at: r.get(9)?,
-            due_at: r.get(10)?,
-            scheduled_start_at: r.get(11)?,
-            scheduled_end_at: r.get(12)?,
-            started_at: r.get(13)?,
-            completed_at: r.get(14)?,
-            archived_at: r.get(15)?,
-            updated_at: r.get(16)?,
-            delegated_to: r.get(17)?,
-            project_type: r.get(18)?,
+            status: r.get(3)?,
+            rrule: r.get(4)?,
+            created_at: r.get(5)?,
+            clarified_at: r.get(6)?,
+            due_at: r.get(7)?,
+            scheduled_start_at: r.get(8)?,
+            scheduled_end_at: r.get(9)?,
+            completed_at: r.get(10)?,
+            archived_at: r.get(11)?,
+            updated_at: r.get(12)?,
+            delegated_to: r.get(13)?,
             checklist: serde_json::from_str(&cl_str).unwrap_or_default(),
-            archive_reason: r.get(20)?,
+            archive_reason: r.get(15)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -217,30 +212,25 @@ pub fn import_all(conn: &Connection, data: &BackupData, replace: bool) -> Result
             let cl_str = serde_json::to_string(&t.checklist).unwrap_or_else(|_| "[]".to_string());
             tx.execute(
                 "INSERT INTO tasks \
-             (id,title,notes,kind,parent_id,status,rrule,created_at,clarified_at,organized_at,\
-              due_at,scheduled_start_at,scheduled_end_at,started_at,completed_at,archived_at,\
-              updated_at,delegated_to,project_type,checklist,archive_reason) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
+             (id,title,notes,status,rrule,created_at,clarified_at,due_at,\
+              scheduled_start_at,scheduled_end_at,completed_at,archived_at,updated_at,\
+              delegated_to,checklist,archive_reason) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
                 rusqlite::params![
                     t.id,
                     t.title,
                     t.notes,
-                    t.kind,
-                    t.parent_id,
                     t.status,
                     t.rrule,
                     t.created_at,
                     t.clarified_at,
-                    t.organized_at,
                     t.due_at,
                     t.scheduled_start_at,
                     t.scheduled_end_at,
-                    t.started_at,
                     t.completed_at,
                     t.archived_at,
                     t.updated_at,
                     t.delegated_to,
-                    t.project_type,
                     cl_str,
                     t.archive_reason
                 ],

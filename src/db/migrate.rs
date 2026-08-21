@@ -63,6 +63,12 @@ pub fn run(conn: &mut Connection) -> anyhow::Result<()> {
         conn.pragma_update(None, "user_version", 9)?;
     }
 
+    if current_version < 10 {
+        let sql11 = include_str!("../../migrations/0011_drop_dead_columns.sql");
+        conn.execute_batch(sql11)?;
+        conn.pragma_update(None, "user_version", 10)?;
+    }
+
     Ok(())
 }
 
@@ -129,7 +135,7 @@ mod tests {
         let v: i32 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 9, "迁移版本推进到 9");
+        assert_eq!(v, 10, "迁移版本推进到 10");
 
         // 幂等：再次运行不改变任何值
         run(&mut conn).unwrap();

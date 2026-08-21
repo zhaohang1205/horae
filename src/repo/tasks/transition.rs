@@ -1,3 +1,7 @@
+//! Task mutations: capture, status transitions, scheduling, archive/purge.
+//! Every state change goes through [`crate::repo::mutate`] so the mutation and
+//! its audit event share one timestamp and are atomic.
+
 use rusqlite::Connection;
 use uuid::Uuid;
 
@@ -8,10 +12,7 @@ use crate::repo::log_event;
 use crate::time;
 use anyhow::Result;
 
-/// Columns for the `tasks` table, shared by every row-mapping query.
-const TASK_COLUMNS: &str = "id,title,notes,status,rrule,created_at,clarified_at,\
-        due_at,scheduled_start_at,scheduled_end_at,started_at,completed_at,archived_at,updated_at,\
-        delegated_to,checklist,archive_reason";
+use super::{checked_in_today, get, resolve_id};
 
 /// Input for creating a task (capture).
 pub struct CaptureInput {
@@ -36,14 +37,6 @@ impl Default for CaptureInput {
             checklist: Vec::new(),
         }
     }
-}
-
-pub fn get(conn: &Connection, id: &str) -> Result<Task> {
-    let mut stmt = conn.prepare(&format!("SELECT {} FROM tasks WHERE id = ?1", TASK_COLUMNS))?;
-    let mut rows = stmt.query_map([id], row_to_task)?;
-    rows.next()
-        .transpose()?
-        .ok_or_else(|| Error::TaskNotFound(id.to_string()).into())
 }
 
 pub fn create_capture(conn: &Connection, input: &CaptureInput) -> Result<Task> {
@@ -101,25 +94,6 @@ pub fn create_capture(conn: &Connection, input: &CaptureInput) -> Result<Task> {
         Ok(())
     })?;
     get(conn, &id)
-}
-
-/// Resolve a task reference to its full id: exact match, else a unique id
-/// prefix (like git), else `TaskNotFound`.
-pub fn resolve_id(conn: &Connection, key: &str) -> Result<String> {
-    // 一次查询同时命中精确匹配与 id 前缀（精确匹配排在最前），避免先 `get` 再前缀查询两次往返。
-    let mut stmt = conn.prepare(
-        "SELECT id FROM tasks WHERE id = ?1 OR id LIKE ?1 || '%' \
-         ORDER BY (id = ?1) DESC LIMIT 2",
-    )?;
-    let rows = stmt.query_map([key], |r| r.get::<usize, String>(0))?;
-    let ids: Vec<String> = rows.collect::<rusqlite::Result<_>>()?;
-    match ids.as_slice() {
-        // 精确匹配优先：即使同时存在多个前缀命中，精确命中仍然胜出（git 语义）。
-        [first, ..] if first.as_str() == key => Ok(key.to_string()),
-        [first] => Ok(first.clone()),
-        [] => Err(Error::TaskNotFound(key.to_string()).into()),
-        _ => anyhow::bail!("ambiguous id prefix: {}", key),
-    }
 }
 
 pub fn rename(conn: &Connection, id: &str, new_title: &str) -> Result<Task> {
@@ -213,8 +187,8 @@ pub fn transition(conn: &Connection, id: &str, to_status: task::Status) -> Resul
                         t.updated_at = now;
 
                         tx.execute(
-                            "UPDATE tasks SET status=?1, clarified_at=?2, completed_at=?3, updated_at=?4, started_at=?5, scheduled_start_at=?6, scheduled_end_at=?7, due_at=?8 WHERE id=?9",
-                            rusqlite::params![t.status.to_string(), t.clarified_at, t.completed_at, t.updated_at, t.started_at, t.scheduled_start_at, t.scheduled_end_at, t.due_at, id],
+                            "UPDATE tasks SET status=?1, clarified_at=?2, completed_at=?3, updated_at=?4, scheduled_start_at=?5, scheduled_end_at=?6, due_at=?7 WHERE id=?8",
+                            rusqlite::params![t.status.to_string(), t.clarified_at, t.completed_at, t.updated_at, t.scheduled_start_at, t.scheduled_end_at, t.due_at, id],
                         )?;
                         return Ok(());
                     }
@@ -229,8 +203,8 @@ pub fn transition(conn: &Connection, id: &str, to_status: task::Status) -> Resul
         t.updated_at = now;
 
         tx.execute(
-            "UPDATE tasks SET status=?1, clarified_at=?2, completed_at=?3, updated_at=?4, started_at=?5, scheduled_start_at=?6, scheduled_end_at=?7 WHERE id=?8",
-            rusqlite::params![t.status.to_string(), t.clarified_at, t.completed_at, t.updated_at, t.started_at, t.scheduled_start_at, t.scheduled_end_at, id],
+            "UPDATE tasks SET status=?1, clarified_at=?2, completed_at=?3, updated_at=?4, scheduled_start_at=?5, scheduled_end_at=?6 WHERE id=?7",
+            rusqlite::params![t.status.to_string(), t.clarified_at, t.completed_at, t.updated_at, t.scheduled_start_at, t.scheduled_end_at, id],
         )?;
         let ev = if to_status == task::Status::Done {
             event::EV_COMPLETED
@@ -390,312 +364,10 @@ pub fn purge(conn: &Connection, id: &str) -> Result<Task> {
     Ok(t)
 }
 
-/// Count of archived (soft-deleted) tasks, for the guide sidebar badge.
-pub fn count_archived(conn: &Connection) -> Result<usize> {
-    let c: usize = conn.query_row(
-        "SELECT COUNT(*) FROM tasks WHERE archived_at IS NOT NULL",
-        [],
-        |r| r.get(0),
-    )?;
-    Ok(c)
-}
-
-/// The tag name backing the 金句 (Quotes) view.
-pub const QUOTE_TAG: &str = "quote";
-
-/// WHERE fragment selecting tasks carrying the `quote` tag (not archived).
-/// Optional extra tag + search query narrow it further, mirroring `filter_where`.
-fn quote_filter(
-    query: Option<&str>,
-    extra_tag: Option<&str>,
-) -> (String, Vec<Box<dyn rusqlite::ToSql>>) {
-    let mut sql = String::from(
-        " AND id IN (SELECT task_id FROM task_tags tt JOIN tags g ON g.id=tt.tag_id WHERE g.name = 'quote')",
-    );
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-    if let Some(t) = extra_tag {
-        sql.push_str(
-            " AND id IN (SELECT task_id FROM task_tags tt JOIN tags g ON g.id=tt.tag_id WHERE g.name = ?)",
-        );
-        params.push(Box::new(t.to_string()));
-    }
-    if let Some(q) = query {
-        sql.push_str(" AND (title LIKE ? OR notes LIKE ?)");
-        let like_q = format!("%{}%", q);
-        params.push(Box::new(like_q.clone()));
-        params.push(Box::new(like_q));
-    }
-    (sql, params)
-}
-
-/// List tasks tagged `quote` (金句视图), newest first — a feed-like notebook.
-/// Quotes reuse the task model: status is `reference`, so they never surface in
-/// the inbox / action workflow.
-pub fn list_quotes(
-    conn: &Connection,
-    query: Option<&str>,
-    extra_tag: Option<&str>,
-) -> Result<Vec<Task>> {
-    let (where_sql, params) = quote_filter(query, extra_tag);
-    let sql = format!(
-        "SELECT {} FROM tasks WHERE archived_at IS NULL{where_sql} \
-         ORDER BY created_at DESC",
-        TASK_COLUMNS
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-    let rows = stmt.query_map(param_refs.as_slice(), row_to_task)?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-}
-
-/// Count of quote-tagged (unarchived) tasks, for the guide sidebar badge.
-pub fn count_quotes(conn: &Connection, query: Option<&str>) -> Result<usize> {
-    let (where_sql, params) = quote_filter(query, None);
-    let sql = format!("SELECT COUNT(*) FROM tasks WHERE archived_at IS NULL{where_sql}");
-    let mut stmt = conn.prepare(&sql)?;
-    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-    let c: usize = stmt.query_row(param_refs.as_slice(), |r| r.get(0))?;
-    Ok(c)
-}
-
-/// Ids of all unarchived tasks tagged `quote` (any status). Used by the
-/// Reference view to exclude quotes so quotes live only in the Quotes view.
-pub fn quote_task_ids(conn: &Connection) -> Result<Vec<String>> {
-    let mut stmt = conn.prepare(
-        "SELECT DISTINCT tt.task_id FROM task_tags tt \
-         JOIN tags g ON g.id = tt.tag_id \
-         JOIN tasks t ON t.id = tt.task_id \
-         WHERE g.name = ?1 AND t.archived_at IS NULL",
-    )?;
-    let rows = stmt.query_map([QUOTE_TAG], |r| r.get::<usize, String>(0))?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-}
-
-/// Count of quote-tagged (unarchived) tasks in a specific status. Precise
-/// counterpart of [`count_quotes`] for the Reference badge subtraction: only
-/// quotes that are actually `reference` live in the Reference view.
-pub fn count_quotes_in_status(
-    conn: &Connection,
-    status: &str,
-    query: Option<&str>,
-) -> Result<usize> {
-    let mut sql = String::from(
-        "SELECT COUNT(*) FROM tasks WHERE archived_at IS NULL AND status = ?1 \
-         AND id IN (SELECT task_id FROM task_tags tt JOIN tags g ON g.id=tt.tag_id WHERE g.name = 'quote')",
-    );
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(status.to_string())];
-    if let Some(q) = query {
-        sql.push_str(" AND (title LIKE ? OR notes LIKE ?)");
-        let like_q = format!("%{}%", q);
-        params.push(Box::new(like_q.clone()));
-        params.push(Box::new(like_q));
-    }
-    let mut stmt = conn.prepare(&sql)?;
-    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-    let c: usize = stmt.query_row(param_refs.as_slice(), |r| r.get(0))?;
-    Ok(c)
-}
-
-/// Tasks whose `due_at` falls in the inclusive `[start_ms, end_ms]` window.
-/// Lightweight query returning only the columns the due-notification check needs,
-/// instead of scanning every task row on each tick.
-pub fn due_in_range(
-    conn: &Connection,
-    start_ms: i64,
-    end_ms: i64,
-) -> Result<Vec<(String, String, Option<i64>)>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, title, due_at FROM tasks \
-         WHERE archived_at IS NULL AND due_at BETWEEN ?1 AND ?2",
-    )?;
-    let rows = stmt.query_map(rusqlite::params![start_ms, end_ms], |r| {
-        Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-    })?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-}
-
-/// List only archived (soft-deleted) tasks, for the restore UI.
-pub fn list_archived(conn: &Connection) -> Result<Vec<Task>> {
-    let mut stmt = conn.prepare(&format!(
-        "SELECT {} FROM tasks WHERE archived_at IS NOT NULL \
-         ORDER BY archived_at DESC",
-        TASK_COLUMNS
-    ))?;
-    let rows = stmt.query_map([], row_to_task)?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-}
-
-pub struct ListFilter {
-    pub status: Option<task::Status>,
-    pub tags: Vec<String>,
-    pub query: Option<String>,
-    pub review_stale: bool,
-}
-
-pub fn list(conn: &Connection, f: &ListFilter) -> Result<Vec<Task>> {
-    let (where_sql, params) = filter_where(f);
-    let sql = format!(
-        "SELECT {} FROM tasks WHERE archived_at IS NULL{where_sql} \
-         ORDER BY (scheduled_start_at IS NOT NULL) DESC, scheduled_start_at ASC, due_at ASC, created_at ASC",
-        TASK_COLUMNS
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-    let rows = stmt.query_map(param_refs.as_slice(), row_to_task)?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-}
-
-/// 未归档任务按状态分组计数（`status 字符串 -> 数量`），一次 GROUP BY 取代逐状态
-/// COUNT。仅按搜索条件过滤，供侧栏徽标复用。
-pub fn count_by_status(
-    conn: &Connection,
-    query: Option<&str>,
-) -> Result<std::collections::HashMap<String, usize>> {
-    let f = ListFilter {
-        status: None,
-        tags: vec![],
-        query: query.map(String::from),
-        review_stale: false,
-    };
-    let (where_sql, params) = filter_where(&f);
-    let sql = format!(
-        "SELECT status, COUNT(*) FROM tasks WHERE archived_at IS NULL{where_sql} GROUP BY status"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-    let rows = stmt.query_map(param_refs.as_slice(), |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, usize>(1)?))
-    })?;
-    Ok(rows.collect::<rusqlite::Result<_>>()?)
-}
-
-/// Build the `WHERE` fragment (including its leading ` AND …`) and the bound
-/// parameters shared by `list` and `count`.
-fn filter_where(f: &ListFilter) -> (String, Vec<Box<dyn rusqlite::ToSql>>) {
-    let mut sql = String::new();
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-    if let Some(s) = &f.status {
-        sql.push_str(" AND status = ?");
-        params.push(Box::new(s.to_string()));
-    }
-    if f.review_stale {
-        let seven_days_ago = crate::time::now_ms() - 7 * 24 * 3600 * 1000;
-        sql.push_str(" AND (updated_at < ? OR updated_at IS NULL)");
-        params.push(Box::new(seven_days_ago));
-    }
-    for tag in &f.tags {
-        sql.push_str(
-            " AND id IN (SELECT task_id FROM task_tags tt JOIN tags g ON g.id=tt.tag_id WHERE g.name = ?)",
-        );
-        params.push(Box::new(tag.clone()));
-    }
-    if let Some(q) = &f.query {
-        sql.push_str(" AND (title LIKE ? OR notes LIKE ?)");
-        let like_q = format!("%{}%", q);
-        params.push(Box::new(like_q.clone()));
-        params.push(Box::new(like_q));
-    }
-    (sql, params)
-}
-
-/// Inbox 中在 `before_ms` 之前收集、至今未澄清的任务 (id, title)，
-/// 用于心智维护的收件箱滞留提醒。按收集时间升序（最旧的在前）。
-pub fn list_stale_inbox(conn: &Connection, before_ms: i64) -> Result<Vec<(String, String)>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, title FROM tasks \
-         WHERE archived_at IS NULL AND status = 'inbox' AND created_at < ?1 \
-         ORDER BY created_at ASC",
-    )?;
-    let rows = stmt.query_map([before_ms], |r| Ok((r.get(0)?, r.get(1)?)))?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-}
-
-/// Waiting 中 `before_ms` 以来未再动过的任务 (id, title)，
-/// 用于心智维护的等待老化提醒。按最后变动时间升序。
-pub fn list_stale_waiting(conn: &Connection, before_ms: i64) -> Result<Vec<(String, String)>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, title FROM tasks \
-         WHERE archived_at IS NULL AND status = 'waiting' AND updated_at < ?1 \
-         ORDER BY updated_at ASC",
-    )?;
-    let rows = stmt.query_map([before_ms], |r| Ok((r.get(0)?, r.get(1)?)))?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-}
-
-/// 自 `since_ms` 以来完成的任务数（含随后归档的已完成任务）。
-pub fn count_completed_since(conn: &Connection, since_ms: i64) -> Result<usize> {
-    let c: usize = conn.query_row(
-        "SELECT COUNT(*) FROM tasks WHERE completed_at IS NOT NULL AND completed_at >= ?1",
-        [since_ms],
-        |r| r.get(0),
-    )?;
-    Ok(c)
-}
-
-/// 今日已打卡的循环任务 id：存在 `habit_completed` 事件且时间 >= `since_ms`。
-/// 循环任务完成时不会置 `completed_at`（重新排程而非结束），故只能靠事件判断。
-pub fn checked_in_today(conn: &Connection, since_ms: i64) -> Result<Vec<String>> {
-    let mut stmt = conn.prepare(
-        "SELECT DISTINCT task_id FROM task_events \
-         WHERE event_type = ?1 AND at >= ?2",
-    )?;
-    let rows = stmt.query_map(
-        rusqlite::params![event::EV_HABIT_COMPLETED, since_ms],
-        |r| r.get::<_, String>(0),
-    )?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-}
-
-pub fn events(conn: &Connection, task_id: &str) -> Result<Vec<event::TaskEvent>> {
-    let mut stmt = conn.prepare(
-        "SELECT id,task_id,event_type,from_status,to_status,at,meta \
-         FROM task_events WHERE task_id = ?1 ORDER BY at ASC",
-    )?;
-    let rows = stmt.query_map([task_id], |r| {
-        Ok(event::TaskEvent {
-            id: r.get(0)?,
-            task_id: r.get(1)?,
-            event_type: r.get(2)?,
-            from_status: r.get(3)?,
-            to_status: r.get(4)?,
-            at: r.get(5)?,
-            meta: r.get(6)?,
-        })
-    })?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-}
-
-fn row_to_task(r: &rusqlite::Row) -> rusqlite::Result<Task> {
-    let status_str: String = r.get(3)?;
-    let delegated_to: Option<String> = r.get(14)?;
-    let cl_str: String = r.get(15)?;
-
-    Ok(Task {
-        id: r.get(0)?,
-        title: r.get(1)?,
-        notes: r.get(2)?,
-        status: status_str
-            .parse()
-            .unwrap_or(crate::model::task::Status::Inbox),
-        rrule: r.get(4)?,
-        created_at: r.get(5)?,
-        clarified_at: r.get(6)?,
-        due_at: r.get(7)?,
-        scheduled_start_at: r.get(8)?,
-        scheduled_end_at: r.get(9)?,
-        started_at: r.get(10)?,
-        completed_at: r.get(11)?,
-        archived_at: r.get(12)?,
-        updated_at: r.get(13)?,
-        delegated_to,
-        checklist: serde_json::from_str(&cl_str).unwrap_or_default(),
-        archive_reason: r.get(16)?,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repo::tasks::events;
     use crate::testutil::test_conn;
 
     fn count_rows(conn: &Connection, table: &str, task_id: &str) -> usize {
@@ -883,78 +555,42 @@ mod tests {
             .count();
         assert_eq!(habit_events, 1, "不重复记录打卡事件");
     }
+}
 
-    #[test]
-    fn list_quotes_filters_and_orders_newest_first() {
-        let (_dir, conn) = test_conn();
-        // 普通收件箱任务（不带 quote）
-        create_capture(
-            &conn,
-            &CaptureInput {
-                title: "普通任务".into(),
-                status: task::Status::Inbox,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        // 两条金句（@quote + reference）
-        let q1 = create_capture(
-            &conn,
-            &CaptureInput {
-                title: "金句一".into(),
-                status: task::Status::Reference,
-                tag_names: vec![QUOTE_TAG.to_string()],
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(5));
-        let q2 = create_capture(
-            &conn,
-            &CaptureInput {
-                title: "金句二".into(),
-                status: task::Status::Reference,
-                tag_names: vec![QUOTE_TAG.to_string()],
-                ..Default::default()
-            },
-        )
-        .unwrap();
+pub enum ToggleResult {
+    Checked(String),
+    Reset,
+}
 
-        assert_eq!(count_quotes(&conn, None).unwrap(), 2);
-        let all = list_quotes(&conn, None, None).unwrap();
-        assert_eq!(all.len(), 2);
-        assert_eq!(all[0].id, q2.id, "新的在前");
-        assert_eq!(all[1].id, q1.id, "旧的在后");
-
-        // quote_task_ids / count_quotes_in_status（供 Reference 视图排除金句）
-        let mut ids = quote_task_ids(&conn).unwrap();
-        ids.sort();
-        let mut expect = vec![q1.id.clone(), q2.id.clone()];
-        expect.sort();
-        assert_eq!(ids, expect);
-        assert_eq!(count_quotes_in_status(&conn, "reference", None).unwrap(), 2);
-        assert_eq!(count_quotes_in_status(&conn, "next", None).unwrap(), 0);
-
-        // 搜索过滤
-        let found = list_quotes(&conn, Some("金句二"), None).unwrap();
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].id, q2.id);
-
-        // 附加标签过滤
-        let none = list_quotes(&conn, None, Some("不存在的标签")).unwrap();
-        assert!(none.is_empty());
-
-        // 归档的金句不计入
-        archive(&conn, &q2.id).unwrap();
-        assert_eq!(count_quotes(&conn, None).unwrap(), 1);
-        let all = list_quotes(&conn, None, None).unwrap();
-        assert_eq!(all.len(), 1);
-        assert_eq!(all[0].id, q1.id);
-        assert_eq!(quote_task_ids(&conn).unwrap(), vec![q1.id.clone()]);
-        assert_eq!(
-            count_quotes_in_status(&conn, "reference", None).unwrap(),
-            1,
-            "归档的金句不参与 Reference 徽标减法"
-        );
+pub fn toggle_next_checklist_item(conn: &Connection, id: &str) -> Result<Option<ToggleResult>> {
+    let mut task = crate::repo::tasks::get(conn, id)?;
+    if task.checklist.is_empty() {
+        return Ok(None);
     }
+
+    let mut toggled_title = None;
+    if let Some(item) = task.checklist.iter_mut().find(|i| !i.done) {
+        item.done = true;
+        toggled_title = Some(item.title.clone());
+    }
+
+    let result = if let Some(title) = toggled_title {
+        ToggleResult::Checked(title)
+    } else {
+        for item in task.checklist.iter_mut() {
+            item.done = false;
+        }
+        ToggleResult::Reset
+    };
+
+    update_checklist(conn, &task.id, &task.checklist)?;
+    Ok(Some(result))
+}
+
+pub fn ensure_ready_for_pomodoro(conn: &Connection, id: &str) -> Result<()> {
+    let task = crate::repo::tasks::get(conn, id)?;
+    if task.status != task::Status::Next && task.status != task::Status::Done {
+        transition(conn, id, task::Status::Next)?;
+    }
+    Ok(())
 }

@@ -64,7 +64,6 @@ pub struct Task {
     pub due_at: Option<i64>,
     pub scheduled_start_at: Option<i64>,
     pub scheduled_end_at: Option<i64>,
-    pub started_at: Option<i64>,
     pub completed_at: Option<i64>,
     pub archived_at: Option<i64>,
     pub archive_reason: Option<String>,

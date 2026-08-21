@@ -26,7 +26,7 @@ GTD terminal task manager (`gtp`) — a Rust binary (edition 2021, **no lib targ
 ## Non-obvious rules (violating these breaks things)
 
 - **Timestamps**: store UTC ms INTEGER, never formatted strings. All time math goes through `time.rs`; display via `format_local`.
-- **Migrations**: never edit existing `migrations/*.sql`. Add a new file plus a new version block in `migrate.rs` (currently v1 = 0001+0002, v2 = +0003, v3 = +0004, v4 = +0005, v5 = +0006, v6 = +0007, v7 = +0008, v8 = +0009, v9 = +0010). Migration SQL is idempotent (IF NOT EXISTS / INSERT OR IGNORE).
+- **Migrations**: never edit existing `migrations/*.sql`. Add a new file plus a new version block in `migrate.rs` (currently v1 = 0001+0002, v2 = +0003, v3 = +0004, v4 = +0005, v5 = +0006, v6 = +0007, v7 = +0008, v8 = +0009, v9 = +0010, v10 = +0011). Migration SQL is idempotent (IF NOT EXISTS / INSERT OR IGNORE); the `DROP COLUMN` in 0011 relies on the `user_version` guard rather than SQL-level idempotency.
 - **New event types**: add a const in `model/event.rs` AND keep the `task_events` comment in `migrations/0001_init.sql` in sync.
 - **DB paths**: `~/.config/gtp/gtp.db`, `~/.config/gtp/config.json` and `~/.config/gtp/pomo.json` all derive from `dirs::config_dir()` — never hardcode.
 - **ID resolution**: commands accept a task id, a unique id-prefix, or an exact title (`resolve_id`).

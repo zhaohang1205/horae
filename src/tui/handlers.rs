@@ -647,44 +647,21 @@ impl<'a> App<'a> {
         match key.code {
             KeyCode::Char('=') => {
                 if let Some(row) = self.items.get(self.selected).cloned() {
-                    if let Ok(mut task) = tasks::get(self.conn, &row.id) {
-                        if !task.checklist.is_empty() {
-                            let mut toggled_title = String::new();
-                            if let Some(item) = task.checklist.iter_mut().find(|i| !i.done) {
-                                item.done = true;
-                                toggled_title = item.title.clone();
+                    if let Ok(Some(result)) =
+                        crate::repo::tasks::toggle_next_checklist_item(self.conn, &row.id)
+                    {
+                        match result {
+                            crate::repo::tasks::ToggleResult::Checked(title) => {
+                                self.status_message =
+                                    crate::tr!(self.lang, "打卡: {}", "Checked: {}", title);
                             }
-                            if !toggled_title.is_empty() {
-                                if self.note(tasks::update_checklist(
-                                    self.conn,
-                                    &task.id,
-                                    &task.checklist,
-                                )) {
-                                    self.status_message = crate::tr!(
-                                        self.lang,
-                                        "打卡: {}",
-                                        "Checked: {}",
-                                        toggled_title
-                                    );
-                                }
-                                self.load_detail();
-                            } else {
-                                // 全部已完成时，按 = 则全部重置为未完成
-                                for item in task.checklist.iter_mut() {
-                                    item.done = false;
-                                }
-                                if self.note(tasks::update_checklist(
-                                    self.conn,
-                                    &task.id,
-                                    &task.checklist,
-                                )) {
-                                    self.status_message =
-                                        crate::tr!(self.lang, "已重置检查单", "Checklist reset")
-                                            .to_string();
-                                }
-                                self.load_detail();
+                            crate::repo::tasks::ToggleResult::Reset => {
+                                self.status_message =
+                                    crate::tr!(self.lang, "已重置检查单", "Checklist reset")
+                                        .to_string();
                             }
                         }
+                        self.load_detail();
                     }
                 }
             }
@@ -708,19 +685,12 @@ impl<'a> App<'a> {
                             .map(|r| r.id.clone())
                             .or(pomo.task_id);
                         if let Some(tid) = target_id {
-                            if let Ok(t) = tasks::get(self.conn, &tid) {
-                                if t.status != task::Status::Next && t.status != task::Status::Done
-                                {
-                                    self.note(tasks::transition(
-                                        self.conn,
-                                        &tid,
-                                        task::Status::Next,
-                                    ));
-                                    {
-                                        let r = self.refresh();
-                                        self.note(r);
-                                    }
-                                }
+                            self.note(crate::repo::tasks::ensure_ready_for_pomodoro(
+                                self.conn, &tid,
+                            ));
+                            {
+                                let r = self.refresh();
+                                self.note(r);
                             }
                             if self.note(crate::commands::pomo::start(self.conn, &tid)) {
                                 self.status_message = crate::tr!(
@@ -745,14 +715,12 @@ impl<'a> App<'a> {
                             .and_then(|s| s.task_id)
                     });
                 if let Some(tid) = target_id {
-                    if let Ok(t) = tasks::get(self.conn, &tid) {
-                        if t.status != task::Status::Next && t.status != task::Status::Done {
-                            self.note(tasks::transition(self.conn, &tid, task::Status::Next));
-                            {
-                                let r = self.refresh();
-                                self.note(r);
-                            }
-                        }
+                    self.note(crate::repo::tasks::ensure_ready_for_pomodoro(
+                        self.conn, &tid,
+                    ));
+                    {
+                        let r = self.refresh();
+                        self.note(r);
                     }
                     if self.note(crate::commands::pomo::start(self.conn, &tid)) {
                         self.status_message = crate::tr!(

@@ -283,7 +283,6 @@ mod tests {
             due_at: due,
             scheduled_start_at: None,
             scheduled_end_at: None,
-            started_at: None,
             completed_at: None,
             archived_at: None,
             archive_reason: None,
