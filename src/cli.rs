@@ -42,6 +42,7 @@ pub enum Command {
     #[command(long_about = "Capture a new item into the inbox. Tags auto-create on first use; \
         quick-add syntax (@tag ~time *rrule !priority) is parsed in the title.",
         after_help = "Examples:\n  horae capture \"buy milk\" --tag home\n  horae capture \"call mom\" --p2 --due tomorrow\n  horae capture \"submit report\" --status scheduled --due +1d\n  horae capture \"email boss ~today @work !a\"",
+        visible_alias = "c",
         group = clap::ArgGroup::new("priority").args(["p1", "p2", "p3"]))]
     Capture {
         title: String,
@@ -72,7 +73,8 @@ pub enum Command {
     #[command(
         long_about = "List tasks with optional filters. Sorting uses the effective due: \
         for recurring tasks that is the next occurrence on or after now.",
-        after_help = "Examples:\n  horae list\n  horae list --status next\n  horae list --status scheduled --tag work\n  horae list --due-before +1d --json"
+        after_help = "Examples:\n  horae list\n  horae list --status next\n  horae list --status scheduled --tag work\n  horae list --due-before +1d --json",
+        visible_alias = "l"
     )]
     List {
         #[arg(long, value_name = "STATUS", help = "Filter by status")]
@@ -85,7 +87,7 @@ pub enum Command {
         json: bool,
     },
     /// Show a task with its full event timeline
-    #[command(long_about = "Show a task's details plus its full append-only event timeline.")]
+    #[command(long_about = "Show a task's details plus its full append-only event timeline.", visible_alias = "s")]
     Show {
         id: String,
         #[arg(long, help = "Print the task as JSON")]
@@ -116,6 +118,7 @@ pub enum Command {
     /// Move to someday/maybe
     Someday { id: String },
     /// Mark done (reschedules recurring tasks to the next occurrence)
+    #[command(visible_alias = "d")]
     Done { id: String },
     /// Archive (soft delete) a task
     Archive { id: String },
@@ -135,7 +138,8 @@ pub enum Command {
     #[command(
         long_about = "Pomodoro focus mode. `start` spawns a background daemon that ticks \
         every second, writes pomo.json and sends desktop notifications.",
-        after_help = "Examples:\n  horae pomo start <task-id>\n  horae pomo stop\n  horae pomo daemon\n  horae pomo waybar"
+        after_help = "Examples:\n  horae pomo start <task-id>\n  horae pomo stop\n  horae pomo daemon\n  horae pomo waybar",
+        visible_alias = "p"
     )]
     Pomo {
         #[arg(value_name = "ACTION", help = "start, stop, daemon, or waybar")]
