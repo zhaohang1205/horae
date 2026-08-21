@@ -53,4 +53,27 @@
 - 命令层返回 `anyhow::Result`，域错误用 `crate::error::Error`。
 - 架构词汇（/codebase-design）：module / interface / depth / seam / adapter / leverage / locality。领域词汇见 `CONTEXT.md`。
 - 无 ADR 目录；唯一设计文档 `docs/design-profiles-and-cloud.md`（profile 多库 + 云，未实现；`config.rs` 已落地 Phase 1）。
-- CI：fmt、clippy `-D warnings`、test、MSRV（rust-version 1.89）。clippy 必须零警告。
+## 最新会话已完成 (Latest Session Accomplishments)
+
+### 6. 通知守护进程解耦 (Notification Engine Seam)
+- **问题**：原 `App::tick` (在 `tui/app.rs`) 中混合了通知时间窗计算与 OS 弹窗，职责不清晰且存在反向依赖。
+- **解决**：抽取纯后台计算引擎 `src/notification.rs::NotificationEngine`。它接管了所有的任务到期探测，吐出抽象的 `NotificationEvent::InOneHour | InTenMins | Now`。
+- **修正**：消除了对 `chrono` 的直接依赖，全面切换回 `crate::time::now_ms()`。解决了循环依赖（通知引擎不依赖 `commands` 层，而是把 `commands::notify::check` 推回给 UI 适配器执行）。
+
+### 7. 加深领域 API，消除 TUI 层逻辑泄漏 (Deepen Domain APIs)
+- **问题**：`src/tui/handlers.rs` 在处理番茄钟打卡 (`P`) 和检查单勾选 (`=`) 时，直接在 UI 层遍历任务、修改状态并校验前置条件。
+- **解决**：在 `repo::tasks::transition` 下新增 `toggle_next_checklist_item` 和 `ensure_ready_for_pomodoro`。TUI 退化为纯粹的事件路由与适配器（按键触发深层 API，根据 `ToggleResult` 显示提示信息），成功通过 Deletion Test。
+
+### 8. 全局更名与 CLI 极简优化 (Project Rename & CLI UX)
+- **更名**：项目从 `gtp` 正式更名为 **`horae`**（希腊神话掌管时间与秩序的女神）。涵盖 `Cargo.toml`、配置路径 `~/.config/horae/`、环境变量 `HORAE_*` 及所有相关文档注释。
+- **短别名**：利用 `clap` 增加了高频单字母别名：`horae c` (capture), `l` (list), `d` (done), `s` (show), `p` (pomo)。
+- **无引号输入**：将 `Capture` 的 `title` 改为 `Vec<String>`（Var-args），允许用户**完全不带引号**执行极速捕获：`horae c 给花浇水 @home ~today`。
+
+## 下一步建议方向 (Proposed Next Steps)
+
+1. **`horae focus` (或 `horae do`)**
+   - **目标**：终结选择困难症。直接计算并输出**目前最应该做的一件事**（综合考虑 p1/p2、有效截止期、当前上下文时间），甚至支持附加 `--start` 直接起番茄钟。
+2. **`horae stats` (终端看板)**
+   - **目标**：不进 TUI，提供一个帅气的 MOTD 风格简报（包含今日完成番茄数、燃尽图、待办统计），适合加进 `~/.zshrc`。
+3. **`horae log` (无任务碎碎念)**
+   - **目标**：复用底层强大的 `task_events` append-only 时间线，支持纯粹记录带时间戳的事件/日记，不产生待办任务。
