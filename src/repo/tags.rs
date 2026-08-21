@@ -53,16 +53,18 @@ pub fn find_or_create_tag(conn: &Connection, name: &str) -> Result<i64> {
 }
 
 pub fn add_tag_to_task(conn: &Connection, task_id: &str, tag_name: &str) -> Result<()> {
-    let tx = conn.unchecked_transaction()?;
-    add_tag_to_task_inner(&tx, task_id, tag_name)?;
-    tx.commit()?;
-    Ok(())
+    crate::repo::mutate(conn, |tx, now| {
+        add_tag_to_task_inner(tx, task_id, tag_name, now)
+    })
 }
 
+/// 在事务内给任务加标签并写审计事件。`now` 由外层事务传入，保证与其它事件
+/// 时间戳一致（时间数据化）。
 pub(crate) fn add_tag_to_task_inner(
     conn: &Connection,
     task_id: &str,
     tag_name: &str,
+    now: i64,
 ) -> Result<()> {
     let tag_id = find_or_create_tag(conn, tag_name)?;
     let exists: i64 = conn.query_row(
@@ -73,7 +75,6 @@ pub(crate) fn add_tag_to_task_inner(
     if exists > 0 {
         return Ok(());
     }
-    let now = time::now_ms();
     conn.execute(
         "INSERT INTO task_tags (task_id, tag_id, added_at) VALUES (?1, ?2, ?3)",
         rusqlite::params![task_id, tag_id, now],
@@ -92,69 +93,67 @@ pub(crate) fn add_tag_to_task_inner(
 }
 
 pub fn remove_tag_from_task(conn: &Connection, task_id: &str, tag_name: &str) -> Result<()> {
-    let tx = conn.unchecked_transaction()?;
-    let tag =
-        get_tag_by_name(&tx, tag_name)?.ok_or_else(|| Error::TagNotFound(tag_name.to_string()))?;
-    let deleted = tx.execute(
-        "DELETE FROM task_tags WHERE task_id = ?1 AND tag_id = ?2",
-        rusqlite::params![task_id, tag.id],
-    )?;
-    if deleted == 0 {
-        return Err(Error::TagNotFound(tag_name.to_string()).into());
-    }
-    let now = time::now_ms();
-    let meta = format!("{{\"name\":\"{}\"}}", tag_name);
-    log_event(
-        &tx,
-        task_id,
-        crate::model::event::EV_TAG_REMOVED,
-        None,
-        None,
-        Some(&meta),
-        now,
-    )?;
-    tx.commit()?;
-    Ok(())
+    crate::repo::mutate(conn, |tx, now| {
+        let tag = get_tag_by_name(tx, tag_name)?
+            .ok_or_else(|| Error::TagNotFound(tag_name.to_string()))?;
+        let deleted = tx.execute(
+            "DELETE FROM task_tags WHERE task_id = ?1 AND tag_id = ?2",
+            rusqlite::params![task_id, tag.id],
+        )?;
+        if deleted == 0 {
+            return Err(Error::TagNotFound(tag_name.to_string()).into());
+        }
+        let meta = format!("{{\"name\":\"{}\"}}", tag_name);
+        log_event(
+            tx,
+            task_id,
+            crate::model::event::EV_TAG_REMOVED,
+            None,
+            None,
+            Some(&meta),
+            now,
+        )?;
+        Ok(())
+    })
 }
 
 /// Delete a tag from the tags table and remove all its associations in task_tags.
 /// System tags (is_system = 1) cannot be deleted.
 pub fn delete_tag(conn: &Connection, tag_name: &str) -> Result<()> {
-    let tx = conn.unchecked_transaction()?;
-    if let Some(tag) = get_tag_by_name(&tx, tag_name)? {
-        if tag.is_system {
-            anyhow::bail!("系统预设标签不能删除");
-        }
-        // 查找当前绑定该标签的所有任务 ID，为其补齐 tag_removed 审计日志
-        let mut stmt = tx.prepare("SELECT task_id FROM task_tags WHERE tag_id = ?1")?;
-        let task_ids: Vec<String> = stmt
-            .query_map([tag.id], |r| r.get(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-        drop(stmt);
+    crate::repo::mutate(conn, |tx, now| {
+        if let Some(tag) = get_tag_by_name(tx, tag_name)? {
+            if tag.is_system {
+                anyhow::bail!("系统预设标签不能删除");
+            }
+            // 查找当前绑定该标签的所有任务 ID，为其补齐 tag_removed 审计日志
+            let mut stmt = tx.prepare("SELECT task_id FROM task_tags WHERE tag_id = ?1")?;
+            let task_ids: Vec<String> = stmt
+                .query_map([tag.id], |r| r.get(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            drop(stmt);
 
-        let meta = format!("{{\"name\":\"{}\"}}", tag_name);
-        let now = time::now_ms();
-        for task_id in task_ids {
-            let _ = log_event(
-                &tx,
-                &task_id,
-                crate::model::event::EV_TAG_REMOVED,
-                None,
-                None,
-                Some(&meta),
-                now,
-            );
-        }
+            let meta = format!("{{\"name\":\"{}\"}}", tag_name);
+            for task_id in task_ids {
+                log_event(
+                    tx,
+                    &task_id,
+                    crate::model::event::EV_TAG_REMOVED,
+                    None,
+                    None,
+                    Some(&meta),
+                    now,
+                )?;
+            }
 
-        tx.execute(
-            "DELETE FROM task_tags WHERE tag_id = ?1",
-            rusqlite::params![tag.id],
-        )?;
-        tx.execute("DELETE FROM tags WHERE id = ?1", rusqlite::params![tag.id])?;
-        tx.commit()?;
-    }
-    Ok(())
+            tx.execute(
+                "DELETE FROM task_tags WHERE tag_id = ?1",
+                rusqlite::params![tag.id],
+            )?;
+            tx.execute("DELETE FROM tags WHERE id = ?1", rusqlite::params![tag.id])?;
+        }
+        Ok(())
+    })
 }
 
 pub fn get_task_tags(conn: &Connection, task_id: &str) -> Result<Vec<Tag>> {

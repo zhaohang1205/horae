@@ -48,60 +48,58 @@ pub fn get(conn: &Connection, id: &str) -> Result<Task> {
 
 pub fn create_capture(conn: &Connection, input: &CaptureInput) -> Result<Task> {
     let id = Uuid::new_v4().to_string();
-    let now = time::now_ms();
     let status = input.status;
-    let clarified = if status != task::Status::Inbox {
-        Some(now)
-    } else {
-        None
-    };
-
     let cl_str = serde_json::to_string(&input.checklist).unwrap_or_else(|_| "[]".to_string());
 
-    let tx = conn.unchecked_transaction()?;
-    tx.execute(
-        "INSERT INTO tasks \
-         (id,title,notes,status,rrule,created_at,clarified_at,due_at,updated_at,delegated_to,checklist) \
-         VALUES (?1,?2,'',?3,?4,?5,?6,?7,?8,?9,?10)",
-        rusqlite::params![
-            id,
-            input.title,
-            status.to_string(),
-            input.rrule,
-            now,
-            clarified,
-            input.due_at,
-            now,
-            input.delegated_to,
-            cl_str
-        ],
-    )?;
-    let status_str = status.to_string();
-    log_event(
-        &tx,
-        &id,
-        event::EV_CAPTURED,
-        None,
-        Some(&status_str),
-        None,
-        now,
-    )?;
-    if clarified.is_some() {
+    crate::repo::mutate(conn, |tx, now| {
+        let clarified = if status != task::Status::Inbox {
+            Some(now)
+        } else {
+            None
+        };
+        tx.execute(
+            "INSERT INTO tasks \
+             (id,title,notes,status,rrule,created_at,clarified_at,due_at,updated_at,delegated_to,checklist) \
+             VALUES (?1,?2,'',?3,?4,?5,?6,?7,?8,?9,?10)",
+            rusqlite::params![
+                id,
+                input.title,
+                status.to_string(),
+                input.rrule,
+                now,
+                clarified,
+                input.due_at,
+                now,
+                input.delegated_to,
+                cl_str
+            ],
+        )?;
+        let status_str = status.to_string();
         log_event(
-            &tx,
+            tx,
             &id,
-            event::EV_CLARIFIED,
+            event::EV_CAPTURED,
             None,
             Some(&status_str),
             None,
             now,
         )?;
-    }
-
-    for tag in &input.tag_names {
-        crate::repo::tags::add_tag_to_task_inner(&tx, &id, tag)?;
-    }
-    tx.commit()?;
+        if clarified.is_some() {
+            log_event(
+                tx,
+                &id,
+                event::EV_CLARIFIED,
+                None,
+                Some(&status_str),
+                None,
+                now,
+            )?;
+        }
+        for tag in &input.tag_names {
+            crate::repo::tags::add_tag_to_task_inner(tx, &id, tag, now)?;
+        }
+        Ok(())
+    })?;
     get(conn, &id)
 }
 
@@ -168,10 +166,6 @@ pub fn transition(conn: &Connection, id: &str, to_status: task::Status) -> Resul
         }
         .into());
     }
-    let now = time::now_ms();
-    if from == task::Status::Inbox && t.clarified_at.is_none() {
-        t.clarified_at = Some(now);
-    }
 
     // 循环习惯一天只允许打卡一次（防止把排程再次推进/重复记录打卡）。
     if to_status == task::Status::Done && t.rrule.is_some() {
@@ -184,67 +178,70 @@ pub fn transition(conn: &Connection, id: &str, to_status: task::Status) -> Resul
         }
     }
 
-    let tx = conn.unchecked_transaction()?;
+    crate::repo::mutate(conn, |tx, now| {
+        if from == task::Status::Inbox && t.clarified_at.is_none() {
+            t.clarified_at = Some(now);
+        }
 
-    if to_status == task::Status::Done {
-        // 循环任务：把起点（排程开始时间或截止时间）推进到下一次发生，继续排程。
-        // 兼容仅有 due_at + rrule（如快速录入 `~time rrule=...`）的任务。
-        if let Some(rrule) = &t.rrule {
-            let anchor = t.scheduled_start_at.or(t.due_at);
-            if let Some(start) = anchor {
-                if let Some((next, next_end)) =
-                    crate::schedule::next_window(rrule, start, t.scheduled_end_at)
-                {
-                    log_event(
-                        &tx,
-                        id,
-                        event::EV_HABIT_COMPLETED,
-                        Some(&from.to_string()),
-                        Some(&task::Status::Done.to_string()),
-                        None,
-                        now,
-                    )?;
+        if to_status == task::Status::Done {
+            // 循环任务：把起点（排程开始时间或截止时间）推进到下一次发生，继续排程。
+            // 兼容仅有 due_at + rrule（如快速录入 `~time rrule=...`）的任务。
+            if let Some(rrule) = &t.rrule {
+                let anchor = t.scheduled_start_at.or(t.due_at);
+                if let Some(start) = anchor {
+                    if let Some((next, next_end)) =
+                        crate::schedule::next_window(rrule, start, t.scheduled_end_at)
+                    {
+                        log_event(
+                            tx,
+                            id,
+                            event::EV_HABIT_COMPLETED,
+                            Some(&from.to_string()),
+                            Some(&task::Status::Done.to_string()),
+                            None,
+                            now,
+                        )?;
 
-                    if t.scheduled_start_at.is_some() {
-                        t.scheduled_start_at = Some(next);
-                        t.scheduled_end_at = Some(next_end);
+                        if t.scheduled_start_at.is_some() {
+                            t.scheduled_start_at = Some(next);
+                            t.scheduled_end_at = Some(next_end);
+                        }
+                        if t.scheduled_start_at.is_none() && t.due_at.is_some() {
+                            t.due_at = Some(next);
+                        }
+                        t.status = task::Status::Scheduled;
+                        t.updated_at = now;
+
+                        tx.execute(
+                            "UPDATE tasks SET status=?1, clarified_at=?2, completed_at=?3, updated_at=?4, started_at=?5, scheduled_start_at=?6, scheduled_end_at=?7, due_at=?8 WHERE id=?9",
+                            rusqlite::params![t.status.to_string(), t.clarified_at, t.completed_at, t.updated_at, t.started_at, t.scheduled_start_at, t.scheduled_end_at, t.due_at, id],
+                        )?;
+                        return Ok(());
                     }
-                    if t.scheduled_start_at.is_none() && t.due_at.is_some() {
-                        t.due_at = Some(next);
-                    }
-                    t.status = task::Status::Scheduled;
-                    t.updated_at = now;
-
-                    tx.execute(
-                        "UPDATE tasks SET status=?1, clarified_at=?2, completed_at=?3, updated_at=?4, started_at=?5, scheduled_start_at=?6, scheduled_end_at=?7, due_at=?8 WHERE id=?9",
-                        rusqlite::params![t.status.to_string(), t.clarified_at, t.completed_at, t.updated_at, t.started_at, t.scheduled_start_at, t.scheduled_end_at, t.due_at, id],
-                    )?;
-                    tx.commit()?;
-                    return Ok(t);
                 }
             }
         }
-    }
 
-    if to_status == task::Status::Done && t.completed_at.is_none() {
-        t.completed_at = Some(now);
-    }
-    t.status = to_status;
-    t.updated_at = now;
+        if to_status == task::Status::Done && t.completed_at.is_none() {
+            t.completed_at = Some(now);
+        }
+        t.status = to_status;
+        t.updated_at = now;
 
-    tx.execute(
-        "UPDATE tasks SET status=?1, clarified_at=?2, completed_at=?3, updated_at=?4, started_at=?5, scheduled_start_at=?6, scheduled_end_at=?7 WHERE id=?8",
-        rusqlite::params![t.status.to_string(), t.clarified_at, t.completed_at, t.updated_at, t.started_at, t.scheduled_start_at, t.scheduled_end_at, id],
-    )?;
-    let ev = if to_status == task::Status::Done {
-        event::EV_COMPLETED
-    } else {
-        event::EV_STATUS_CHANGED
-    };
-    let from_str = from.to_string();
-    let to_str = to_status.to_string();
-    log_event(&tx, id, ev, Some(&from_str), Some(&to_str), None, now)?;
-    tx.commit()?;
+        tx.execute(
+            "UPDATE tasks SET status=?1, clarified_at=?2, completed_at=?3, updated_at=?4, started_at=?5, scheduled_start_at=?6, scheduled_end_at=?7 WHERE id=?8",
+            rusqlite::params![t.status.to_string(), t.clarified_at, t.completed_at, t.updated_at, t.started_at, t.scheduled_start_at, t.scheduled_end_at, id],
+        )?;
+        let ev = if to_status == task::Status::Done {
+            event::EV_COMPLETED
+        } else {
+            event::EV_STATUS_CHANGED
+        };
+        let from_str = from.to_string();
+        let to_str = to_status.to_string();
+        log_event(tx, id, ev, Some(&from_str), Some(&to_str), None, now)?;
+        Ok(())
+    })?;
     Ok(t)
 }
 
@@ -252,16 +249,16 @@ pub fn transition(conn: &Connection, id: &str, to_status: task::Status) -> Resul
 /// inbox→next planning hook so a next action keeps its status while gaining a due.
 pub fn set_due(conn: &Connection, id: &str, due_ms: Option<i64>) -> Result<Task> {
     let mut t = get(conn, id)?;
-    let now = time::now_ms();
-    t.due_at = due_ms;
-    t.updated_at = now;
-    let tx = conn.unchecked_transaction()?;
-    tx.execute(
-        "UPDATE tasks SET due_at=?1, updated_at=?2 WHERE id=?3",
-        rusqlite::params![t.due_at, t.updated_at, id],
-    )?;
-    log_event(&tx, id, event::EV_DUE, None, None, None, now)?;
-    tx.commit()?;
+    crate::repo::mutate(conn, |tx, now| {
+        t.due_at = due_ms;
+        t.updated_at = now;
+        tx.execute(
+            "UPDATE tasks SET due_at=?1, updated_at=?2 WHERE id=?3",
+            rusqlite::params![t.due_at, t.updated_at, id],
+        )?;
+        log_event(tx, id, event::EV_DUE, None, None, None, now)?;
+        Ok(())
+    })?;
     get(conn, id)
 }
 
@@ -270,29 +267,29 @@ pub fn set_due(conn: &Connection, id: &str, due_ms: Option<i64>) -> Result<Task>
 pub fn set_rrule(conn: &Connection, id: &str, rrule: Option<String>) -> Result<Task> {
     let mut t = get(conn, id)?;
     let from = t.status;
-    let now = time::now_ms();
-    t.rrule = rrule.clone();
-    t.updated_at = now;
-    let tx = conn.unchecked_transaction()?;
-    tx.execute(
-        "UPDATE tasks SET rrule=?1, updated_at=?2 WHERE id=?3",
-        rusqlite::params![t.rrule, t.updated_at, id],
-    )?;
-    let meta = t
-        .rrule
-        .as_deref()
-        .map(|r| format!("{{\"rrule\":\"{}\"}}", r));
-    let to_s = t.status.to_string();
-    log_event(
-        &tx,
-        id,
-        event::EV_SCHEDULED,
-        Some(&from.to_string()),
-        Some(&to_s),
-        meta.as_deref(),
-        now,
-    )?;
-    tx.commit()?;
+    crate::repo::mutate(conn, |tx, now| {
+        t.rrule = rrule.clone();
+        t.updated_at = now;
+        tx.execute(
+            "UPDATE tasks SET rrule=?1, updated_at=?2 WHERE id=?3",
+            rusqlite::params![t.rrule, t.updated_at, id],
+        )?;
+        let meta = t
+            .rrule
+            .as_deref()
+            .map(|r| format!("{{\"rrule\":\"{}\"}}", r));
+        let to_s = t.status.to_string();
+        log_event(
+            tx,
+            id,
+            event::EV_SCHEDULED,
+            Some(&from.to_string()),
+            Some(&to_s),
+            meta.as_deref(),
+            now,
+        )?;
+        Ok(())
+    })?;
     Ok(t)
 }
 
@@ -307,72 +304,72 @@ pub fn schedule(
 ) -> Result<Task> {
     let mut t = get(conn, id)?;
     let from = t.status;
-    let now = time::now_ms();
-    if from == task::Status::Inbox && t.clarified_at.is_none() {
-        t.clarified_at = Some(now);
-    }
-    t.scheduled_start_at = Some(start_ms);
-    t.scheduled_end_at = end_ms;
-    t.rrule = rrule.clone();
-    t.status = task::Status::Scheduled;
-    t.updated_at = now;
-    let tx = conn.unchecked_transaction()?;
-    tx.execute(
-        "UPDATE tasks SET status=?1, clarified_at=?2, scheduled_start_at=?3, scheduled_end_at=?4, rrule=?5, updated_at=?6 WHERE id=?7",
-        rusqlite::params![
-            t.status.to_string(),
-            t.clarified_at,
-            t.scheduled_start_at,
-            t.scheduled_end_at,
-            t.rrule,
-            t.updated_at,
-            id
-        ],
-    )?;
-    let meta = rrule.as_deref().map(|r| format!("{{\"rrule\":\"{}\"}}", r));
-    let from_str = from.to_string();
-    log_event(
-        &tx,
-        id,
-        event::EV_SCHEDULED,
-        Some(&from_str),
-        Some("scheduled"),
-        meta.as_deref(),
-        now,
-    )?;
-    tx.commit()?;
+    crate::repo::mutate(conn, |tx, now| {
+        if from == task::Status::Inbox && t.clarified_at.is_none() {
+            t.clarified_at = Some(now);
+        }
+        t.scheduled_start_at = Some(start_ms);
+        t.scheduled_end_at = end_ms;
+        t.rrule = rrule.clone();
+        t.status = task::Status::Scheduled;
+        t.updated_at = now;
+        tx.execute(
+            "UPDATE tasks SET status=?1, clarified_at=?2, scheduled_start_at=?3, scheduled_end_at=?4, rrule=?5, updated_at=?6 WHERE id=?7",
+            rusqlite::params![
+                t.status.to_string(),
+                t.clarified_at,
+                t.scheduled_start_at,
+                t.scheduled_end_at,
+                t.rrule,
+                t.updated_at,
+                id
+            ],
+        )?;
+        let meta = rrule.as_deref().map(|r| format!("{{\"rrule\":\"{}\"}}", r));
+        let from_str = from.to_string();
+        log_event(
+            tx,
+            id,
+            event::EV_SCHEDULED,
+            Some(&from_str),
+            Some("scheduled"),
+            meta.as_deref(),
+            now,
+        )?;
+        Ok(())
+    })?;
     Ok(t)
 }
 
 pub fn archive(conn: &Connection, id: &str) -> Result<Task> {
     let t = get(conn, id)?;
-    let now = time::now_ms();
     let reason = if t.status == task::Status::Done {
         "completed"
     } else {
         "deleted"
     };
-    let tx = conn.unchecked_transaction()?;
-    tx.execute(
-        "UPDATE tasks SET archived_at=?1, archive_reason=?2, updated_at=?3 WHERE id=?4",
-        rusqlite::params![now, reason, now, id],
-    )?;
-    log_event(&tx, id, event::EV_ARCHIVED, None, None, Some(reason), now)?;
-    tx.commit()?;
+    crate::repo::mutate(conn, |tx, now| {
+        tx.execute(
+            "UPDATE tasks SET archived_at=?1, archive_reason=?2, updated_at=?3 WHERE id=?4",
+            rusqlite::params![now, reason, now, id],
+        )?;
+        log_event(tx, id, event::EV_ARCHIVED, None, None, Some(reason), now)?;
+        Ok(())
+    })?;
     get(conn, id)
 }
 
 /// Undo a soft-delete: clear `archived_at` and record a `restored` event.
 pub fn unarchive(conn: &Connection, id: &str) -> Result<Task> {
     let _ = get(conn, id)?;
-    let now = time::now_ms();
-    let tx = conn.unchecked_transaction()?;
-    tx.execute(
-        "UPDATE tasks SET archived_at=NULL, archive_reason=NULL, updated_at=?1 WHERE id=?2",
-        rusqlite::params![now, id],
-    )?;
-    log_event(&tx, id, event::EV_RESTORED, None, None, None, now)?;
-    tx.commit()?;
+    crate::repo::mutate(conn, |tx, now| {
+        tx.execute(
+            "UPDATE tasks SET archived_at=NULL, archive_reason=NULL, updated_at=?1 WHERE id=?2",
+            rusqlite::params![now, id],
+        )?;
+        log_event(tx, id, event::EV_RESTORED, None, None, None, now)?;
+        Ok(())
+    })?;
     get(conn, id)
 }
 
@@ -386,9 +383,10 @@ pub fn purge(conn: &Connection, id: &str) -> Result<Task> {
     if t.archived_at.is_none() {
         return Err(Error::NotArchived(id).into());
     }
-    let tx = conn.unchecked_transaction()?;
-    tx.execute("DELETE FROM tasks WHERE id = ?1", rusqlite::params![id])?;
-    tx.commit()?;
+    crate::repo::mutate(conn, |tx, _now| {
+        tx.execute("DELETE FROM tasks WHERE id = ?1", rusqlite::params![id])?;
+        Ok(())
+    })?;
     Ok(t)
 }
 

@@ -169,135 +169,136 @@ pub fn import_all(conn: &Connection, data: &BackupData, replace: bool) -> Result
         rows.collect::<rusqlite::Result<_>>()?
     };
 
-    let mut stats = ImportStats::default();
-    let tx = conn.unchecked_transaction()?;
+    let mut stats = crate::repo::mutate(conn, |tx, _now| {
+        let mut stats = ImportStats::default();
 
-    if replace {
-        tx.execute("DELETE FROM task_tags", [])?;
-        tx.execute("DELETE FROM task_events", [])?;
-        tx.execute("DELETE FROM tasks", [])?;
-        tx.execute("DELETE FROM tags", [])?;
-        tx.execute("DELETE FROM settings", [])?;
-    }
+        if replace {
+            tx.execute("DELETE FROM task_tags", [])?;
+            tx.execute("DELETE FROM task_events", [])?;
+            tx.execute("DELETE FROM tasks", [])?;
+            tx.execute("DELETE FROM tags", [])?;
+            tx.execute("DELETE FROM settings", [])?;
+        }
 
-    // Tag reconciliation by name: reuse an existing tag (system presets are
-    // seeded by migrations), create only what is missing.
-    let mut tag_ids: Vec<(String, i64)> = Vec::new();
-    for t in &data.tags {
-        let existing = crate::repo::tags::get_tag_by_name(&tx, &t.name)?;
-        if let Some(tag) = existing {
-            tag_ids.push((t.name.clone(), tag.id));
-        } else {
+        // Tag reconciliation by name: reuse an existing tag (system presets are
+        // seeded by migrations), create only what is missing.
+        let mut tag_ids: Vec<(String, i64)> = Vec::new();
+        for t in &data.tags {
+            let existing = crate::repo::tags::get_tag_by_name(tx, &t.name)?;
+            if let Some(tag) = existing {
+                tag_ids.push((t.name.clone(), tag.id));
+            } else {
+                tx.execute(
+                    "INSERT INTO tags (name,category,is_system,color,icon,description,created_at) \
+                     VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                    rusqlite::params![
+                        t.name,
+                        t.category,
+                        t.is_system as i64,
+                        t.color,
+                        t.icon,
+                        t.description,
+                        t.created_at
+                    ],
+                )?;
+                tag_ids.push((t.name.clone(), tx.last_insert_rowid()));
+                stats.tags_created += 1;
+            }
+        }
+
+        // Insert tasks, keeping the original UUIDs so child links and the event
+        // timeline stay intact. In merge mode, already-present ids are skipped.
+        let mut imported: HashSet<String> = HashSet::new();
+        for t in &data.tasks {
+            if existing_ids.contains(&t.id) {
+                stats.tasks_skipped += 1;
+                continue;
+            }
+            let cl_str = serde_json::to_string(&t.checklist).unwrap_or_else(|_| "[]".to_string());
             tx.execute(
-                "INSERT INTO tags (name,category,is_system,color,icon,description,created_at) \
-                 VALUES (?1,?2,?3,?4,?5,?6,?7)",
-                rusqlite::params![
-                    t.name,
-                    t.category,
-                    t.is_system as i64,
-                    t.color,
-                    t.icon,
-                    t.description,
-                    t.created_at
-                ],
-            )?;
-            tag_ids.push((t.name.clone(), tx.last_insert_rowid()));
-            stats.tags_created += 1;
-        }
-    }
-
-    // Insert tasks, keeping the original UUIDs so child links and the event
-    // timeline stay intact. In merge mode, already-present ids are skipped.
-    let mut imported: HashSet<String> = HashSet::new();
-    for t in &data.tasks {
-        if existing_ids.contains(&t.id) {
-            stats.tasks_skipped += 1;
-            continue;
-        }
-        let cl_str = serde_json::to_string(&t.checklist).unwrap_or_else(|_| "[]".to_string());
-        tx.execute(
-            "INSERT INTO tasks \
+                "INSERT INTO tasks \
              (id,title,notes,kind,parent_id,status,rrule,created_at,clarified_at,organized_at,\
               due_at,scheduled_start_at,scheduled_end_at,started_at,completed_at,archived_at,\
               updated_at,delegated_to,project_type,checklist,archive_reason) \
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
-            rusqlite::params![
-                t.id,
-                t.title,
-                t.notes,
-                t.kind,
-                t.parent_id,
-                t.status,
-                t.rrule,
-                t.created_at,
-                t.clarified_at,
-                t.organized_at,
-                t.due_at,
-                t.scheduled_start_at,
-                t.scheduled_end_at,
-                t.started_at,
-                t.completed_at,
-                t.archived_at,
-                t.updated_at,
-                t.delegated_to,
-                t.project_type,
-                cl_str,
-                t.archive_reason
-            ],
-        )?;
-        imported.insert(t.id.clone());
-        stats.tasks_created += 1;
-    }
-
-    // Timeline: only for tasks that actually landed in this DB. In replace mode
-    // that is every backup task; in merge mode only the newly imported ones.
-    for e in &data.events {
-        if imported.contains(&e.task_id) {
-            tx.execute(
-                "INSERT INTO task_events (task_id,event_type,from_status,to_status,at,meta) \
-                 VALUES (?1,?2,?3,?4,?5,?6)",
                 rusqlite::params![
-                    e.task_id,
-                    e.event_type,
-                    e.from_status,
-                    e.to_status,
-                    e.at,
-                    e.meta
+                    t.id,
+                    t.title,
+                    t.notes,
+                    t.kind,
+                    t.parent_id,
+                    t.status,
+                    t.rrule,
+                    t.created_at,
+                    t.clarified_at,
+                    t.organized_at,
+                    t.due_at,
+                    t.scheduled_start_at,
+                    t.scheduled_end_at,
+                    t.started_at,
+                    t.completed_at,
+                    t.archived_at,
+                    t.updated_at,
+                    t.delegated_to,
+                    t.project_type,
+                    cl_str,
+                    t.archive_reason
                 ],
             )?;
-            stats.events_imported += 1;
+            imported.insert(t.id.clone());
+            stats.tasks_created += 1;
         }
-    }
 
-    // Tag associations, resolved by name → (existing/new) tag id.
-    for tt in &data.task_tags {
-        if !imported.contains(&tt.task_id) {
-            continue;
+        // Timeline: only for tasks that actually landed in this DB. In replace mode
+        // that is every backup task; in merge mode only the newly imported ones.
+        for e in &data.events {
+            if imported.contains(&e.task_id) {
+                tx.execute(
+                    "INSERT INTO task_events (task_id,event_type,from_status,to_status,at,meta) \
+                 VALUES (?1,?2,?3,?4,?5,?6)",
+                    rusqlite::params![
+                        e.task_id,
+                        e.event_type,
+                        e.from_status,
+                        e.to_status,
+                        e.at,
+                        e.meta
+                    ],
+                )?;
+                stats.events_imported += 1;
+            }
         }
-        let tag_id = tag_ids
-            .iter()
-            .find(|(n, _)| n == &tt.tag_name)
-            .map(|(_, id)| *id);
-        if let Some(tag_id) = tag_id {
+
+        // Tag associations, resolved by name → (existing/new) tag id.
+        for tt in &data.task_tags {
+            if !imported.contains(&tt.task_id) {
+                continue;
+            }
+            let tag_id = tag_ids
+                .iter()
+                .find(|(n, _)| n == &tt.tag_name)
+                .map(|(_, id)| *id);
+            if let Some(tag_id) = tag_id {
+                tx.execute(
+                    "INSERT OR IGNORE INTO task_tags (task_id,tag_id,added_at) VALUES (?1,?2,?3)",
+                    rusqlite::params![tt.task_id, tag_id, tt.added_at],
+                )?;
+                stats.task_links += 1;
+            }
+        }
+
+        // Settings: merge upserts; replace leaves the table empty until here.
+        for s in &data.settings {
             tx.execute(
-                "INSERT OR IGNORE INTO task_tags (task_id,tag_id,added_at) VALUES (?1,?2,?3)",
-                rusqlite::params![tt.task_id, tag_id, tt.added_at],
+                "INSERT INTO settings (key,value) VALUES (?1,?2) \
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                rusqlite::params![s.key, s.value],
             )?;
-            stats.task_links += 1;
+            stats.settings_imported += 1;
         }
-    }
 
-    // Settings: merge upserts; replace leaves the table empty until here.
-    for s in &data.settings {
-        tx.execute(
-            "INSERT INTO settings (key,value) VALUES (?1,?2) \
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            rusqlite::params![s.key, s.value],
-        )?;
-        stats.settings_imported += 1;
-    }
-
-    tx.commit()?;
+        Ok(stats)
+    })?;
 
     if let Some(state) = &data.pomodoro {
         crate::repo::pomodoro::save_state(state)?;

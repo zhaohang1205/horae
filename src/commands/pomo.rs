@@ -139,15 +139,17 @@ pub fn daemon() -> Result<()> {
                 Phase::Work => {
                     if let Some(ref tid) = state.task_id {
                         let duration = state.config.work_mins * 60;
-                        let _ = crate::repo::log_event(
-                            &conn,
-                            tid,
-                            event::EV_POMODORO,
-                            None,
-                            None,
-                            Some(&duration.to_string()),
-                            now,
-                        );
+                        let _ = crate::repo::mutate(&conn, |tx, at| {
+                            crate::repo::log_event(
+                                tx,
+                                tid,
+                                event::EV_POMODORO,
+                                None,
+                                None,
+                                Some(&duration.to_string()),
+                                at,
+                            )
+                        });
                     }
 
                     // 跨天检测：若日期已切换，重置当日计数和循环计数
