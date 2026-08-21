@@ -63,6 +63,9 @@ impl<'a> AppHandlers for App<'a> {
         if self.handle_navigation_keys(key)? {
             return Ok(());
         }
+        if self.handle_settings_keys(key)? {
+            return Ok(());
+        }
         if self.handle_review_keys(key)? {
             return Ok(());
         }
@@ -90,6 +93,9 @@ impl<'a> AppHandlers for App<'a> {
         }
         if self.mode == Mode::ConfirmPurge {
             return self.handle_confirm_purge(key);
+        }
+        if self.mode == Mode::ConfirmProfileDelete {
+            return self.handle_confirm_profile_delete(key);
         }
         match key.code {
             KeyCode::Esc => {
@@ -160,7 +166,13 @@ impl<'a> AppHandlers for App<'a> {
             Mode::ChecklistAdding => self.confirm_checklist_adding(input)?,
             Mode::CreatingTag => self.confirm_creating_tag(input)?,
             Mode::ConfiguringPomo => self.confirm_pomo_config(input)?,
-            Mode::Normal | Mode::Visual | Mode::ConfirmArchive | Mode::ConfirmPurge => {}
+            Mode::CreatingProfile => self.confirm_creating_profile(input)?,
+            Mode::RenamingProfile => self.confirm_renaming_profile(input)?,
+            Mode::Normal
+            | Mode::Visual
+            | Mode::ConfirmArchive
+            | Mode::ConfirmPurge
+            | Mode::ConfirmProfileDelete => {}
         }
         Ok(())
     }
@@ -421,6 +433,7 @@ impl<'a> App<'a> {
             }
             KeyCode::Char('J') => self.set_view(View::Today),
             KeyCode::Char('K') => self.set_view(View::Tomorrow),
+            KeyCode::Char(',') => self.set_view(View::Settings),
             KeyCode::Char('g') => self.move_sel(-10000),
             KeyCode::Char('G') => self.move_sel(10000),
             _ => return Ok(false),
@@ -523,6 +536,38 @@ impl<'a> App<'a> {
             KeyCode::Char('f') => {
                 self.input = self.tag_filter.clone().unwrap_or_default();
                 self.set_mode(Mode::FilteringTag);
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    /// 设置页按键：n 新建 / r 重命名 / d 删除 / s 设为默认（仅 Settings 视图生效）。
+    fn handle_settings_keys(&mut self, key: KeyEvent) -> Result<bool> {
+        if self.view != View::Settings {
+            return Ok(false);
+        }
+        match key.code {
+            KeyCode::Char('n') => {
+                self.set_mode(Mode::CreatingProfile);
+                self.input.clear();
+            }
+            KeyCode::Char('r') => {
+                let Some(row) = self.items.get(self.selected).cloned() else {
+                    return Ok(true);
+                };
+                self.input = row.id.clone();
+                self.set_mode(Mode::RenamingProfile);
+            }
+            KeyCode::Char('d') => {
+                let Some(row) = self.items.get(self.selected).cloned() else {
+                    return Ok(true);
+                };
+                self.pending_profile_delete = Some(row.id.clone());
+                self.set_mode(Mode::ConfirmProfileDelete);
+            }
+            KeyCode::Char('s') => {
+                self.settings_set_default()?;
             }
             _ => return Ok(false),
         }
@@ -892,6 +937,25 @@ impl<'a> App<'a> {
         Ok(())
     }
 
+    fn handle_confirm_profile_delete(&mut self, key: KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                let name = self.pending_profile_delete.take().unwrap_or_default();
+                self.set_mode(Mode::Normal);
+                self.settings_delete_profile(&name)?;
+                self.reload()?;
+            }
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                self.pending_profile_delete = None;
+                self.set_mode(Mode::Normal);
+                self.status_message =
+                    crate::tr!(self.lang, "删除已取消", "Delete cancelled").into();
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// Tab：候选激活时向下推进；未激活时尝试补全当前词（正常情况下
     /// 实时补全已在输入时填充候选，此处兜底）。
     fn handle_tab_completion(&mut self) {
@@ -1255,6 +1319,20 @@ impl<'a> App<'a> {
             self.status_message = crate::tr!(self.lang, "已创建标签: {}", "created tag: {}", name);
             self.refresh()?;
         }
+        self.set_mode(Mode::Normal);
+        self.input.clear();
+        Ok(())
+    }
+
+    fn confirm_creating_profile(&mut self, input: &str) -> Result<()> {
+        self.settings_new_profile(input)?;
+        self.set_mode(Mode::Normal);
+        self.input.clear();
+        Ok(())
+    }
+
+    fn confirm_renaming_profile(&mut self, input: &str) -> Result<()> {
+        self.settings_rename_profile(input)?;
         self.set_mode(Mode::Normal);
         self.input.clear();
         Ok(())

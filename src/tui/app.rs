@@ -57,6 +57,7 @@ pub(crate) enum View {
     Archived,
     Tags,
     Quotes,
+    Settings,
 }
 
 /// 有状态的 7 个主视图（Inbox..Done），用于按状态统计计数。
@@ -89,7 +90,8 @@ impl View {
             | View::Review
             | View::Archived
             | View::Tags
-            | View::Quotes => None,
+            | View::Quotes
+            | View::Settings => None,
         }
     }
 
@@ -130,6 +132,12 @@ pub(crate) enum Mode {
     CreatingTag,
     /// 配置番茄钟时长 (工作;短休;长休)
     ConfiguringPomo,
+    /// 新建 profile（输入名称）
+    CreatingProfile,
+    /// 重命名 profile（输入新名称）
+    RenamingProfile,
+    /// 删除 profile 确认：等待 y/Enter 确认或 n/Esc 取消。
+    ConfirmProfileDelete,
 }
 
 impl Mode {
@@ -231,6 +239,10 @@ pub(crate) struct App<'a> {
     pub(crate) completion_prefix: char,
     /// 金句视图是否启用（settings 键 `quotes`，F7 切换）。默认关闭。
     pub(crate) quotes_enabled: bool,
+    /// 当前会话使用的 profile 名（用于设置页标记与显示）。
+    pub(crate) profile_name: String,
+    /// 设置页待删除的 profile 名。
+    pub(crate) pending_profile_delete: Option<String>,
 }
 
 impl<'a> App<'a> {
@@ -302,6 +314,8 @@ impl<'a> App<'a> {
             completion_range: None,
             completion_prefix: '@',
             quotes_enabled,
+            profile_name: String::new(),
+            pending_profile_delete: None,
         };
         app.refresh()?;
 
@@ -874,6 +888,41 @@ impl<'a> App<'a> {
             return Ok(());
         }
 
+        // 设置视图单独构建行（读取 config.json 的 profile 列表）。
+        if self.view == View::Settings {
+            if let Ok(config) = crate::config::Config::load() {
+                for name in config.profile_names() {
+                    let profile = config.profile(&name);
+                    let is_default = config.default_profile == name;
+                    let is_current = self.profile_name == name;
+                    let db = profile.map(|p| p.db.clone()).unwrap_or_default();
+                    let tags = if is_current {
+                        vec![crate::tr!(self.lang, "当前", "current").to_string(), db]
+                    } else if is_default {
+                        vec![crate::tr!(self.lang, "默认", "default").to_string(), db]
+                    } else {
+                        vec![db]
+                    };
+                    self.items.push(Row {
+                        id: name.clone(),
+                        title: name,
+                        status: String::new(),
+                        due: None,
+                        tags,
+                        indent: 0,
+                        done: None,
+                        total: None,
+                        archive_reason: None,
+                        checked_in_today: false,
+                    });
+                }
+            }
+            if self.selected >= self.items.len() {
+                self.selected = self.items.len().saturating_sub(1);
+            }
+            return Ok(());
+        }
+
         // 加载当前视图的任务（今日/明日带展示用到期时间）。
         let tasks: Vec<(task::Task, Option<i64>)> = match self.view {
             View::Today | View::Tomorrow => {
@@ -1014,6 +1063,181 @@ impl<'a> App<'a> {
         Ok(())
     }
 
+    /// 设置页：新建 profile（写入 config.json，不动任何数据库）。
+    pub(crate) fn settings_new_profile(&mut self, name: &str) -> Result<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            self.status_message = crate::tr!(
+                self.lang,
+                "profile 名称不能为空",
+                "profile name cannot be empty"
+            )
+            .into();
+            return Ok(());
+        }
+        let mut config = crate::config::Config::load()?;
+        if config.profile(name).is_some() {
+            self.status_message = crate::tr!(
+                self.lang,
+                "profile 已存在: {}",
+                "profile already exists: {}",
+                name
+            );
+            return Ok(());
+        }
+        config.upsert_profile(
+            name,
+            crate::config::Profile {
+                db: format!("profiles/{name}.db"),
+                cloud: None,
+            },
+        );
+        if config.save().is_err() {
+            self.status_message = crate::tr!(
+                self.lang,
+                "保存 config.json 失败",
+                "failed to save config.json"
+            )
+            .into();
+            return Ok(());
+        }
+        self.status_message = crate::tr!(
+            self.lang,
+            "已创建 profile: {} (下次启动可用 --profile {})",
+            "created profile: {} (use --profile {} next launch)",
+            name,
+            name
+        );
+        self.refresh()?;
+        Ok(())
+    }
+
+    /// 设置页：重命名当前选中的 profile。
+    pub(crate) fn settings_rename_profile(&mut self, new_name: &str) -> Result<()> {
+        let Some(row) = self.items.get(self.selected).cloned() else {
+            return Ok(());
+        };
+        let new_name = new_name.trim();
+        if new_name.is_empty() || new_name == row.id {
+            self.status_message =
+                crate::tr!(self.lang, "profile 名称无效", "invalid profile name").into();
+            return Ok(());
+        }
+        let mut config = crate::config::Config::load()?;
+        if config.profile(new_name).is_some() {
+            self.status_message = crate::tr!(
+                self.lang,
+                "profile 已存在: {}",
+                "profile already exists: {}",
+                new_name
+            );
+            return Ok(());
+        }
+        if config.rename_profile(&row.id, new_name).is_err() {
+            self.status_message = crate::tr!(
+                self.lang,
+                "profile 不存在: {}",
+                "profile not found: {}",
+                row.id
+            );
+            return Ok(());
+        }
+        if config.save().is_err() {
+            self.status_message = crate::tr!(
+                self.lang,
+                "保存 config.json 失败",
+                "failed to save config.json"
+            )
+            .into();
+            return Ok(());
+        }
+        if self.profile_name == row.id {
+            self.profile_name = new_name.to_string();
+        }
+        self.status_message = crate::tr!(
+            self.lang,
+            "已重命名: {} -> {}",
+            "renamed: {} -> {}",
+            row.id,
+            new_name
+        );
+        self.refresh()?;
+        Ok(())
+    }
+
+    /// 设置页：删除当前选中的 profile（仅从 config.json 移除，db 文件保留）。
+    pub(crate) fn settings_delete_profile(&mut self, name: &str) -> Result<()> {
+        let mut config = crate::config::Config::load()?;
+        if config.remove_profile(name).is_none() {
+            self.status_message = crate::tr!(
+                self.lang,
+                "profile 不存在: {}",
+                "profile not found: {}",
+                name
+            );
+            return Ok(());
+        }
+        // 删除默认 profile 时把默认改派给剩余第一个。
+        if config.default_profile == name {
+            config.default_profile = config
+                .profile_names()
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "default".to_string());
+        }
+        if config.save().is_err() {
+            self.status_message = crate::tr!(
+                self.lang,
+                "保存 config.json 失败",
+                "failed to save config.json"
+            )
+            .into();
+            return Ok(());
+        }
+        self.status_message = crate::tr!(
+            self.lang,
+            "已删除 profile: {} (db 文件保留)",
+            "deleted profile: {} (db file kept)",
+            name
+        );
+        self.refresh()?;
+        Ok(())
+    }
+
+    /// 设置页：把选中的 profile 设为默认（下次无 --profile 启动生效）。
+    pub(crate) fn settings_set_default(&mut self) -> Result<()> {
+        let Some(row) = self.items.get(self.selected).cloned() else {
+            return Ok(());
+        };
+        let mut config = crate::config::Config::load()?;
+        if config.set_default(&row.id).is_err() {
+            self.status_message = crate::tr!(
+                self.lang,
+                "profile 不存在: {}",
+                "profile not found: {}",
+                row.id
+            );
+            return Ok(());
+        }
+        if config.save().is_err() {
+            self.status_message = crate::tr!(
+                self.lang,
+                "保存 config.json 失败",
+                "failed to save config.json"
+            )
+            .into();
+            return Ok(());
+        }
+        self.status_message = crate::tr!(
+            self.lang,
+            "默认 profile 已设为 {} (下次启动生效)",
+            "default profile set to {} (applies next launch)",
+            row.id
+        );
+        self.refresh()?;
+        Ok(())
+    }
+
     pub(crate) fn load_detail(&mut self) {
         self.detail = None;
         if let Some(row) = self.items.get(self.selected) {
@@ -1076,6 +1300,7 @@ impl<'a> App<'a> {
             View::Archived,
             View::Tags,
             View::Review,
+            View::Settings,
         ];
         if self.quotes_enabled {
             views.push(View::Quotes);
@@ -1099,7 +1324,7 @@ impl<'a> App<'a> {
             .into();
             return Ok(());
         }
-        if matches!(self.view, View::Tags | View::Archived) {
+        if matches!(self.view, View::Tags | View::Archived | View::Settings) {
             return Ok(());
         }
         let Some(row) = self.items.get(self.selected).cloned() else {

@@ -52,6 +52,7 @@ pub(crate) fn view_label(lang: crate::i18n::Lang, v: View) -> &'static str {
         View::Archived => crate::tr!(lang, "归档箱", "Archived"),
         View::Tags => crate::tr!(lang, "标签库", "Tags"),
         View::Quotes => crate::tr!(lang, "金句", "Quotes"),
+        View::Settings => crate::tr!(lang, "设置", "Settings"),
     }
 }
 
@@ -110,7 +111,7 @@ pub(crate) fn row_from_tags_with_due(
 }
 
 /// 启动交互式 TUI。
-pub fn run(conn: &Connection) -> Result<()> {
+pub fn run(conn: &Connection, profile: Option<&str>) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(
@@ -121,7 +122,7 @@ pub fn run(conn: &Connection) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run_app(&mut terminal, conn);
+    let result = run_app(&mut terminal, conn, profile);
 
     disable_raw_mode()?;
     execute!(
@@ -133,8 +134,20 @@ pub fn run(conn: &Connection) -> Result<()> {
     result
 }
 
-fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, conn: &Connection) -> Result<()> {
+fn run_app(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    conn: &Connection,
+    profile: Option<&str>,
+) -> Result<()> {
     let mut app = App::new(conn)?;
+    app.profile_name = profile
+        .map(|s| s.to_string())
+        .or_else(|| {
+            crate::config::Config::load()
+                .ok()
+                .map(|c| c.default_profile)
+        })
+        .unwrap_or_default();
     loop {
         if app.needs_clear {
             terminal.clear()?;
@@ -1072,6 +1085,7 @@ mod tests {
             View::Archived,
             View::Tags,
             View::Review,
+            View::Settings,
         ];
         for (i, v) in ring.iter().enumerate() {
             app.view = *v;
@@ -1204,8 +1218,10 @@ mod tests {
         assert_eq!(q[0].status, task::Status::Reference);
         assert_eq!(q[0].title, "灵感: 知行合一");
 
-        // 启用后视图环尾接金句
+        // 启用后视图环尾依次接 Settings、金句
         app.view = View::Review;
+        app.next_view(1);
+        assert_eq!(app.view, View::Settings, "Review 之后是 Settings");
         app.next_view(1);
         assert_eq!(app.view, View::Quotes, "启用后环尾接金句");
 
@@ -1227,6 +1243,85 @@ mod tests {
             Some("0"),
             "停用状态写入 settings"
         );
+    }
+
+    #[test]
+    fn settings_view_manages_profiles() {
+        use crate::config::Config;
+
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("GTP_CONFIG_DIR", tmp.path());
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        let mut app = App::new(&conn).unwrap();
+        app.popup = None;
+
+        // 进入设置视图：默认 profile 应在列表中
+        app.handle_key(key(',')).unwrap();
+        assert_eq!(app.view, View::Settings);
+        assert!(
+            app.items.iter().any(|r| r.id == "default"),
+            "默认 profile 在设置页"
+        );
+        assert!(app
+            .items
+            .iter()
+            .any(|r| r.tags.iter().any(|t| t == "gtp.db")));
+
+        // n → 新建 work
+        app.handle_key(key('n')).unwrap();
+        assert_eq!(app.mode, Mode::CreatingProfile);
+        for c in "work".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(kc(KeyCode::Enter)).unwrap();
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(
+            app.items.iter().any(|r| r.id == "work"),
+            "新建的 work profile 出现在列表"
+        );
+        let cfg = Config::load().unwrap();
+        assert_eq!(
+            cfg.profile("work").unwrap().db,
+            "profiles/work.db",
+            "work 使用默认 db 路径"
+        );
+
+        // 选中 work 并设为默认
+        let idx = app.items.iter().position(|r| r.id == "work").unwrap();
+        app.selected = idx;
+        app.handle_key(key('s')).unwrap();
+        let cfg = Config::load().unwrap();
+        assert_eq!(cfg.default_profile, "work", "work 成为默认");
+
+        // r → 重命名为 work2
+        app.handle_key(key('r')).unwrap();
+        assert_eq!(app.mode, Mode::RenamingProfile);
+        assert_eq!(app.input, "work", "重命名预填当前名称");
+        for _ in 0..4 {
+            app.handle_key(kc(KeyCode::Backspace)).unwrap();
+        }
+        for c in "work2".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(kc(KeyCode::Enter)).unwrap();
+        let cfg = Config::load().unwrap();
+        assert!(cfg.profile("work2").is_some(), "重命名后 work2 存在");
+        assert!(cfg.profile("work").is_none(), "work 已不存在");
+        assert_eq!(cfg.default_profile, "work2", "默认跟随重命名");
+
+        // d + y → 删除 work2
+        app.handle_key(key('d')).unwrap();
+        assert_eq!(app.mode, Mode::ConfirmProfileDelete);
+        app.handle_key(key('y')).unwrap();
+        let cfg = Config::load().unwrap();
+        assert!(cfg.profile("work2").is_none(), "work2 已删除");
+        assert!(
+            cfg.profile("default").is_some(),
+            "删除默认后保留剩余 default"
+        );
+
+        std::env::remove_var("GTP_CONFIG_DIR");
     }
 
     #[test]
@@ -1506,7 +1601,7 @@ mod tests {
             );
         }
 
-        // 表不变量：每条都有键与双语描述与热度；NON_TASK_VIEWS 恰好是 Tags/Archived
+        // 表不变量：每条都有键与双语描述与热度；NON_TASK_VIEWS 恰好是 Tags/Archived/Settings
         assert!(!KEY_TABLE.is_empty());
         for k in KEY_TABLE {
             assert!(!k.keys.is_empty());
@@ -1514,7 +1609,10 @@ mod tests {
             assert!(!k.en.is_empty());
             assert!(k.heat > 0, "{} 必须有热度", k.keys);
         }
-        assert_eq!(NON_TASK_VIEWS, &[View::Tags, View::Archived]);
+        assert_eq!(
+            NON_TASK_VIEWS,
+            &[View::Tags, View::Archived, View::Settings]
+        );
     }
 
     #[test]

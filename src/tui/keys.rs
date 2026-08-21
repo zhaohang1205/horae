@@ -59,7 +59,7 @@ pub(crate) enum When {
 }
 
 /// 非任务视图：行不是任务，任务操作键不适用。
-pub(crate) const NON_TASK_VIEWS: &[View] = &[View::Tags, View::Archived];
+pub(crate) const NON_TASK_VIEWS: &[View] = &[View::Tags, View::Archived, View::Settings];
 
 /// `~` 时间补全候选（Tab 补全用）。
 pub(crate) const TIME_CANDIDATES: &[&str] = &[
@@ -310,6 +310,15 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         heat: 56,
     },
     KeyDef {
+        keys: ",",
+        zh: "设置",
+        en: "settings",
+        group: KeyGroup::Global,
+        status: false,
+        when: When::Always,
+        heat: 50,
+    },
+    KeyDef {
         keys: "q",
         zh: "退出",
         en: "quit",
@@ -317,6 +326,43 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         status: true,
         when: When::Always,
         heat: 82,
+    },
+    // ── 设置页（Settings 视图内）──
+    KeyDef {
+        keys: "n",
+        zh: "新建 profile",
+        en: "new profile",
+        group: KeyGroup::Global,
+        status: false,
+        when: When::View(View::Settings),
+        heat: 60,
+    },
+    KeyDef {
+        keys: "r",
+        zh: "重命名",
+        en: "rename",
+        group: KeyGroup::Global,
+        status: false,
+        when: When::ViewSel(View::Settings),
+        heat: 58,
+    },
+    KeyDef {
+        keys: "d",
+        zh: "删除",
+        en: "delete",
+        group: KeyGroup::Global,
+        status: false,
+        when: When::ViewSel(View::Settings),
+        heat: 56,
+    },
+    KeyDef {
+        keys: "s",
+        zh: "设为默认",
+        en: "set default",
+        group: KeyGroup::Global,
+        status: false,
+        when: When::ViewSel(View::Settings),
+        heat: 54,
     },
     // ── Task ──
     KeyDef {
@@ -620,7 +666,7 @@ fn mode_keys(mode: Mode, lang: Lang) -> Vec<(&'static str, &'static str)> {
     use Mode::*;
     let mut v: Vec<(&'static str, &'static str)> = Vec::new();
     match mode {
-        ConfirmArchive | ConfirmPurge => {
+        ConfirmArchive | ConfirmPurge | ConfirmProfileDelete => {
             v.push(("y/Enter", lang.tr("确认", "confirm")));
             v.push(("n/Esc", lang.tr("取消", "cancel")));
         }

@@ -25,5 +25,9 @@ fn main() -> Result<()> {
         return commands::profile::run(action);
     }
     let conn = db::conn::open(cli.profile.as_deref())?;
-    commands::run(cli.command.unwrap_or(cli::Command::Tui), &conn)
+    commands::run(
+        cli.command.unwrap_or(cli::Command::Tui),
+        &conn,
+        cli.profile.as_deref(),
+    )
 }

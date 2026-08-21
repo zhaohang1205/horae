@@ -70,7 +70,7 @@ impl<'a> AppRender for App<'a> {
         self.render_status_bar(f, chunks[1]);
 
         match self.mode {
-            Mode::ConfirmArchive | Mode::ConfirmPurge => {
+            Mode::ConfirmArchive | Mode::ConfirmPurge | Mode::ConfirmProfileDelete => {
                 self.render_confirm_overlay(f, size);
             }
             Mode::Normal | Mode::Visual => {}
@@ -764,7 +764,21 @@ impl<'a> App<'a> {
                 " 自定义番茄钟时长 (格式: 工作分钟;短休分钟;长休分钟, 如 25;5;15) ",
                 " Custom pomodoro lengths (format: work;short;long, e.g. 25;5;15) "
             ),
-            Mode::Normal | Mode::Visual | Mode::ConfirmArchive | Mode::ConfirmPurge => "",
+            Mode::CreatingProfile => crate::tr!(
+                self.lang,
+                " 新建 profile (输入名称，如 work / personal / prod1) ",
+                " New profile (enter name, e.g. work / personal / prod1) "
+            ),
+            Mode::RenamingProfile => crate::tr!(
+                self.lang,
+                " 重命名 profile (输入新名称) ",
+                " Rename profile (enter new name) "
+            ),
+            Mode::Normal
+            | Mode::Visual
+            | Mode::ConfirmArchive
+            | Mode::ConfirmPurge
+            | Mode::ConfirmProfileDelete => "",
         };
 
         let mut text_lines: Vec<Line> = Vec::new();
@@ -941,6 +955,19 @@ impl<'a> App<'a> {
                     "将永久删除 {} 项，不可恢复。",
                     "Permanently delete {} item(s). This cannot be undone.",
                     self.pending_purge_ids.len()
+                ),
+            ),
+            Mode::ConfirmProfileDelete => (
+                crate::tr!(
+                    self.lang,
+                    " ⚠ 确认删除 profile ",
+                    " ⚠ Confirm delete profile "
+                ),
+                crate::tr!(
+                    self.lang,
+                    "从配置移除 profile `{}`（数据库文件保留）。",
+                    "Remove profile `{}` from config (db file kept).",
+                    self.pending_profile_delete.as_deref().unwrap_or("")
                 ),
             ),
             _ => (
@@ -1629,6 +1656,7 @@ impl<'a> App<'a> {
                     View::Archived => ("", super::view_label(self.lang, View::Archived)),
                     View::Tags => ("", super::view_label(self.lang, View::Tags)),
                     View::Quotes => ("", super::view_label(self.lang, View::Quotes)),
+                    View::Settings => ("⚙", super::view_label(self.lang, View::Settings)),
                 };
                 let padded_label = pad_right(label, 10);
 
@@ -1680,12 +1708,14 @@ impl<'a> App<'a> {
             ('8', View::Archived),
             ('9', View::Tags),
             ('r', View::Review),
+            (',', View::Settings),
         ] {
             let active = cur == *v;
             let (icon, label) = match v {
                 View::Review => ("", super::view_label(self.lang, View::Review)),
                 View::Archived => ("", super::view_label(self.lang, View::Archived)),
                 View::Tags => ("", super::view_label(self.lang, View::Tags)),
+                View::Settings => ("⚙", super::view_label(self.lang, View::Settings)),
                 _ => ("", ""),
             };
             let padded_label = pad_right(label, 10);

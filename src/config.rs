@@ -36,7 +36,11 @@ fn default_profile_name() -> String {
 }
 
 /// gtp config dir: `~/.config/gtp` (falls back to `.` when no config dir).
+/// `GTP_CONFIG_DIR` env overrides it (used by tests / power users).
 pub fn config_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("GTP_CONFIG_DIR") {
+        return PathBuf::from(dir);
+    }
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("gtp")

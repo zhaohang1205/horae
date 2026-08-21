@@ -17,14 +17,14 @@ mod status;
 mod tagging;
 mod watch;
 
-pub fn run(cmd: Command, conn: &Connection) -> Result<()> {
-    let result = run_inner(cmd, conn);
+pub fn run(cmd: Command, conn: &Connection, profile: Option<&str>) -> Result<()> {
+    let result = run_inner(cmd, conn, profile);
     // CLI hook：每次命令结束后顺带检查每日心智维护摘要（每天至多一次，已发送则直接跳过）。
     let _ = notify::check(conn);
     result
 }
 
-fn run_inner(cmd: Command, conn: &Connection) -> Result<()> {
+fn run_inner(cmd: Command, conn: &Connection, profile: Option<&str>) -> Result<()> {
     match cmd {
         Command::Capture {
             title,
@@ -101,7 +101,7 @@ fn run_inner(cmd: Command, conn: &Connection) -> Result<()> {
             "next" => alarm::next(slot, limit),
             _ => anyhow::bail!("unknown alarm action"),
         },
-        Command::Tui => crate::tui::run(conn),
+        Command::Tui => crate::tui::run(conn, profile),
         Command::Watch {
             dir,
             interval,
