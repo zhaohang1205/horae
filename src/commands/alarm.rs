@@ -81,7 +81,7 @@ fn due_to_ring(tasks: &[Task], rung: &[String], now: i64, lead_ms: i64) -> Vec<(
 pub fn waybar(slot: Option<usize>, limit: Option<usize>, emit_all: bool) -> Result<()> {
     let slot = slot.unwrap_or(1).max(1);
     let limit = limit.unwrap_or(2).clamp(1, 10);
-    let conn = crate::db::conn::open()?;
+    let conn = crate::db::conn::open(None)?;
     let all = tasks::list(
         &conn,
         &tasks::ListFilter {
@@ -162,7 +162,7 @@ pub fn waybar(slot: Option<usize>, limit: Option<usize>, emit_all: bool) -> Resu
 pub fn next(slot: Option<usize>, limit: Option<usize>) -> Result<()> {
     let slot = slot.unwrap_or(1).max(1);
     let limit = limit.unwrap_or(2).clamp(1, 10);
-    let conn = crate::db::conn::open()?;
+    let conn = crate::db::conn::open(None)?;
     let all = tasks::list(
         &conn,
         &tasks::ListFilter {

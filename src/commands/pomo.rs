@@ -123,7 +123,7 @@ pub fn waybar() -> Result<()> {
 }
 
 pub fn daemon() -> Result<()> {
-    let conn = crate::db::conn::open()?;
+    let conn = crate::db::conn::open(None)?;
     loop {
         let mut state = pomodoro::get_state().unwrap_or_default();
         if state.phase == Phase::Idle {

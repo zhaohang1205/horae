@@ -1,5 +1,6 @@
 mod cli;
 mod commands;
+mod config;
 mod db;
 mod error;
 mod i18n;
@@ -20,6 +21,9 @@ fn main() -> Result<()> {
         cli::Cli::print_completions(shell);
         return Ok(());
     }
-    let conn = db::conn::open()?;
+    if let Some(cli::Command::Profile { action }) = cli.command {
+        return commands::profile::run(action);
+    }
+    let conn = db::conn::open(cli.profile.as_deref())?;
     commands::run(cli.command.unwrap_or(cli::Command::Tui), &conn)
 }

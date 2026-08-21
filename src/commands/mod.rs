@@ -10,6 +10,7 @@ mod capture;
 mod list;
 pub mod notify;
 pub mod pomo;
+pub mod profile;
 mod review;
 mod show;
 mod status;
@@ -117,6 +118,9 @@ fn run_inner(cmd: Command, conn: &Connection) -> Result<()> {
         Command::Import { file, replace } => backup::run_import(conn, &file, replace),
         Command::Completions { .. } => {
             anyhow::bail!("`gtp completions` is handled before the database is opened")
+        }
+        Command::Profile { .. } => {
+            anyhow::bail!("`gtp profile` is handled before the database is opened")
         }
     }
 }

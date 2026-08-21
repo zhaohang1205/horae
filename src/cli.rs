@@ -12,6 +12,10 @@ use std::path::PathBuf;
     after_help = "Examples:\n  gtp                       launch the TUI\n  gtp capture \"buy milk\" --tag home --p2\n  gtp list --status next\n  gtp show <id>\n  gtp completions bash\n\nTime syntax: now, +2h, +30m, +1d, today, tomorrow, 2026-07-24 14:30\nTask refs: full id, unique id-prefix, or exact title."
 )]
 pub struct Cli {
+    /// Profile (data set) to use; defaults to the configured default profile.
+    #[arg(long, value_name = "NAME", global = true)]
+    pub profile: Option<String>,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -227,4 +231,37 @@ pub enum Command {
         after_help = "Usage:\n  gtp completions bash\n  gtp completions fish\n\nInstall into ~/.bashrc or ~/.config/fish/completions/"
     )]
     Completions { shell: Shell },
+    /// Manage data-set profiles (list, create, delete, rename, set default)
+    #[command(
+        long_about = "Profiles let you keep separate data sets (e.g. work / personal / prod1) \
+        each in its own SQLite file, switched via `gtp --profile <name>` or the TUI settings view. \
+        This command edits the profile config (~/.config/gtp/config.json) without touching any data.",
+        after_help = "Examples:\n  gtp profile list\n  gtp profile new work\n  gtp profile new prod1 --db prod1.db\n  gtp profile rename work work2\n  gtp profile rm prod1\n  gtp profile set-default work\n  gtp --profile work capture \"buy milk\""
+    )]
+    Profile {
+        #[command(subcommand)]
+        action: ProfileAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ProfileAction {
+    /// List all profiles and mark the default
+    List,
+    /// Create a new profile (data set)
+    New {
+        name: String,
+        #[arg(
+            long,
+            value_name = "PATH",
+            help = "Database file (default: profiles/<name>.db)"
+        )]
+        db: Option<String>,
+    },
+    /// Rename a profile
+    Rename { from: String, to: String },
+    /// Delete a profile from the config (its database file is kept)
+    Rm { name: String },
+    /// Set the default profile used when --profile is not given
+    SetDefault { name: String },
 }
