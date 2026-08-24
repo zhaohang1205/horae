@@ -5,7 +5,7 @@ GTD terminal task manager (`horae`) — a Rust binary (edition 2021, **no lib ta
 ## Commands
 
 - Build/run: `cargo run -- capture "buy milk" --tag home` — note the `--` before subcommand args.
-- Test: `cargo test` — unit tests live in `src/tui/mod.rs`, `src/parser.rs`, and `src/commands/alarm.rs`; run one with `cargo test <name>`.
+- Test: `cargo test` — unit tests live in `src/tui/tests.rs`, `src/parser.rs`, and `src/commands/alarm.rs`; run one with `cargo test <name>`.
 - Lint/format: `cargo clippy`, `cargo fmt`. Clippy must stay clean with `-- -D warnings`.
 - CI: GitHub Actions (`.github/workflows/ci.yml`) runs fmt, clippy `-D warnings`, tests, and an MSRV job; `release.yml` builds tagged releases (`v*`). `tempfile` is available for test DBs.
 
@@ -21,7 +21,7 @@ GTD terminal task manager (`horae`) — a Rust binary (edition 2021, **no lib ta
 - `time.rs` — pure time primitives: `parse_time` (human input: `now`, `+2h`, `today`, `2026-07-24 14:30` → UTC ms), `now_ms`, `local_day_bounds`, `format_local`.
 - `schedule.rs` — the recurrence/scheduling engine (in-process, pure): `occurrences` (RRULE expansion, no external crate, 366-horizon hidden inside), `effective_due` / `effective_due_from` (missed-or-next slot picking, `now` injected), `next_window` (pure reschedule computation), `display_due` (display precedence ladder). DB writes stay in callers (`tasks/transition.rs` calls `next_window` then writes).
 - `parser.rs` — `parse_quick_add`: splits input into `@tag` words and `~time` words.
-- `tui/` — `app.rs`, `handlers.rs` (key handling), `render.rs`, `ui.rs`, `calendar.rs`, `theme.rs` (Catppuccin), `i18n.rs`. **UI strings are Chinese by default and localized via `crate::tr!` / `Lang` (F6 toggles to English, F5 toggles theme); never hardcode UI text.**
+- `tui/` — `app.rs`, `handlers.rs` (key handling), `render.rs`, `ui.rs`, `calendar.rs`, `theme.rs` (Catppuccin), `i18n.rs`. `mod.rs` is thin: module decls, the label/row helpers, and `run`/`run_app`; splash-screen machinery lives in `splash.rs`, TUI tests in `tests.rs` (child of `tui`, so its `use super::*` still sees `mod.rs` items). **UI strings are Chinese by default and localized via `crate::tr!` / `Lang` (F6 toggles to English, F5 toggles theme); never hardcode UI text.**
 - `config.rs` (TUI): `HORAE_CONFIG_DIR` env var overrides `dirs::config_dir()` (used by tests); Settings view (`F8` key, side group `[Modules]`) manages profiles in `config.json` — n new / r rename / d delete (confirm) / s set default. The TUI session's `profile_name` is threaded in from `main.rs` via `commands::run`/`tui::run`; profile switching takes effect next launch (the `Connection` is borrowed, no hot-swap).
 
 ## Non-obvious rules (violating these breaks things)

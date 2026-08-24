@@ -72,7 +72,12 @@
 ### 9. 终端看板与极客美学 (`horae stats` & TUI Splash Screen)
 - **看板设计**：实现了独立的 `horae stats` 控制台看板（MOTD 风格）。
 - **色彩与图形**：编写了跨界脚本，将基于图片生成的 ASCII 艺术（时间女神像）注入 Rust 源码，并采用纯正的 Catppuccin Mocha（摩卡）渐变色彩，搭配当日番茄钟进度与任务统计。
-- **UI 融合**：在 TUI 层（`src/tui/mod.rs`）提取了 `stats` 模块的核心渲染逻辑 `get_stats_lines`，将其转化为了交互式的 TUI 专属开屏页（Splash Screen），并在下方附加了每日随机的 GTD 哲学标语。
+- **UI 融合**：在 TUI 层提取了 `stats` 模块的核心渲染逻辑 `get_stats_lines`，将其转化为了交互式的 TUI 专属开屏页（Splash Screen），并在下方附加了每日随机的 GTD 哲学标语。
+
+### 10. tui/mod.rs 瘦身（开屏与测试外迁）
+- **问题**：`tui/mod.rs` 膨胀到 3156 行，其中 ~330 行是 PNG/Kitty 开屏机制、~2500 行是测试，生产逻辑与测试混杂。
+- **解决**：拆出 `tui/splash.rs`（PNG 加载、Kitty 图形协议、base64、按键等待 + 自带 splash_tests；仅 `show_splash` 为 `pub(super)`）与 `tui/tests.rs`（作为 `tui` 的子模块声明，`use super::*` 对父模块私有项的可见性不变，迁移零改动）。`mod.rs` 收敛为 ~210 行：模块声明、label/row 辅助、`run`/`run_app`。顺带把悬空在开屏函数上的 `run` 文档注释归位。
+- **遗留**：TUI 剩余大文件为 `render.rs`(2116) / `app.rs`(1500) / `handlers.rs`(1437)，是下一个拆分候选。
 
 ## 下一步建议方向 (Proposed Next Steps)
 
