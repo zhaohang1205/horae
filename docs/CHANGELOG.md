@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `horae stats` 控制台看板，使用 Catppuccin 摩卡配色的“时间女神” ASCII 像素艺术展示今日番茄钟进度与任务统计。
+- TUI 启动专属“开屏页”（Splash Screen）：复用 `stats` 绝美画面与统计数据，并伴随随机 GTD 哲思标语（“大脑是用来思考的，记忆交给 HORAE”等），增强操作仪式感。
 - 完整备份与还原：`horae export [--file PATH]` 把全部任务（含所有列）、
   `task_events` 时间线、标签、设置与番茄钟状态打包成一个 JSON 文件
   （默认 `horae-backup-<日期>.json`）；`horae import <FILE> [--replace]` 默认按 id

@@ -38,7 +38,7 @@
 
 ## 剩余候选
 
-### 5. 金句（quotes）功能单一归属 — Worth exploring
+### 5. 金句（quotes）功能单一归属 — Done
 - 现状：功能开关 `quotes_enabled` 散在 7 个文件：`repo/tasks/quotes.rs`（`QUOTE_TAG` + 4 fn）、`tui/app.rs`、`tui/handlers.rs`、`tui/keys.rs`、`tui/ui.rs`、`tui/render.rs`、`migrations/0010`。
 - 方案：`repo::quotes` 模块持有查询 + 门控面（`enabled`/`list`/`count`/`exclude_ids`/`toggle_tag`），TUI 各层消费同一接口。
 - 收益：locality（功能可一处删除，deletion test 通过）、leverage（7 个消费方）。
@@ -69,11 +69,14 @@
 - **短别名**：利用 `clap` 增加了高频单字母别名：`horae c` (capture), `l` (list), `d` (done), `s` (show), `p` (pomo)。
 - **无引号输入**：将 `Capture` 的 `title` 改为 `Vec<String>`（Var-args），允许用户**完全不带引号**执行极速捕获：`horae c 给花浇水 @home ~today`。
 
+### 9. 终端看板与极客美学 (`horae stats` & TUI Splash Screen)
+- **看板设计**：实现了独立的 `horae stats` 控制台看板（MOTD 风格）。
+- **色彩与图形**：编写了跨界脚本，将基于图片生成的 ASCII 艺术（时间女神像）注入 Rust 源码，并采用纯正的 Catppuccin Mocha（摩卡）渐变色彩，搭配当日番茄钟进度与任务统计。
+- **UI 融合**：在 TUI 层（`src/tui/mod.rs`）提取了 `stats` 模块的核心渲染逻辑 `get_stats_lines`，将其转化为了交互式的 TUI 专属开屏页（Splash Screen），并在下方附加了每日随机的 GTD 哲学标语。
+
 ## 下一步建议方向 (Proposed Next Steps)
 
-1. **`horae focus` (或 `horae do`)**
+1. **`horae focus` (或 `horae do`) — Done**
    - **目标**：终结选择困难症。直接计算并输出**目前最应该做的一件事**（综合考虑 p1/p2、有效截止期、当前上下文时间），甚至支持附加 `--start` 直接起番茄钟。
-2. **`horae stats` (终端看板)**
-   - **目标**：不进 TUI，提供一个帅气的 MOTD 风格简报（包含今日完成番茄数、燃尽图、待办统计），适合加进 `~/.zshrc`。
-3. **`horae log` (无任务碎碎念)**
+2. **`horae log` (无任务碎碎念) — Done**
    - **目标**：复用底层强大的 `task_events` append-only 时间线，支持纯粹记录带时间戳的事件/日记，不产生待办任务。

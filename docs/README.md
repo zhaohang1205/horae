@@ -20,6 +20,7 @@ an append-only `task_events` timeline, giving every task a full audit trail.
 - 检查单：一键勾选，全部完成自动重置 · Checklists with one-key tick and auto-reset
 - 金句（可选功能）：随心记录好句子/灵感/知识，一键入库，独立视图管理 · Quotes (opt-in): capture good sentences, ideas & knowledge into a dedicated view
 - 番茄钟专注模式：全屏倒计时环、连击、桌面通知、waybar 模块 · Pomodoro focus mode with progress ring, streaks and a waybar module
+- 控制台看板与开屏页：`horae stats` 或进入 TUI 时，展示极具极客美学与 Catppuccin 配色的“时间女神” ASCII 艺术与哲学标语，极具仪式感 · Stats dashboard and TUI splash screen featuring Catppuccin ASCII art of the Goddess of Time and philosophical GTD slogans
 - 中英双语界面（`F6` 切换）、Catppuccin 深/浅主题（`F5` 切换） · Bilingual UI (F6) and Catppuccin themes (F5)
 
 ## 安装 / Installation
