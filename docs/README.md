@@ -1,8 +1,8 @@
 # horae — GTD 终端任务管理器 / GTD Terminal Task Manager
 
-[![CI](https://github.com/zhaohang1205/gtd/actions/workflows/ci.yml/badge.svg)](https://github.com/zhaohang1205/gtd/actions/workflows/ci.yml)
-[![Release](https://github.com/zhaohang1205/gtd/actions/workflows/release.yml/badge.svg)](https://github.com/zhaohang1205/gtd/actions/workflows/release.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/zhaohang1205/horae/actions/workflows/ci.yml/badge.svg)](https://github.com/zhaohang1205/horae/actions/workflows/ci.yml)
+[![Release](https://github.com/zhaohang1205/horae/actions/workflows/release.yml/badge.svg)](https://github.com/zhaohang1205/horae/actions/workflows/release.yml)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 
 用 Rust 写成的 GTD 终端任务管理器：SQLite 数据层 + CLI + ratatui TUI 三合一。
 A GTD terminal task manager in Rust: SQLite data layer + CLI + ratatui TUI in one binary.
@@ -28,9 +28,9 @@ an append-only `task_events` timeline, giving every task a full audit trail.
 需要 Rust 1.89+，SQLite 已内置，无系统依赖。Requires Rust 1.89+; SQLite is bundled.
 
 ```sh
-cargo install --git https://github.com/zhaohang1205/gtd
+cargo install --git https://github.com/zhaohang1205/horae
 # 或本地构建 / or build from source:
-git clone https://github.com/zhaohang1205/gtd.git && cd gtd
+git clone https://github.com/zhaohang1205/horae.git && cd horae
 cargo build --release
 ```
 
@@ -190,4 +190,5 @@ cargo fmt --check              # 格式 / formatting
 
 ## 许可证 / License
 
-MIT，见 [LICENSE](LICENSE)。
+GPL-3.0，见 [LICENSE](LICENSE)。衍生作品须以同协议开源——拿代码可以，闭源白嫖不行。
+GPL-3.0, see [LICENSE](LICENSE). Derivatives must be licensed alike — use it freely, but share alike.
