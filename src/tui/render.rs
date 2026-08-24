@@ -120,24 +120,24 @@ impl<'a> AppRender for App<'a> {
         let secs = diff_secs % 60;
         let time_str = format!("{:02}:{:02}", mins, secs);
 
-        // ── 阶段配色 ──
+        // ── 阶段配色（正统 Catppuccin：Red / Green / Teal）──
         let (phase_icon, ring_color, dim_color, bg_color) = match &pomo.phase {
             Phase::Work => (
                 crate::tr!(self.lang, "🍅 专注", "🍅 Focus"),
-                Color::Rgb(230, 60, 60),
-                Color::Rgb(70, 25, 25),
+                Color::Rgb(243, 139, 168), // Red
+                mix_toward(self.theme.bg, Color::Rgb(243, 139, 168), 0.55),
                 self.theme.bg,
             ),
             Phase::ShortBreak => (
                 crate::tr!(self.lang, "☕ 小休", "☕ Short break"),
-                Color::Rgb(60, 210, 110),
-                Color::Rgb(20, 65, 35),
+                Color::Rgb(166, 227, 161), // Green
+                mix_toward(self.theme.bg, Color::Rgb(166, 227, 161), 0.55),
                 self.theme.bg,
             ),
             Phase::LongBreak => (
                 crate::tr!(self.lang, "🌿 长休", "🌿 Long break"),
-                Color::Rgb(60, 150, 230),
-                Color::Rgb(20, 45, 75),
+                Color::Rgb(148, 226, 213), // Teal
+                mix_toward(self.theme.bg, Color::Rgb(148, 226, 213), 0.55),
                 self.theme.bg,
             ),
             Phase::Idle => return,
@@ -286,7 +286,7 @@ impl<'a> AppRender for App<'a> {
                     Span::styled(
                         format!("{:>6} ", k),
                         Style::default()
-                            .fg(Color::Cyan)
+                            .fg(self.theme.accent)
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(desc),
@@ -451,6 +451,17 @@ impl<'a> AppRender for App<'a> {
 
 // ── 大数字字体辅助（5 行 × 4 列，纯 █ 字符）──
 
+/// 将 `over` 朝 `base` 方向按比例 `t`（0..1）混合，得到与背景协调的暗化/亮化色。
+/// 用于番茄钟进度环的“轨道”底色，保证两者同属一套 Catppuccin 色相。
+fn mix_toward(base: Color, over: Color, t: f32) -> Color {
+    if let (Color::Rgb(br, bg, bb), Color::Rgb(or, og, ob)) = (base, over) {
+        let m = |a: u8, b: u8| (a as f32 * (1.0 - t) + b as f32 * t).round() as u8;
+        Color::Rgb(m(br, or), m(bg, og), m(bb, ob))
+    } else {
+        over
+    }
+}
+
 fn big_digit_rows(c: char, blink: bool) -> [&'static str; 5] {
     match c {
         '0' => [" ██ ", "█  █", "█  █", "█  █", " ██ "],
@@ -556,7 +567,7 @@ impl<'a> App<'a> {
                     step_name
                 ),
                 Style::default()
-                    .bg(Color::Cyan)
+                    .bg(self.theme.accent)
                     .fg(self.theme.bg)
                     .add_modifier(Modifier::BOLD),
             )));
@@ -667,7 +678,7 @@ impl<'a> App<'a> {
                 let key_color = if i % 2 == 0 {
                     self.theme.accent
                 } else {
-                    Color::Cyan
+                    self.theme.text_success
                 };
                 content_spans.push(Span::styled(
                     format!("{:<3} {}", k, d),
@@ -1374,7 +1385,7 @@ impl<'a> App<'a> {
                 }
                 ctx.draw(&Points {
                     coords: &tick_pts,
-                    color: Color::Rgb(85, 85, 85),
+                    color: self.theme.text_dim,
                 });
             });
         f.render_widget(canvas, canvas_area);
@@ -1404,7 +1415,7 @@ impl<'a> App<'a> {
                     "    添加情境, 如 ",
                     "    add context, e.g. "
                 )),
-                Span::styled("@work", Style::default().fg(Color::LightBlue)),
+                Span::styled("@work", Style::default().fg(self.theme.accent)),
                 Span::raw(crate::tr!(
                     self.lang,
                     " (支持 Tab 补全)",
@@ -1422,11 +1433,11 @@ impl<'a> App<'a> {
                     "    设置优先级: ",
                     "    set priority: "
                 )),
-                Span::styled("!a", Style::default().fg(Color::Red)),
+                Span::styled("!a", Style::default().fg(self.theme.text_urgent)),
                 Span::raw(crate::tr!(self.lang, "(高) / ", "(high) / ")),
-                Span::styled("!b", Style::default().fg(Color::Yellow)),
+                Span::styled("!b", Style::default().fg(Color::Rgb(249, 226, 175))),
                 Span::raw(crate::tr!(self.lang, "(中) / ", "(medium) / ")),
-                Span::styled("!c", Style::default().fg(Color::Blue)),
+                Span::styled("!c", Style::default().fg(Color::Rgb(137, 180, 250))),
                 Span::raw(crate::tr!(self.lang, "(低)", "(low)")),
             ]),
             Line::from(vec![
@@ -1445,12 +1456,12 @@ impl<'a> App<'a> {
                 Span::raw(crate::tr!(self.lang, "  例: ", "  examples: ")),
                 Span::styled(
                     "a买牛奶 @home ~tomorrow",
-                    Style::default().fg(Color::LightBlue),
+                    Style::default().fg(self.theme.accent),
                 ),
                 Span::raw(" / "),
                 Span::styled(
                     "a写周报 @work !a ~+3d",
-                    Style::default().fg(Color::LightBlue),
+                    Style::default().fg(self.theme.accent),
                 ),
             ]),
             Line::from(""),
@@ -1526,7 +1537,7 @@ impl<'a> App<'a> {
                     "  一句话排程: ",
                     "  one-line schedule: "
                 )),
-                Span::styled("~明天 15:30", Style::default().fg(Color::Cyan)),
+                Span::styled("~明天 15:30", Style::default().fg(self.theme.accent)),
                 Span::raw(crate::tr!(
                     self.lang,
                     " 即可设排程起点, 循环任务再补 *rrule",
@@ -1539,7 +1550,7 @@ impl<'a> App<'a> {
                     "  快速录入简写: ",
                     "  quick shorthand: "
                 )),
-                Span::styled("*2w[1,3]", Style::default().fg(Color::LightBlue)),
+                Span::styled("*2w[1,3]", Style::default().fg(self.theme.rrule_fg)),
                 Span::raw(crate::tr!(
                     self.lang,
                     " = 每2周周一、周三  (星期用 1-7, 0=周日; 也可写 *mo,we)",
@@ -1584,12 +1595,12 @@ impl<'a> App<'a> {
                 Span::raw(crate::tr!(self.lang, "  例: ", "  examples: ")),
                 Span::styled(
                     ";FREQ=WEEKLY;BYDAY=SA,SU",
-                    Style::default().fg(Color::LightBlue),
+                    Style::default().fg(self.theme.rrule_fg),
                 ),
                 Span::raw("    "),
                 Span::styled(
                     ";FREQ=DAILY;COUNT=30",
-                    Style::default().fg(Color::LightBlue),
+                    Style::default().fg(self.theme.rrule_fg),
                 ),
             ]),
             Line::from(""),
@@ -1604,7 +1615,7 @@ impl<'a> App<'a> {
                 Span::styled(
                     "w",
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(crate::tr!(
@@ -1612,21 +1623,21 @@ impl<'a> App<'a> {
                     " 后可填写 [谁/何时], 如 ",
                     " then set [who/when], e.g. "
                 )),
-                Span::styled("w → Alice → +1d", Style::default().fg(Color::LightBlue)),
+                Span::styled("w → Alice → +1d", Style::default().fg(self.theme.accent)),
             ]),
             Line::from(vec![
                 Span::raw(crate::tr!(self.lang, "  子任务 ", "  subtasks ")),
                 Span::styled(
                     "C",
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(crate::tr!(self.lang, " 新增, ", " add, ")),
                 Span::styled(
                     "Space",
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(crate::tr!(
@@ -1644,14 +1655,14 @@ impl<'a> App<'a> {
                 Span::styled(
                     "a",
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(crate::tr!(self.lang, " 动态新增, 按 ", " to add, ")),
                 Span::styled(
                     "D",
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(crate::tr!(self.lang, " 删除", " to delete")),
@@ -1661,7 +1672,7 @@ impl<'a> App<'a> {
                 Span::styled(
                     "Ctrl+P",
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(crate::tr!(
@@ -1944,7 +1955,7 @@ impl<'a> App<'a> {
                         format!("   {:>6} ", k),
                         Style::default().fg(self.theme.text_dim),
                     ),
-                    Span::styled(*desc, Style::default().fg(Color::Gray)),
+                    Span::styled(*desc, Style::default().fg(self.theme.fg)),
                 ]));
                 shown += 1;
                 budget -= 1;
@@ -1996,7 +2007,7 @@ impl<'a> App<'a> {
                 ),
             ]));
         } else {
-            let st_color = ui::status_color(&d.task.status);
+            let st_color = ui::status_color(&d.task.status, self.theme.is_dark);
             lines.push(Line::from(vec![
                 Span::styled(
                     crate::tr!(self.lang, "状态: ", "Status: "),

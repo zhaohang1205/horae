@@ -43,7 +43,7 @@ impl Theme {
 
             hl_bg: Color::Rgb(49, 50, 68),          // Surface0
             hl_fg: Color::Rgb(137, 180, 250),       // Blue
-            row_active_bg: Color::Rgb(30, 60, 110), // 深蓝，活动行背景
+            row_active_bg: Color::Rgb(88, 91, 112), // Surface2，活动行（比 hl_bg 高一档，更醒目）
 
             status_bg: Color::Rgb(24, 24, 37),    // Mantle
             status_fg: Color::Rgb(186, 194, 222), // Subtext1
@@ -67,7 +67,7 @@ impl Theme {
 
             hl_bg: Color::Rgb(204, 208, 218),         // Surface0
             hl_fg: Color::Rgb(30, 102, 245),          // Blue
-            row_active_bg: Color::Rgb(204, 208, 218), // 浅色主题沿用 hl_bg
+            row_active_bg: Color::Rgb(172, 176, 190), // Surface2，活动行（比 hl_bg 高一档）
 
             status_bg: Color::Rgb(230, 233, 239), // Mantle
             status_fg: Color::Rgb(92, 95, 119),   // Subtext1

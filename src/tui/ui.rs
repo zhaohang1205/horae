@@ -22,25 +22,34 @@ pub fn status_letter(s: &Status) -> &'static str {
     }
 }
 
-/// 状态语义色：列表、详情、引导栏统一使用，形成稳定的视觉语言。
-pub fn status_color(s: &Status) -> Color {
-    match s {
-        Status::Inbox => Color::Gray,
-        Status::Next => Color::Yellow,
-        Status::Waiting => Color::LightBlue,
-        Status::Scheduled => Color::Cyan,
-        Status::Someday => Color::Magenta,
-        Status::Reference => Color::White,
-        Status::Done => Color::Green,
+/// 状态语义色：列表、详情、引导栏统一使用，形成稳定的视觉语言（正统 Catppuccin）。
+pub fn status_color(s: &Status, is_dark: bool) -> Color {
+    match (s, is_dark) {
+        // Mocha（深色）
+        (Status::Inbox, true) => Color::Rgb(147, 153, 178),     // Overlay2
+        (Status::Next, true) => Color::Rgb(166, 227, 161),      // Green
+        (Status::Waiting, true) => Color::Rgb(249, 226, 175),   // Yellow
+        (Status::Scheduled, true) => Color::Rgb(137, 180, 250), // Blue
+        (Status::Someday, true) => Color::Rgb(203, 166, 229),   // Mauve
+        (Status::Reference, true) => Color::Rgb(148, 226, 213), // Teal
+        (Status::Done, true) => Color::Rgb(127, 132, 156),      // Overlay1
+        // Latte（浅色）
+        (Status::Inbox, false) => Color::Rgb(138, 143, 161),    // Overlay1
+        (Status::Next, false) => Color::Rgb(64, 160, 43),       // Green
+        (Status::Waiting, false) => Color::Rgb(223, 142, 29),   // Yellow
+        (Status::Scheduled, false) => Color::Rgb(30, 102, 245), // Blue
+        (Status::Someday, false) => Color::Rgb(136, 58, 234),   // Mauve
+        (Status::Reference, false) => Color::Rgb(23, 146, 153), // Teal
+        (Status::Done, false) => Color::Rgb(138, 143, 161),     // Overlay1
     }
 }
 
 /// 优先级标签的配色：p1 红 / p2 黄 / p3 蓝，与状态色区分开。
 pub fn priority_color(tag: &str) -> Option<Color> {
     match tag {
-        "p1" => Some(Color::Red),
-        "p2" => Some(Color::Yellow),
-        "p3" => Some(Color::Blue),
+        "p1" => Some(Color::Rgb(243, 139, 168)), // Red
+        "p2" => Some(Color::Rgb(249, 226, 175)), // Yellow
+        "p3" => Some(Color::Rgb(137, 180, 250)), // Blue
         _ => None,
     }
 }
@@ -109,34 +118,34 @@ pub fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
                     .unwrap_or_default()
             };
             let due_color = if is_archived || is_done || is_checked_in || is_quote {
-                Color::DarkGray
+                app.theme.text_dim
             } else if time::is_overdue(r.due) {
-                Color::Red
+                app.theme.text_urgent
             } else {
-                Color::DarkGray
+                app.theme.text_dim
             };
 
             let (letter, color) = if is_archived {
                 match r.archive_reason.as_deref() {
-                    Some("completed") => ("√", Color::DarkGray),
-                    Some("deleted") => ("×", Color::DarkGray),
-                    _ => ("?", Color::DarkGray),
+                    Some("completed") => ("√", app.theme.text_dim),
+                    Some("deleted") => ("×", app.theme.text_dim),
+                    _ => ("?", app.theme.text_dim),
                 }
             } else if is_checked_in {
-                ("✓", Color::Green)
+                ("✓", app.theme.text_success)
             } else if is_quote {
                 ("\"", app.theme.accent)
             } else {
-                (status_letter(&status_enum), status_color(&status_enum))
+                (status_letter(&status_enum), status_color(&status_enum, app.theme.is_dark))
             };
 
             let mut spans = vec![Span::styled(
                 format!("{}{}{} ", sel_prefix, indent, letter),
                 Style::default()
                     .fg(if is_focus_task {
-                        Color::LightRed
+                        app.theme.text_urgent
                     } else if is_selected {
-                        Color::Yellow
+                        app.theme.accent
                     } else {
                         color
                     })
@@ -150,7 +159,7 @@ pub fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
             // 标题（选中时加粗，专注任务特殊高亮）
             let title_style = if is_focus_task {
                 Style::default()
-                    .fg(Color::LightRed)
+                    .fg(app.theme.text_urgent)
                     .add_modifier(Modifier::BOLD)
             } else if is_selected {
                 Style::default().add_modifier(Modifier::BOLD)
@@ -164,7 +173,7 @@ pub fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
             if !prog.is_empty() {
                 spans.push(Span::styled(
                     format!(" {}", prog),
-                    Style::default().fg(Color::Green),
+                    Style::default().fg(app.theme.text_success),
                 ));
             }
 
@@ -191,7 +200,7 @@ pub fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
                     format!("  {}{}", reason_cn, due_text),
                     Style::default()
                         .fg(due_color)
-                        .add_modifier(if due_color == Color::Red {
+                        .add_modifier(if due_color == app.theme.text_urgent {
                             Modifier::BOLD
                         } else {
                             Modifier::empty()
@@ -202,7 +211,7 @@ pub fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
             let line = Line::from(spans);
             let mut item = ListItem::new(line);
             if is_selected {
-                item = item.style(Style::default().bg(Color::DarkGray));
+                item = item.style(Style::default().bg(app.theme.hl_bg));
             }
             item
         })

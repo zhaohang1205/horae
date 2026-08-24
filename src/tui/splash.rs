@@ -316,10 +316,10 @@ fn draw_splash_frame<W: std::io::Write>(
 
     let text_x = start_x + render_img_w + gap;
 
-    // Title (Catppuccin Blue, Bold)
+    // Title (Catppuccin Lavender, Bold)
     for (i, line) in title_lines.iter().enumerate() {
         out.execute(cursor::MoveTo(text_x, text_y + i as u16))?;
-        write!(out, "\x1b[1m\x1b[38;2;137;180;250m{}\x1b[0m", line)?;
+        write!(out, "\x1b[1m\x1b[38;2;180;190;254m{}\x1b[0m", line)?;
     }
 
     // Quote 1 (Catppuccin Blue, Italic, source right-aligned)
@@ -334,7 +334,7 @@ fn draw_splash_frame<W: std::io::Write>(
         write!(out, "\x1b[38;2;137;180;250m\x1b[3m{}\x1b[0m", line)?;
     }
 
-    // Quote 2 (Catppuccin Blue, Italic + OSC 8 Hyperlink, source right-aligned)
+    // Quote 2 (Catppuccin Pink, Italic + OSC 8 Hyperlink, source right-aligned)
     let quote2_y = quote1_y + quote1_lines.len() as u16 + 1;
     for (i, line) in quote2_lines.iter().enumerate() {
         let pad = if i == quote2_lines.len() - 1 {
@@ -345,7 +345,7 @@ fn draw_splash_frame<W: std::io::Write>(
         out.execute(cursor::MoveTo(text_x + pad, quote2_y + i as u16))?;
         write!(
             out,
-            "\x1b[38;2;137;180;250m\x1b[3m\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\\x1b[0m",
+            "\x1b[38;2;245;194;231m\x1b[3m\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\\x1b[0m",
             slogan_url, line
         )?;
     }
