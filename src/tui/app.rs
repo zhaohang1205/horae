@@ -244,6 +244,8 @@ pub(crate) struct App<'a> {
     pub(crate) quotes: crate::repo::quotes::Quotes,
     /// 模块显示门控 (Splash, Reference, Done, etc.)
     pub(crate) modules: crate::repo::modules::ModuleVisibility,
+    /// 图标风格（Nerd Font / ASCII 回退）。
+    pub(crate) icon_style: crate::tui::icons::IconStyle,
     /// 当前会话使用的 profile 名（用于设置页标记与显示）。
     pub(crate) profile_name: String,
     /// 设置页待删除的 profile 名。
@@ -271,6 +273,7 @@ impl<'a> App<'a> {
         };
         let quotes = crate::repo::quotes::Quotes::load(conn);
         let modules = crate::repo::modules::ModuleVisibility::load(conn);
+        let icon_style = crate::tui::icons::IconStyle::load(conn);
         let mut app = App {
             conn,
             view: View::Inbox,
@@ -315,6 +318,7 @@ impl<'a> App<'a> {
             completion_prefix: '@',
             quotes,
             modules,
+            icon_style,
             profile_name: String::new(),
             pending_profile_delete: None,
         };
@@ -722,6 +726,11 @@ impl<'a> App<'a> {
 
     pub(crate) fn context_count(&self, v: View) -> usize {
         self.counts.get(&v).copied().unwrap_or(0)
+    }
+
+    /// 按当前图标风格取字形（Nerd Font 或 ASCII 回退）。
+    pub(crate) fn icon(&self, kind: crate::tui::icons::Icon) -> &'static str {
+        crate::tui::icons::glyph(kind, self.icon_style)
     }
 
     /// 从已经一次性取出的 `all`（未归档、含标签/搜索过滤）里算出今日/明日列表。

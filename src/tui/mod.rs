@@ -1,5 +1,6 @@
 pub mod app;
 pub mod handlers;
+pub mod icons;
 pub mod keys;
 pub mod render;
 pub mod theme;

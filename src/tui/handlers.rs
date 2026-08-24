@@ -32,11 +32,11 @@ impl<'a> AppHandlers for App<'a> {
                             // close, implicitly handled because popup is taken and not put back
                         }
                         KeyCode::Char('j') | KeyCode::Down => {
-                            idx = (idx + 1) % 8;
+                            idx = (idx + 1) % 9;
                             self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
                         }
                         KeyCode::Char('k') | KeyCode::Up => {
-                            idx = idx.checked_sub(1).unwrap_or(7);
+                            idx = idx.checked_sub(1).unwrap_or(8);
                             self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
                         }
                         KeyCode::Char(' ') => {
@@ -98,6 +98,18 @@ impl<'a> AppHandlers for App<'a> {
                                     if !self.modules.settings && self.view == View::Settings {
                                         self.set_view(View::Inbox);
                                     }
+                                }
+                                8 => {
+                                    use crate::tui::icons::IconStyle;
+                                    self.icon_style = match self.icon_style {
+                                        IconStyle::Nerd => IconStyle::Ascii,
+                                        IconStyle::Ascii => IconStyle::Nerd,
+                                    };
+                                    let _ = crate::repo::settings::set(
+                                        self.conn,
+                                        "icons",
+                                        self.icon_style.key(),
+                                    );
                                 }
                                 _ => {}
                             }

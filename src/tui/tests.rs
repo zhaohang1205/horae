@@ -928,8 +928,8 @@ fn quotes_feature_toggle_and_shortcut() {
 
     // F7 启用 + 持久化
     app.handle_key(kc(KeyCode::F(7))).unwrap(); // open popup
-    for _ in 0..3 {
-        app.handle_key(kc(KeyCode::Up)).unwrap(); // move from 0 to 5 (0->7->6->5)
+    for _ in 0..4 {
+        app.handle_key(kc(KeyCode::Up)).unwrap(); // move from 0 to 5 (0->8->7->6->5)
     }
     app.handle_key(key(' ')).unwrap(); // space toggles 5 (Quotes)
     app.handle_key(kc(KeyCode::Esc)).unwrap(); // close popup
@@ -1031,8 +1031,8 @@ fn quotes_feature_toggle_and_shortcut() {
     // F7 停用：若在金句视图则跳回收件箱
     app.handle_key(key('0')).unwrap();
     app.handle_key(kc(KeyCode::F(7))).unwrap();
-    for _ in 0..3 {
-        app.handle_key(kc(KeyCode::Up)).unwrap(); // move to index 5
+    for _ in 0..4 {
+        app.handle_key(kc(KeyCode::Up)).unwrap(); // move to index 5 (0->8->7->6->5)
     }
     app.handle_key(key(' ')).unwrap();
     app.handle_key(kc(KeyCode::Esc)).unwrap();
@@ -2254,12 +2254,12 @@ fn module_toggle_popup_navigates_and_persists() {
     let reloaded = crate::repo::modules::ModuleVisibility::load(app.conn);
     assert!(!reloaded.splash);
 
-    // j 向下循环导航（0 → 1），k 反向且在 0 处回绕到 7
+    // j 向下循环导航（0 → 1），k 反向且在 0 处回绕到 8（最后一项：图标）
     app.handle_key(key('j')).unwrap();
     assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(1)));
     app.popup = Some(crate::tui::app::Popup::ModuleToggles(0));
     app.handle_key(key('k')).unwrap();
-    assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(7)));
+    assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(8)));
 
     // Esc 关闭弹层
     app.handle_key(kc(KeyCode::Esc)).unwrap();
@@ -2296,6 +2296,49 @@ fn disabled_module_blocks_digit_view_and_quotes_toggle_off_returns_to_inbox() {
     app.handle_key(key(' ')).unwrap();
     assert!(!app.quotes.enabled);
     assert_eq!(app.view, View::Inbox, "quotes 关闭时应离开 Quotes 视图");
+}
+
+#[test]
+fn icons_toggle_persists_and_switches_style() {
+    crate::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    seed(&conn);
+    let mut app = App::new(&conn).unwrap();
+
+    use crate::tui::icons::IconStyle;
+
+    // 打开弹层并跳到第 9 项（idx 8：图标开关）
+    app.handle_key(kc(KeyCode::F(7))).unwrap();
+    for _ in 0..8 {
+        app.handle_key(key('j')).unwrap();
+    }
+    assert_eq!(
+        app.popup,
+        Some(crate::tui::app::Popup::ModuleToggles(8)),
+        "j*8 应停在图标项"
+    );
+
+    let before = app.icon_style;
+    app.handle_key(key(' ')).unwrap();
+
+    let expected = match before {
+        IconStyle::Nerd => IconStyle::Ascii,
+        IconStyle::Ascii => IconStyle::Nerd,
+    };
+    assert_eq!(app.icon_style, expected, "space 应翻转图标风格");
+    assert_eq!(
+        crate::repo::settings::get(app.conn, "icons")
+            .unwrap()
+            .as_deref(),
+        Some(expected.key()),
+        "图标风格应持久化到 settings 表"
+    );
+    assert_eq!(
+        IconStyle::load(app.conn),
+        expected,
+        "重新加载应保持翻转后的风格"
+    );
 }
 
 #[test]

@@ -243,7 +243,7 @@ fn draw_splash_frame<W: std::io::Write>(
 
     let quote1_lines = ["物有本末，事有终始，", "知所先后，则近道矣", "--《大学》"];
     let quote2_lines = [
-        "your mind is for having ideas,",
+        "Your mind is for having ideas,",
         "not holding them",
         "--David Allen",
     ];
@@ -302,7 +302,9 @@ fn draw_splash_frame<W: std::io::Write>(
         start_y
     };
 
-    out.execute(crossterm::terminal::Clear(crossterm::terminal::ClearType::All))?;
+    out.execute(crossterm::terminal::Clear(
+        crossterm::terminal::ClearType::All,
+    ))?;
 
     if render_img_w > 0 && use_kitty {
         out.execute(cursor::MoveTo(start_x, img_y))?;
@@ -472,7 +474,7 @@ mod splash_tests {
     fn splash_quotes_and_link() {
         let q1 = ["物有本末，事有终始，", "知所先后，则近道矣", "--《大学》"];
         let q2 = [
-            "your mind is for having ideas,",
+            "Your mind is for having ideas,",
             "not holding them",
             "--David Allen",
         ];
@@ -484,6 +486,6 @@ mod splash_tests {
 
         let osc8 = format!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", url, q2[0]);
         assert!(osc8.contains("https://gettingthingsdone.com/"));
-        assert!(osc8.contains("your mind is for having ideas,"));
+        assert!(osc8.contains("Your mind is for having ideas,"));
     }
 }

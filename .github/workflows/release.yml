@@ -7,26 +7,104 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+
 jobs:
-  release:
-    name: Build + GitHub Release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
       - name: Build release binary
-        run: cargo build --release
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Smoke test
+        shell: bash
+        run: ./target/${{ matrix.target }}/release/horae${{ runner.os == 'Windows' && '.exe' || '' }} --version
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          REF: ${{ github.ref_name }}
+        run: |
+          ASSET="horae-${REF}-${TARGET}.tar.gz"
+          mkdir -p dist
+          cp "target/${TARGET}/release/horae" dist/horae
+          tar czf "dist/${ASSET}" -C dist horae
+          rm dist/horae
+          (
+            cd dist
+            sha256sum "${ASSET}" > "${ASSET}.sha256"
+          )
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+          REF: ${{ github.ref_name }}
+        run: |
+          $asset = "horae-$env:REF-$env:TARGET.zip"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "target/$env:TARGET/release/horae.exe" dist/horae.exe
+          Compress-Archive -Path dist/horae.exe -DestinationPath "dist/$asset" -Force
+          Remove-Item dist/horae.exe
+          $hash = (Get-FileHash -Algorithm SHA256 "dist/$asset").Hash.ToLower()
+          "$hash  $asset" | Out-File -Encoding ascii "dist/$asset.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: horae-${{ matrix.target }}
+          path: dist/*
+
+  release:
+    name: GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: target/release/gtp
+          files: dist/*
           generate_release_notes: true

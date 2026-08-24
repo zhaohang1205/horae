@@ -1,4 +1,5 @@
 use super::app::{pad_right, App, Mode, Pane, View};
+use super::icons::Icon;
 use super::keys::{ctx_of, help_rows, status_strip, strip_keys, KeyGroup};
 use super::status_cn;
 use super::ui;
@@ -208,11 +209,17 @@ impl<'a> AppRender for App<'a> {
         let hints = if matches!(pomo.phase, Phase::ShortBreak | Phase::LongBreak) {
             crate::tr!(
                 self.lang,
-                "󰄾 [Space/P] 下一轮  |  [S] 结束专注",
-                "󰄾 [Space/P] next round  |  [S] end focus"
+                "{} [Space/P] 下一轮  |  [S] 结束专注",
+                "{} [Space/P] next round  |  [S] end focus",
+                self.icon(Icon::Active)
             )
         } else {
-            crate::tr!(self.lang, "󰄾 [S] 停止番茄钟", "󰄾 [S] stop pomodoro")
+            crate::tr!(
+                self.lang,
+                "{} [S] 停止番茄钟",
+                "{} [S] stop pomodoro",
+                self.icon(Icon::Active)
+            )
         };
 
         let stats_line = Line::from(vec![
@@ -574,8 +581,9 @@ impl<'a> App<'a> {
                     Span::styled(
                         crate::tr!(
                             self.lang,
-                            " 󰗠 成就结清: 今日已积 {} 个番茄 (Streak {} 连击!)  |  ",
-                            " 󰗠 Settled: {} tomatoes today (Streak {})  |  ",
+                            " {} 成就结清: 今日已积 {} 个番茄 (Streak {} 连击!)  |  ",
+                            " {} Settled: {} tomatoes today (Streak {})  |  ",
+                            self.icon(Icon::Achievement),
                             pomo.today_count,
                             pomo.streak
                         ),
@@ -586,8 +594,9 @@ impl<'a> App<'a> {
                     Span::styled(
                         crate::tr!(
                             self.lang,
-                            "休息已完成  |  再接再厉? 󰄾 [Space/P] 开启新一轮专注 [{}] ",
-                            "Break done  |  Go again? 󰄾 [Space/P] start a new focus [{}] ",
+                            "休息已完成  |  再接再厉? {} [Space/P] 开启新一轮专注 [{}] ",
+                            "Break done  |  Go again? {} [Space/P] start a new focus [{}] ",
+                            self.icon(Icon::Active),
                             last_title
                         ),
                         Style::default()
@@ -1164,6 +1173,12 @@ impl<'a> App<'a> {
                     .border_style(Style::default().fg(self.theme.accent));
 
                 let mut items = vec![];
+                let nerd = matches!(self.icon_style, crate::tui::icons::IconStyle::Nerd);
+                let icons_label = if nerd {
+                    crate::tr!(self.lang, "图标 (Nerd Font)", "Icons (Nerd Font)")
+                } else {
+                    crate::tr!(self.lang, "图标 (ASCII 回退)", "Icons (ASCII fallback)")
+                };
                 let opts = [
                     (self.modules.splash, "开屏页 (Splash)"),
                     (self.modules.reference, "6 参考资料 (Reference)"),
@@ -1173,6 +1188,7 @@ impl<'a> App<'a> {
                     (self.quotes.enabled, "0 金句 (Quotes)"),
                     (self.modules.review, "r 周回顾 (Review)"),
                     (self.modules.settings, "M 设置 (Settings)"),
+                    (nerd, icons_label),
                 ];
                 for (i, (enabled, name)) in opts.iter().enumerate() {
                     let checkbox = if *enabled { "[x]" } else { "[ ]" };
@@ -1676,7 +1692,7 @@ impl<'a> App<'a> {
         // 矮终端（如 80×24）收紧组间空行，把行数让给下方的 [Keys] 动态键。
         let spacious = area.height >= 30;
 
-        let mut add_group = |views: &[(char, View)], title: &'static str| {
+        let mut add_group = |views: &[(char, View)], title: String| {
             lines.push(Line::from(Span::styled(
                 title,
                 Style::default()
@@ -1687,20 +1703,62 @@ impl<'a> App<'a> {
                 let cnt = self.context_count(*v);
                 let active = cur == *v;
                 let (icon, label) = match v {
-                    View::Inbox => ("", super::view_label(self.lang, View::Inbox)),
-                    View::Today => ("", super::view_label(self.lang, View::Today)),
-                    View::Tomorrow => ("", super::view_label(self.lang, View::Tomorrow)),
-                    View::Next => ("", super::view_label(self.lang, View::Next)),
-                    View::Waiting => ("", super::view_label(self.lang, View::Waiting)),
-                    View::Scheduled => ("", super::view_label(self.lang, View::Scheduled)),
-                    View::Someday => ("", super::view_label(self.lang, View::Someday)),
-                    View::Reference => ("", super::view_label(self.lang, View::Reference)),
-                    View::Done => ("", super::view_label(self.lang, View::Done)),
-                    View::Review => ("", super::view_label(self.lang, View::Review)),
-                    View::Archived => ("", super::view_label(self.lang, View::Archived)),
-                    View::Tags => ("", super::view_label(self.lang, View::Tags)),
-                    View::Quotes => ("", super::view_label(self.lang, View::Quotes)),
-                    View::Settings => ("", super::view_label(self.lang, View::Settings)),
+                    View::Inbox => (
+                        self.icon(Icon::Inbox),
+                        super::view_label(self.lang, View::Inbox),
+                    ),
+                    View::Today => (
+                        self.icon(Icon::Today),
+                        super::view_label(self.lang, View::Today),
+                    ),
+                    View::Tomorrow => (
+                        self.icon(Icon::Tomorrow),
+                        super::view_label(self.lang, View::Tomorrow),
+                    ),
+                    View::Next => (
+                        self.icon(Icon::Next),
+                        super::view_label(self.lang, View::Next),
+                    ),
+                    View::Waiting => (
+                        self.icon(Icon::Waiting),
+                        super::view_label(self.lang, View::Waiting),
+                    ),
+                    View::Scheduled => (
+                        self.icon(Icon::Scheduled),
+                        super::view_label(self.lang, View::Scheduled),
+                    ),
+                    View::Someday => (
+                        self.icon(Icon::Someday),
+                        super::view_label(self.lang, View::Someday),
+                    ),
+                    View::Reference => (
+                        self.icon(Icon::Reference),
+                        super::view_label(self.lang, View::Reference),
+                    ),
+                    View::Done => (
+                        self.icon(Icon::Done),
+                        super::view_label(self.lang, View::Done),
+                    ),
+                    View::Review => (
+                        self.icon(Icon::Review),
+                        super::view_label(self.lang, View::Review),
+                    ),
+                    View::Archived => (
+                        self.icon(Icon::Archived),
+                        super::view_label(self.lang, View::Archived),
+                    ),
+                    View::Tags => (
+                        self.icon(Icon::Tags),
+                        super::view_label(self.lang, View::Tags),
+                    ),
+                    View::Quotes => (
+                        self.icon(Icon::Quotes),
+                        super::view_label(self.lang, View::Quotes),
+                    ),
+                    View::Settings => (
+                        self.icon(Icon::Settings),
+                        super::view_label(self.lang, View::Settings),
+                    ),
                 };
                 let padded_label = pad_right(label, 10);
 
@@ -1712,7 +1770,14 @@ impl<'a> App<'a> {
                         style = style.add_modifier(Modifier::REVERSED);
                     }
                     lines.push(Line::from(Span::styled(
-                        format!(" 󰄾 {} {} {} {:>3} ", key, icon, padded_label, cnt),
+                        format!(
+                            " {} {} {} {} {:>3} ",
+                            self.icon(Icon::Active),
+                            key,
+                            icon,
+                            padded_label,
+                            cnt
+                        ),
                         style,
                     )));
                 } else {
@@ -1734,15 +1799,21 @@ impl<'a> App<'a> {
             }
         };
 
-        add_group(&[('J', View::Today), ('K', View::Tomorrow)], "  [Day] ⇧+");
-        add_group(&[('1', View::Inbox), ('2', View::Next)], "  [Active]");
+        add_group(
+            &[('J', View::Today), ('K', View::Tomorrow)],
+            format!(" {} [Day] ⇧+", self.icon(Icon::GroupDay)),
+        );
+        add_group(
+            &[('1', View::Inbox), ('2', View::Next)],
+            format!(" {} [Active]", self.icon(Icon::GroupActive)),
+        );
         add_group(
             &[
                 ('3', View::Waiting),
                 ('4', View::Scheduled),
                 ('5', View::Someday),
             ],
-            "  [Waiting]",
+            format!(" {} [Waiting]", self.icon(Icon::GroupWaiting)),
         );
         let mut archive_group = vec![];
         if self.modules.reference {
@@ -1752,11 +1823,14 @@ impl<'a> App<'a> {
             archive_group.push(('7', View::Done));
         }
         if !archive_group.is_empty() {
-            add_group(&archive_group, "  [Archive]");
+            add_group(
+                &archive_group,
+                format!(" {} [Archive]", self.icon(Icon::GroupArchive)),
+            );
         }
 
         lines.push(Line::from(Span::styled(
-            "  [Modules]",
+            format!(" {} [Modules]", self.icon(Icon::GroupModules)),
             Style::default()
                 .fg(self.theme.text_dim)
                 .add_modifier(Modifier::BOLD),
@@ -1781,11 +1855,26 @@ impl<'a> App<'a> {
         for (key, v) in mod_group {
             let active = cur == v;
             let (icon, label) = match v {
-                View::Review => ("", super::view_label(self.lang, View::Review)),
-                View::Archived => ("", super::view_label(self.lang, View::Archived)),
-                View::Tags => ("", super::view_label(self.lang, View::Tags)),
-                View::Settings => ("", super::view_label(self.lang, View::Settings)),
-                View::Quotes => ("", super::view_label(self.lang, View::Quotes)),
+                View::Review => (
+                    self.icon(Icon::Review),
+                    super::view_label(self.lang, View::Review),
+                ),
+                View::Archived => (
+                    self.icon(Icon::Archived),
+                    super::view_label(self.lang, View::Archived),
+                ),
+                View::Tags => (
+                    self.icon(Icon::Tags),
+                    super::view_label(self.lang, View::Tags),
+                ),
+                View::Settings => (
+                    self.icon(Icon::Settings),
+                    super::view_label(self.lang, View::Settings),
+                ),
+                View::Quotes => (
+                    self.icon(Icon::Quotes),
+                    super::view_label(self.lang, View::Quotes),
+                ),
                 _ => ("", ""),
             };
             let padded_label = pad_right(label, 10);
@@ -1804,7 +1893,14 @@ impl<'a> App<'a> {
                     style = style.add_modifier(Modifier::REVERSED);
                 }
                 lines.push(Line::from(Span::styled(
-                    format!(" 󰄾 {:>1} {} {} {}", key, icon, padded_label, cnt_str),
+                    format!(
+                        " {} {:>1} {} {} {}",
+                        self.icon(Icon::Active),
+                        key,
+                        icon,
+                        padded_label,
+                        cnt_str
+                    ),
                     style,
                 )));
             } else {
@@ -1832,7 +1928,7 @@ impl<'a> App<'a> {
         let keys = strip_keys(&ctx, self.lang);
         if avail >= 1 && !keys.is_empty() {
             lines.push(Line::from(Span::styled(
-                "  [Keys]",
+                format!(" {} [Keys]", self.icon(Icon::GroupKeys)),
                 Style::default()
                     .fg(self.theme.text_dim)
                     .add_modifier(Modifier::BOLD),
@@ -2031,7 +2127,7 @@ impl<'a> App<'a> {
             .filter(|e| e.event_type == event::EV_POMODORO)
             .count();
         if pomo_count > 0 {
-            let tomatoes = " ".repeat(pomo_count);
+            let tomatoes = format!("{} ", self.icon(Icon::Tomato)).repeat(pomo_count);
             lines.push(Line::from(vec![
                 Span::styled(
                     crate::tr!(self.lang, "专注: ", "Focus: "),

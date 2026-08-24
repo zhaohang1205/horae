@@ -93,7 +93,7 @@ id-prefix, or an exact title.
 | `c` | 标签库视图新增标签 · add tag (Tags view) |
 | `r` / `R` | 周回顾（开始 / 下一步）· weekly review (start/next) |
 | `F5` / `F6` | 主题 / 语言 · theme / language |
-| `F7` | 金句功能开关（默认关闭）· toggle quotes feature (default off) |
+| `F7` | 模块显示设置（含金句开关、图标风格）· module visibility (incl. quotes & icon style) |
 | `F1` 或 `?` | 快捷键帮助 · shortcut help |
 | `q` | 退出 · quit |
 
@@ -102,6 +102,12 @@ id-prefix, or an exact title.
 金句是一个**可选功能**（默认关闭，`F7` 开启，状态持久化到 `settings`）。用于随心收藏好句子、灵感与知识碎片——它们不是任务，不该占用收件箱/今日等行动流。
 
 Quotes is an **opt-in** feature (off by default; `F7` toggles it, persisted in `settings`). It's a notebook for quotes, inspirations and knowledge — not actionable tasks.
+
+## 图标回退 / Icon fallback
+
+界面图标默认使用 Nerd Font 字形。启动时自动探测（`fc-list` 是否含 Nerd 字体），未安装或无法探测时自动回退为纯 ASCII 字符，不会出现"豆腐块"。可用环境变量 `HORAE_ICONS=nerd|ascii` 强制指定，或在 TUI 里按 `F7` 打开模块显示设置，选到最后一项"图标"按空格切换（持久化）。
+
+Icons default to Nerd Font glyphs. On startup horae auto-detects support (via `fc-list`) and falls back to plain ASCII when no Nerd font is found — no tofu characters. Override with `HORAE_ICONS=nerd|ascii`, or toggle the last entry of the `F7` module-visibility popup (persisted).
 
 **工作方式 / How it works**
 
