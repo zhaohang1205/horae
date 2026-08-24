@@ -621,7 +621,7 @@ impl<'a> App<'a> {
 
         let status_layout = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(0), Constraint::Length(5)])
+            .constraints([Constraint::Min(0), Constraint::Length(7)])
             .split(area);
 
         // 内容区三态：消息 > F2 关闭提示 > 全局键条。
