@@ -169,13 +169,16 @@ fn splash_debug(msg: impl std::fmt::Display) {
 }
 
 pub(super) fn show_splash(_conn: &rusqlite::Connection) -> anyhow::Result<()> {
-    use crossterm::{cursor, terminal, ExecutableCommand};
+    use crossterm::{
+        event::{self, Event},
+        terminal,
+    };
     use std::io::Write;
 
     let mut stdout = std::io::stdout();
-    let (cols, rows) = terminal::size()?;
+    let splash_png = load_splash_png();
     splash_debug(format!(
-        "start cols={cols} rows={rows} is_kitty={} force={:?} TERM={:?} TERM_PROGRAM={:?} KITTY_WINDOW_ID={:?}",
+        "start is_kitty={} force={:?} TERM={:?} TERM_PROGRAM={:?} KITTY_WINDOW_ID={:?}",
         is_kitty_terminal(),
         std::env::var_os("HORAE_FORCE_KITTY_SPLASH").is_some(),
         std::env::var("TERM").ok(),
@@ -183,7 +186,51 @@ pub(super) fn show_splash(_conn: &rusqlite::Connection) -> anyhow::Result<()> {
         std::env::var_os("KITTY_WINDOW_ID").is_some(),
     ));
 
-    let splash_png = load_splash_png();
+    // 先进入 raw mode 再画首帧，这样等待期间能收到 Resize 事件并重绘。
+    crossterm::terminal::enable_raw_mode()?;
+    let result = (|| -> anyhow::Result<()> {
+        let (mut cols, mut rows) = terminal::size()?;
+        loop {
+            let drew_image = draw_splash_frame(&mut stdout, cols, rows, splash_png.as_deref())?;
+            stdout.flush()?;
+            loop {
+                if !event::poll(std::time::Duration::from_millis(100))? {
+                    continue;
+                }
+                match event::read()? {
+                    Event::Key(_) => return Ok(()),
+                    Event::Resize(c, r) => {
+                        // Kitty 图片不受 Clear 影响，重绘前必须显式删除。
+                        if drew_image {
+                            delete_kitty_image(&mut stdout)?;
+                        }
+                        splash_debug(format!("resize {cols}x{rows} -> {c}x{r}, redraw"));
+                        cols = c;
+                        rows = r;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    })();
+    let _ = crossterm::terminal::disable_raw_mode();
+    result
+}
+
+/// 删除之前通过 Kitty 协议显示的图片（按 id）。
+fn delete_kitty_image<W: std::io::Write>(out: &mut W) -> std::io::Result<()> {
+    write!(out, "\x1b_Ga=d,d=i,i=1,q=2\x1b\\")
+}
+
+/// 清屏并按当前终端尺寸绘制一帧开屏内容；返回本帧是否显示了 Kitty 图。
+fn draw_splash_frame<W: std::io::Write>(
+    out: &mut W,
+    cols: u16,
+    rows: u16,
+    png: Option<&[u8]>,
+) -> anyhow::Result<bool> {
+    use crossterm::{cursor, ExecutableCommand};
 
     let mut img_w = 0;
     let mut img_h = 0;
@@ -207,7 +254,7 @@ pub(super) fn show_splash(_conn: &rusqlite::Connection) -> anyhow::Result<()> {
 
     let text_h = title_h + 10; // title + blank + q1(3) + blank + q2(3) + blank + prompt
 
-    if let Some(bytes) = &splash_png {
+    if let Some(bytes) = png {
         if is_kitty_terminal() {
             if let Some((w, h)) = png_cell_size(bytes, cols, rows, text_h) {
                 img_w = w;
@@ -255,11 +302,11 @@ pub(super) fn show_splash(_conn: &rusqlite::Connection) -> anyhow::Result<()> {
         start_y
     };
 
-    stdout.execute(terminal::Clear(terminal::ClearType::All))?;
+    out.execute(crossterm::terminal::Clear(crossterm::terminal::ClearType::All))?;
 
     if render_img_w > 0 && use_kitty {
-        stdout.execute(cursor::MoveTo(start_x, img_y))?;
-        write_kitty_image(&mut stdout, splash_png.as_ref().unwrap(), img_w, img_h)?;
+        out.execute(cursor::MoveTo(start_x, img_y))?;
+        write_kitty_image(out, png.unwrap(), img_w, img_h)?;
         splash_debug(format!(
             "image written at left={start_x} top={img_y} cell=({img_w},{img_h})"
         ));
@@ -269,8 +316,8 @@ pub(super) fn show_splash(_conn: &rusqlite::Connection) -> anyhow::Result<()> {
 
     // Title (Catppuccin Blue, Bold)
     for (i, line) in title_lines.iter().enumerate() {
-        stdout.execute(cursor::MoveTo(text_x, text_y + i as u16))?;
-        write!(stdout, "\x1b[1m\x1b[38;2;137;180;250m{}\x1b[0m", line)?;
+        out.execute(cursor::MoveTo(text_x, text_y + i as u16))?;
+        write!(out, "\x1b[1m\x1b[38;2;137;180;250m{}\x1b[0m", line)?;
     }
 
     // Quote 1 (Catppuccin Blue, Italic, source right-aligned)
@@ -281,8 +328,8 @@ pub(super) fn show_splash(_conn: &rusqlite::Connection) -> anyhow::Result<()> {
         } else {
             0
         };
-        stdout.execute(cursor::MoveTo(text_x + pad, quote1_y + i as u16))?;
-        write!(stdout, "\x1b[38;2;137;180;250m\x1b[3m{}\x1b[0m", line)?;
+        out.execute(cursor::MoveTo(text_x + pad, quote1_y + i as u16))?;
+        write!(out, "\x1b[38;2;137;180;250m\x1b[3m{}\x1b[0m", line)?;
     }
 
     // Quote 2 (Catppuccin Blue, Italic + OSC 8 Hyperlink, source right-aligned)
@@ -293,9 +340,9 @@ pub(super) fn show_splash(_conn: &rusqlite::Connection) -> anyhow::Result<()> {
         } else {
             0
         };
-        stdout.execute(cursor::MoveTo(text_x + pad, quote2_y + i as u16))?;
+        out.execute(cursor::MoveTo(text_x + pad, quote2_y + i as u16))?;
         write!(
-            stdout,
+            out,
             "\x1b[38;2;137;180;250m\x1b[3m\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\\x1b[0m",
             slogan_url, line
         )?;
@@ -303,8 +350,8 @@ pub(super) fn show_splash(_conn: &rusqlite::Connection) -> anyhow::Result<()> {
 
     // Prompt
     let prompt_y = quote2_y + quote2_lines.len() as u16 + 1;
-    stdout.execute(cursor::MoveTo(text_x, prompt_y))?;
-    write!(stdout, "\x1b[90m\x1b[5m{}\x1b[0m", prompt)?;
+    out.execute(cursor::MoveTo(text_x, prompt_y))?;
+    write!(out, "\x1b[90m\x1b[5m{}\x1b[0m", prompt)?;
 
     // Author at edge area (bottom right)
     let author_x = if cols > author_w {
@@ -313,21 +360,10 @@ pub(super) fn show_splash(_conn: &rusqlite::Connection) -> anyhow::Result<()> {
         0
     };
     let author_y = rows.saturating_sub(1);
-    stdout.execute(cursor::MoveTo(author_x, author_y))?;
-    write!(stdout, "\x1b[90m{}\x1b[0m", author_str)?;
+    out.execute(cursor::MoveTo(author_x, author_y))?;
+    write!(out, "\x1b[90m{}\x1b[0m", author_str)?;
 
-    stdout.flush()?;
-
-    crossterm::terminal::enable_raw_mode()?;
-    loop {
-        if crossterm::event::poll(std::time::Duration::from_millis(100))? {
-            if let crossterm::event::Event::Key(_) = crossterm::event::read()? {
-                break;
-            }
-        }
-    }
-    crossterm::terminal::disable_raw_mode()?;
-    Ok(())
+    Ok(use_kitty)
 }
 
 #[cfg(test)]
@@ -368,6 +404,14 @@ mod splash_tests {
         assert_eq!(base64_encode(b"Man"), "TWFu");
         assert_eq!(base64_encode(b"Ma"), "TWE=");
         assert_eq!(base64_encode(b"M"), "TQ==");
+    }
+
+    #[test]
+    fn delete_kitty_image_emits_delete_control() {
+        let mut buf = std::io::Cursor::new(Vec::new());
+        delete_kitty_image(&mut buf).unwrap();
+        let s = String::from_utf8(buf.into_inner()).unwrap();
+        assert_eq!(s, "\x1b_Ga=d,d=i,i=1,q=2\x1b\\");
     }
 
     #[test]
