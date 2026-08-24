@@ -159,6 +159,8 @@ pub(crate) enum Popup {
     TodayTasks(Vec<String>),
     /// Prompt to enter Pomodoro mode for a scheduled task
     TaskDueNow(String, String), // task_id, task_title
+    /// Feature toggles modal (current selected index)
+    ModuleToggles(usize),
 }
 
 #[derive(Clone)]
@@ -219,6 +221,8 @@ pub(crate) struct App<'a> {
     pub(crate) theme: crate::tui::theme::Theme,
     pub(crate) popup: Option<Popup>,
     pub(crate) notification_engine: crate::notification::NotificationEngine,
+    /// 上次执行每日摘要检查的时间戳（毫秒），用于 60s 节流（Bug4）。
+    pub(crate) last_notify_check_ms: i64,
     /// 各视图计数缓存：`refresh` 时一次性算好，渲染帧内零 DB 查询。
     pub(crate) counts: std::collections::HashMap<View, usize>,
     /// 循环任务展开结果缓存（task_id -> 发生序列）：一次刷新内每个循环规则只
@@ -236,8 +240,10 @@ pub(crate) struct App<'a> {
     pub(crate) completion_range: Option<(usize, usize)>,
     /// 被补全 token 的前缀字符（`@`/`~`/`*`；Tagging 裸标签也视为 `@`）。
     pub(crate) completion_prefix: char,
-    /// 金句视图是否启用（settings 键 `quotes`，F7 切换）。默认关闭。
-    pub(crate) quotes_enabled: bool,
+    /// 金句 (Quotes) 特性门控与查询。
+    pub(crate) quotes: crate::repo::quotes::Quotes,
+    /// 模块显示门控 (Splash, Reference, Done, etc.)
+    pub(crate) modules: crate::repo::modules::ModuleVisibility,
     /// 当前会话使用的 profile 名（用于设置页标记与显示）。
     pub(crate) profile_name: String,
     /// 设置页待删除的 profile 名。
@@ -263,13 +269,8 @@ impl<'a> App<'a> {
             Some("latte") => crate::tui::theme::Theme::catppuccin_latte(),
             _ => crate::tui::theme::Theme::catppuccin_mocha(),
         };
-        let quotes_enabled = matches!(
-            crate::repo::settings::get(conn, "quotes")
-                .ok()
-                .flatten()
-                .as_deref(),
-            Some("1")
-        );
+        let quotes = crate::repo::quotes::Quotes::load(conn);
+        let modules = crate::repo::modules::ModuleVisibility::load(conn);
         let mut app = App {
             conn,
             view: View::Inbox,
@@ -303,6 +304,7 @@ impl<'a> App<'a> {
             theme,
             popup: None,
             notification_engine: crate::notification::NotificationEngine::new(),
+            last_notify_check_ms: 0,
             counts: std::collections::HashMap::new(),
             rrule_cache: std::collections::HashMap::new(),
             pomo: crate::repo::pomodoro::get_state().unwrap_or_default(),
@@ -311,7 +313,8 @@ impl<'a> App<'a> {
             completion_index: 0,
             completion_range: None,
             completion_prefix: '@',
-            quotes_enabled,
+            quotes,
+            modules,
             profile_name: String::new(),
             pending_profile_delete: None,
         };
@@ -361,16 +364,21 @@ impl<'a> App<'a> {
     }
 
     pub(crate) fn check_notifications(&mut self) {
-        // 每日心智维护摘要（合并成一条，同一天至多一次）。
-        let _ = crate::commands::notify::check(self.conn);
+        let now_ms = crate::time::now_ms();
+        // Bug4 修复：每日摘要检查每 60s 至多一次，避免每帧都读 notify.json。
+        if now_ms - self.last_notify_check_ms >= 60_000 {
+            let _ = crate::commands::notify::check(self.conn);
+            self.last_notify_check_ms = now_ms;
+        }
 
         let events = self.notification_engine.tick(self.conn);
         for event in events {
             match event {
-                crate::notification::NotificationEvent::InOneHour { title, .. } => {
+                // Bug5 修复：InOneHour/InTenMins 只有 title 一个字段，去掉多余的 ..
+                crate::notification::NotificationEvent::InOneHour { title } => {
                     crate::commands::notify::desktop("任务即将在1小时后开始", &title);
                 }
-                crate::notification::NotificationEvent::InTenMins { title, .. } => {
+                crate::notification::NotificationEvent::InTenMins { title } => {
                     crate::commands::notify::desktop("任务即将在10分钟后开始", &title);
                 }
                 crate::notification::NotificationEvent::Now { id, title } => {
@@ -908,30 +916,32 @@ impl<'a> App<'a> {
             .into_iter()
             .map(|t| (t, None))
             .collect(),
-            View::Quotes => tasks::list_quotes(
-                self.conn,
-                if self.search_query.is_empty() {
-                    None
-                } else {
-                    Some(self.search_query.as_str())
-                },
-                self.tag_filter.as_deref(),
-            )?
-            .into_iter()
-            // 金句行展示创建时间（"3天前"），而非 overdue/due。
-            .map(|t| {
-                let created = t.created_at;
-                (t, Some(created))
-            })
-            .collect(),
+            View::Quotes => self
+                .quotes
+                .list(
+                    self.conn,
+                    if self.search_query.is_empty() {
+                        None
+                    } else {
+                        Some(self.search_query.as_str())
+                    },
+                    self.tag_filter.as_deref(),
+                )?
+                .into_iter()
+                // 金句行展示创建时间（"3天前"），而非 overdue/due。
+                .map(|t| {
+                    let created = t.created_at;
+                    (t, Some(created))
+                })
+                .collect(),
             _ => {
                 if let Some(s) = self.view.status() {
                     let target = s.parse::<task::Status>().unwrap_or(task::Status::Inbox);
                     // 金句仅存在于金句视图：Reference 视图排除 @quote 任务
-                    //（功能关闭时回归普通标签行为）。
-                    let exclude_quotes = self.quotes_enabled && target == task::Status::Reference;
+                    // （功能关闭时回归普通标签行为）。
+                    let exclude_quotes = self.quotes.enabled && target == task::Status::Reference;
                     let quote_ids: std::collections::HashSet<String> = if exclude_quotes {
-                        tasks::quote_task_ids(self.conn)?.into_iter().collect()
+                        self.quotes.exclude_ids(self.conn)?.into_iter().collect()
                     } else {
                         std::collections::HashSet::new()
                     };
@@ -975,10 +985,10 @@ impl<'a> App<'a> {
         self.counts
             .insert(View::Archived, tasks::count_archived(self.conn)?);
         self.counts.insert(View::Tags, tags::count_tags(self.conn)?);
-        if self.quotes_enabled {
+        if self.quotes.enabled {
             self.counts.insert(
                 View::Quotes,
-                tasks::count_quotes(
+                self.quotes.count(
                     self.conn,
                     if self.search_query.is_empty() {
                         None
@@ -1001,8 +1011,8 @@ impl<'a> App<'a> {
         }
         // 金句仅存在于金句视图：Reference 徽标排除带 @quote 的参考任务，
         // 与列表保持一致。
-        if self.quotes_enabled {
-            let quotes_in_ref = tasks::count_quotes_in_status(self.conn, "reference", query)?;
+        if self.quotes.enabled {
+            let quotes_in_ref = self.quotes.count_in_status(self.conn, "reference", query)?;
             let ref_badge = self.counts.get(&View::Reference).copied().unwrap_or(0);
             self.counts
                 .insert(View::Reference, ref_badge.saturating_sub(quotes_in_ref));
@@ -1249,15 +1259,27 @@ impl<'a> App<'a> {
             View::Waiting,
             View::Scheduled,
             View::Someday,
-            View::Reference,
-            View::Done,
-            View::Archived,
-            View::Tags,
-            View::Review,
-            View::Settings,
         ];
-        if self.quotes_enabled {
+        if self.modules.reference {
+            views.push(View::Reference);
+        }
+        if self.modules.done {
+            views.push(View::Done);
+        }
+        if self.modules.archived {
+            views.push(View::Archived);
+        }
+        if self.modules.tags {
+            views.push(View::Tags);
+        }
+        if self.quotes.enabled {
             views.push(View::Quotes);
+        }
+        if self.modules.review {
+            views.push(View::Review);
+        }
+        if self.modules.settings {
+            views.push(View::Settings);
         }
         let idx = views.iter().position(|v| *v == self.view).unwrap_or(0) as isize;
         let next_idx = (idx + delta).rem_euclid(views.len() as isize);
@@ -1440,36 +1462,10 @@ impl<'a> App<'a> {
         let mut added = 0;
         let mut removed = 0;
         for id in &ids {
-            let Ok(task) = tasks::get(self.conn, id) else {
-                continue;
-            };
-            if task.archived_at.is_some() {
-                continue;
-            }
-            let has_quote = crate::repo::tags::get_task_tags(self.conn, id)
-                .unwrap_or_default()
-                .iter()
-                .any(|t| t.name == crate::repo::tasks::QUOTE_TAG);
-            if has_quote {
-                if crate::repo::tags::remove_tag_from_task(
-                    self.conn,
-                    id,
-                    crate::repo::tasks::QUOTE_TAG,
-                )
-                .is_ok()
-                {
-                    removed += 1;
-                }
-            } else {
-                if crate::repo::tags::add_tag_to_task(self.conn, id, crate::repo::tasks::QUOTE_TAG)
-                    .is_ok()
-                {
-                    added += 1;
-                }
-                // 工作态（非 reference/done）→ 参考资料，让条目离开收件箱等行动流。
-                if !matches!(task.status, task::Status::Reference | task::Status::Done) {
-                    let _ = tasks::transition(self.conn, id, task::Status::Reference);
-                }
+            match self.quotes.toggle_tag(self.conn, id) {
+                Ok(Some(true)) => added += 1,
+                Ok(Some(false)) => removed += 1,
+                _ => {}
             }
         }
         self.status_message = if added > 0 && removed == 0 {

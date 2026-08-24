@@ -134,8 +134,9 @@ pub fn waybar(slot: Option<usize>, limit: Option<usize>, emit_all: bool) -> Resu
         }
     }
 
-    // 窗口滚动时强制两个 slot 同帧刷新, 防止 slot 2 显示过期任务
-    if window_changed {
+    // Bug6 修复：仅 slot 1 负责发 SIGRTMIN+12 信号，避免两个 slot 进程并发
+    // 各发一次导致双重刷新闪烁。slot 2 跳过此步，依赖 slot 1 触发的同帧刷新。
+    if window_changed && slot == 1 {
         refresh_waybar();
     }
 
