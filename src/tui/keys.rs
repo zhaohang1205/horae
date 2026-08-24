@@ -159,7 +159,7 @@ pub(crate) fn ctx_of(app: &super::App) -> Ctx {
         pomo_active,
         task_status,
         has_checklist,
-        quotes_enabled: app.quotes_enabled,
+        quotes_enabled: app.quotes.enabled,
     }
 }
 
@@ -302,15 +302,15 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
     },
     KeyDef {
         keys: "F7",
-        zh: "金句开关",
-        en: "quotes",
+        zh: "功能开关",
+        en: "toggles",
         group: KeyGroup::Global,
         status: true,
         when: When::Always,
         heat: 56,
     },
     KeyDef {
-        keys: "F8",
+        keys: "M",
         zh: "设置",
         en: "settings",
         group: KeyGroup::Global,

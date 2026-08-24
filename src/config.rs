@@ -74,7 +74,7 @@ impl Config {
         let dir = config_dir();
         fs::create_dir_all(&dir)?;
         let path = Self::path();
-        let tmp = dir.join(format!("{CONFIG_FILE}.tmp"));
+        let tmp = dir.join(format!("{CONFIG_FILE}.{}.tmp", std::process::id()));
         let json = serde_json::to_string_pretty(self)?;
         fs::write(&tmp, json)?;
         fs::rename(&tmp, &path)?;
@@ -165,14 +165,18 @@ mod tests {
 
     #[test]
     fn load_missing_file_falls_back_to_default() {
-        let cfg = Config::load().unwrap();
-        assert_eq!(cfg.default_profile, "default");
-        assert_eq!(cfg.profile_names(), vec!["default"]);
-        assert_eq!(
-            cfg.profile("default").unwrap().db,
-            "horae.db",
-            "默认 profile 指向旧 horae.db，向后兼容"
-        );
+        // 隔离到空配置目录：既避免读到真实用户配置，也不与其它
+        // 依赖 HORAE_CONFIG_DIR 的并行测试竞争。
+        crate::testutil::with_test_config_dir(|| {
+            let cfg = Config::load().unwrap();
+            assert_eq!(cfg.default_profile, "default");
+            assert_eq!(cfg.profile_names(), vec!["default"]);
+            assert_eq!(
+                cfg.profile("default").unwrap().db,
+                "horae.db",
+                "默认 profile 指向旧 horae.db，向后兼容"
+            );
+        });
     }
 
     #[test]
@@ -221,19 +225,20 @@ mod tests {
     }
 
     #[test]
-    fn rename_updates_default_when_needed() {
-        let mut cfg = Config::default();
-        cfg.upsert_profile(
-            "work",
-            Profile {
-                db: "w.db".to_string(),
-                cloud: None,
-            },
-        );
-        cfg.set_default("work").unwrap();
-        cfg.rename_profile("work", "work2").unwrap();
-        assert_eq!(cfg.default_profile, "work2");
-        assert!(!cfg.profiles.contains_key("work"));
+    fn db_path_keeps_profile_file() {
+        // 断言含 `horae/` 前缀，必须保证 HORAE_CONFIG_DIR 未被并行测试设置
+        crate::testutil::with_no_config_dir(|| {
+            let mut config = Config::default();
+            config.upsert_profile(
+                "p",
+                Profile {
+                    db: "profiles/p.db".to_string(),
+                    cloud: None,
+                },
+            );
+            let path = config.db_path(config.profile("p").unwrap());
+            assert!(path.to_string_lossy().ends_with("horae/profiles/p.db"));
+        });
     }
 
     #[test]

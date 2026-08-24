@@ -1,7 +1,9 @@
 pub mod alarm;
 pub mod backup;
+pub mod modules;
 pub mod notify;
 pub mod pomodoro;
+pub mod quotes;
 pub mod settings;
 pub mod state;
 pub mod tags;

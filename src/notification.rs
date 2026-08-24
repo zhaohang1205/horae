@@ -21,7 +21,7 @@ const PRUNE_MS: i64 = 2 * 3600 * 1000;
 
 fn key_fresh(key: &str, now: i64) -> bool {
     // key 格式 "type:id:due_ms"，取最后一段为 due_ms
-    key.rsplitn(2, ':')
+    key.rsplit(':')
         .next()
         .and_then(|s| s.parse::<i64>().ok())
         .map(|due_ms| due_ms + PRUNE_MS > now)
@@ -100,8 +100,11 @@ impl NotificationEngine {
 
             let diff_ms = due - now_ms;
 
-            // 仅处理接下来 1 小时内或刚过期 1 分钟内的任务，过滤掉不相关的远期任务。
-            if diff_ms > 3_600_000 || diff_ms < -60_000 {
+            // 仅处理接下来 1 小时内、或过期未超过 PRUNE_MS 的任务。
+            // 下界必须与 PRUNE_MS 对齐：更早的过期任务其去重 key 已被 prune，
+            // 若仍处理会导致每个 tick 重复触发通知（key_fresh 保留条件为
+            // due + PRUNE_MS > now，即 diff > -PRUNE_MS）。
+            if diff_ms > 3_600_000 || diff_ms <= -PRUNE_MS {
                 continue;
             }
 
@@ -117,7 +120,7 @@ impl NotificationEngine {
                     dirty = true;
                     events.push(NotificationEvent::InTenMins { title: task.title });
                 }
-            } else if diff_ms <= 0 && diff_ms > -60_000 {
+            } else if diff_ms <= 0 {
                 let key = make_key("now", &task.id, due);
                 if self.notified.insert(key) {
                     dirty = true;
@@ -204,6 +207,33 @@ mod tests {
         let mut engine = NotificationEngine::new();
         let events = engine.tick(&conn);
         assert!(events.is_empty(), "2 小时后的任务不应触发任何提醒");
+    }
+
+    #[test]
+    fn tick_does_not_spam_for_long_overdue_task() {
+        let (_dir, conn) = test_conn();
+        let now = crate::time::now_ms();
+        // 过期超过 PRUNE_MS(2h)：去重 key 已被 prune，不应再触发任何提醒，
+        // 否则会每个 tick（~10s）重复弹出通知。
+        let long_overdue = now - 3 * 3600 * 1000;
+        crate::repo::tasks::create_capture(
+            &conn,
+            &CaptureInput {
+                title: "逾期已久".into(),
+                status: Status::Next,
+                due_at: Some(long_overdue),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let mut engine = NotificationEngine::new();
+        let events = engine.tick(&conn);
+        assert!(
+            events.is_empty(),
+            "过期超过 PRUNE_MS 的任务不应触发提醒，实际 {:?}",
+            events
+        );
     }
 
     #[test]

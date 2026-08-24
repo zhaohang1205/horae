@@ -11,8 +11,8 @@ mod quotes;
 mod transition;
 
 pub use query::{
-    checked_in_today, count_archived, count_by_status, count_completed_since, due_in_range, events,
-    get, list, list_archived, list_stale_inbox, list_stale_waiting, resolve_id, ListFilter,
+    checked_in_today, count_archived, count_by_status, count_completed_since, events, get, list,
+    list_archived, list_stale_inbox, list_stale_waiting, resolve_id, ListFilter,
 };
 pub use quotes::{count_quotes, count_quotes_in_status, list_quotes, quote_task_ids, QUOTE_TAG};
 pub use transition::{
@@ -22,6 +22,10 @@ pub use transition::{
 };
 
 use crate::model::task::Task;
+
+/// 系统内置日志任务的固定 ID（由 migration 0012 创建，`horae log` 依赖它）。
+/// 普通查询/归档视图会排除它，且不允许被 purge。
+pub const SYSTEM_JOURNAL_ID: &str = "__journal__";
 
 /// Columns for the `tasks` table, shared by every row-mapping query.
 pub(crate) const TASK_COLUMNS: &str = "id,title,notes,status,rrule,created_at,clarified_at,\

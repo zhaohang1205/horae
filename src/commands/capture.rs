@@ -51,9 +51,7 @@ pub fn run(conn: &Connection, args: CaptureArgs) -> Result<()> {
     // ~time 存在 → 排程起点（创建后 schedule 设 scheduled_start_at, 状态 Scheduled, 无终点）。
     let input = tasks::CaptureInput {
         title: quick_add.title,
-        status: if parsed_status == task::Status::Inbox
-            && (due_at.is_some() || scheduled_start.is_some())
-        {
+        status: if parsed_status == task::Status::Inbox && scheduled_start.is_some() {
             task::Status::Scheduled
         } else {
             parsed_status
@@ -77,7 +75,7 @@ pub fn run(conn: &Connection, args: CaptureArgs) -> Result<()> {
     } else {
         println!(
             "captured [{}] {}  (status: {})",
-            &t.id[..8],
+            &t.id[..t.id.len().min(8)],
             t.title,
             t.status
         );

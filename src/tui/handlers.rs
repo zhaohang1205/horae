@@ -25,20 +25,98 @@ impl<'a> AppHandlers for App<'a> {
         }
 
         if let Some(popup) = self.popup.take() {
-            match key.code {
-                KeyCode::Enter => {
-                    if let crate::tui::app::Popup::TaskDueNow(id, _) = popup {
-                        self.note(crate::commands::pomo::start(self.conn, &id));
-                        self.needs_clear = true;
-                    }
-                }
-                _ => {
-                    // Default to close on any key
-                    if let crate::tui::app::Popup::TaskDueNow(_, _) = popup {
-                        if key.code != KeyCode::Esc {
-                            // If they typed something else, maybe restore the popup? Let's just close on anything for now.
+            match popup {
+                crate::tui::app::Popup::ModuleToggles(mut idx) => {
+                    match key.code {
+                        KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
+                            // close, implicitly handled because popup is taken and not put back
+                        }
+                        KeyCode::Char('j') | KeyCode::Down => {
+                            idx = (idx + 1) % 8;
+                            self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
+                        }
+                        KeyCode::Char('k') | KeyCode::Up => {
+                            idx = idx.checked_sub(1).unwrap_or(7);
+                            self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
+                        }
+                        KeyCode::Char(' ') => {
+                            match idx {
+                                0 => {
+                                    let _ = self.modules.set_enabled(
+                                        self.conn,
+                                        "module_splash",
+                                        !self.modules.splash,
+                                    );
+                                }
+                                1 => {
+                                    let _ = self.modules.set_enabled(
+                                        self.conn,
+                                        "module_reference",
+                                        !self.modules.reference,
+                                    );
+                                }
+                                2 => {
+                                    let _ = self.modules.set_enabled(
+                                        self.conn,
+                                        "module_done",
+                                        !self.modules.done,
+                                    );
+                                }
+                                3 => {
+                                    let _ = self.modules.set_enabled(
+                                        self.conn,
+                                        "module_archived",
+                                        !self.modules.archived,
+                                    );
+                                }
+                                4 => {
+                                    let _ = self.modules.set_enabled(
+                                        self.conn,
+                                        "module_tags",
+                                        !self.modules.tags,
+                                    );
+                                }
+                                5 => {
+                                    let _ = self.quotes.toggle_enabled(self.conn);
+                                    if !self.quotes.enabled && self.view == View::Quotes {
+                                        self.set_view(View::Inbox);
+                                    }
+                                }
+                                6 => {
+                                    let _ = self.modules.set_enabled(
+                                        self.conn,
+                                        "module_review",
+                                        !self.modules.review,
+                                    );
+                                }
+                                7 => {
+                                    let _ = self.modules.set_enabled(
+                                        self.conn,
+                                        "module_settings",
+                                        !self.modules.settings,
+                                    );
+                                    if !self.modules.settings && self.view == View::Settings {
+                                        self.set_view(View::Inbox);
+                                    }
+                                }
+                                _ => {}
+                            }
+                            self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
+                            let r = self.reload();
+                            self.note(r);
+                        }
+                        _ => {
+                            self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
                         }
                     }
+                }
+                crate::tui::app::Popup::TaskDueNow(id, _) if key.code == KeyCode::Enter => {
+                    self.note(crate::commands::pomo::start(self.conn, &id));
+                    self.needs_clear = true;
+                }
+                crate::tui::app::Popup::TaskDueNow(_, _) => {}
+                _ => {
+                    // other popups close on any key
                 }
             }
             return Ok(());
@@ -346,37 +424,7 @@ impl<'a> App<'a> {
                 }
             }
             KeyCode::F(7) => {
-                self.quotes_enabled = !self.quotes_enabled;
-                let saved = crate::repo::settings::set(
-                    self.conn,
-                    "quotes",
-                    if self.quotes_enabled { "1" } else { "0" },
-                );
-                // 停用时若正停留在金句视图，跳回收件箱避免停留在隐藏视图。
-                if !self.quotes_enabled && self.view == View::Quotes {
-                    self.set_view(View::Inbox);
-                }
-                if self.note(saved) {
-                    self.status_message = if self.quotes_enabled {
-                        crate::tr!(
-                            self.lang,
-                            "金句功能已启用 (视图 0, 快捷键 \")",
-                            "Quotes enabled (view 0, key \")"
-                        )
-                        .to_string()
-                    } else {
-                        crate::tr!(
-                            self.lang,
-                            "金句功能已停用 (F7 再开)",
-                            "Quotes disabled (F7 to re-enable)"
-                        )
-                        .to_string()
-                    };
-                }
-                {
-                    let r = self.reload();
-                    self.note(r);
-                }
+                self.popup = Some(crate::tui::app::Popup::ModuleToggles(0));
             }
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.show_syntax = !self.show_syntax;
@@ -424,8 +472,19 @@ impl<'a> App<'a> {
             }
             KeyCode::Char(d) if d.is_ascii_digit() => {
                 if let Some(v) = View::from_digit(d) {
-                    // 金句视图功能未启用时，数字 0 不响应。
-                    if v == View::Quotes && !self.quotes_enabled {
+                    if v == View::Quotes && !self.quotes.enabled {
+                        return Ok(true);
+                    }
+                    if v == View::Reference && !self.modules.reference {
+                        return Ok(true);
+                    }
+                    if v == View::Done && !self.modules.done {
+                        return Ok(true);
+                    }
+                    if v == View::Archived && !self.modules.archived {
+                        return Ok(true);
+                    }
+                    if v == View::Tags && !self.modules.tags {
                         return Ok(true);
                     }
                     self.set_view(v);
@@ -433,7 +492,12 @@ impl<'a> App<'a> {
             }
             KeyCode::Char('J') => self.set_view(View::Today),
             KeyCode::Char('K') => self.set_view(View::Tomorrow),
-            KeyCode::F(8) => self.set_view(View::Settings),
+            KeyCode::Char('M') => {
+                if !self.modules.settings {
+                    return Ok(true);
+                }
+                self.set_view(View::Settings);
+            }
             KeyCode::Char('g') => self.move_sel(-10000),
             KeyCode::Char('G') => self.move_sel(10000),
             _ => return Ok(false),
@@ -444,6 +508,9 @@ impl<'a> App<'a> {
     fn handle_review_keys(&mut self, key: KeyEvent) -> Result<bool> {
         match key.code {
             KeyCode::Char('r') => {
+                if !self.modules.review {
+                    return Ok(true);
+                }
                 self.is_reviewing = true;
                 self.review_step = 1;
                 self.set_view(View::Inbox);
@@ -589,25 +656,39 @@ impl<'a> App<'a> {
                         let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
                         let temp_path = std::env::temp_dir()
                             .join(format!("horae_notes_{}.md", uuid::Uuid::new_v4()));
-                        use std::io::Write;
-                        let mut file = std::fs::File::create(&temp_path)?;
-                        file.write_all(task.notes.as_bytes())?;
-                        drop(file);
 
-                        let _ = std::process::Command::new(editor).arg(&temp_path).status();
+                        let result = (|| -> Result<()> {
+                            use std::io::Write;
+                            let mut file = std::fs::File::create(&temp_path)?;
+                            file.write_all(task.notes.as_bytes())?;
+                            drop(file);
 
-                        let new_notes = std::fs::read_to_string(&temp_path).unwrap_or_default();
-                        let _ = std::fs::remove_file(&temp_path);
-                        if new_notes != task.notes {
-                            self.note(tasks::update_notes(self.conn, &task.id, &new_notes));
-                        }
+                            let status = std::process::Command::new("sh")
+                                .arg("-c")
+                                .arg(format!("{} \"{}\"", editor, temp_path.display()))
+                                .status();
+                            if let Err(e) = status {
+                                anyhow::bail!("failed to launch editor: {}", e);
+                            }
+                            Ok(())
+                        })();
 
+                        // Always restore terminal state, even if editor failed
                         crossterm::terminal::enable_raw_mode()?;
                         crossterm::execute!(
                             std::io::stdout(),
                             crossterm::terminal::EnterAlternateScreen
                         )?;
                         self.needs_clear = true;
+
+                        // 无论编辑器是否成功都读取并清理临时文件，避免泄漏。
+                        let new_notes = std::fs::read_to_string(&temp_path).unwrap_or_default();
+                        let _ = std::fs::remove_file(&temp_path);
+                        if let Err(e) = result {
+                            self.status_message = format!("editor error: {}", e);
+                        } else if new_notes != task.notes {
+                            self.note(tasks::update_notes(self.conn, &task.id, &new_notes));
+                        }
                         self.load_detail();
                     }
                 }
@@ -617,7 +698,7 @@ impl<'a> App<'a> {
                 self.move_sel(1);
             }
             KeyCode::Char('s') => self.act_on_selected(task::Status::Someday)?,
-            KeyCode::Char('"') if self.quotes_enabled => {
+            KeyCode::Char('"') if self.quotes.enabled => {
                 // 金句移入/移出：加/摘 @quote 标签，工作态流转为 reference。
                 self.toggle_quotes()?;
             }
@@ -1092,7 +1173,7 @@ impl<'a> App<'a> {
                 ok &= self.note(crate::repo::tags::add_tag_to_task(self.conn, &id, name));
             }
             // @quote 路由：组织/编辑时出现金句标签 → 工作态任务流转为参考资料，离开收件箱。
-            let is_quote = self.quotes_enabled && new_set.contains(crate::repo::tasks::QUOTE_TAG);
+            let is_quote = self.quotes.enabled && new_set.contains(crate::repo::tasks::QUOTE_TAG);
             if is_quote && !matches!(task.status, task::Status::Reference | task::Status::Done) {
                 ok &= self.note(tasks::transition(self.conn, &id, task::Status::Reference));
             }
@@ -1142,7 +1223,7 @@ impl<'a> App<'a> {
             // @quote 路由：捕获输入含金句标签 → 直接创建为 reference + @quote，
             // 自动进入金句视图，不落收件箱。~time/*rrule 让位给金句。
             let is_quote =
-                self.quotes_enabled && tag_names.iter().any(|t| t == crate::repo::tasks::QUOTE_TAG);
+                self.quotes.enabled && tag_names.iter().any(|t| t == crate::repo::tasks::QUOTE_TAG);
             let t = tasks::create_capture(
                 self.conn,
                 &CaptureInput {

@@ -100,7 +100,14 @@ fn set_default(config: &mut Config, name: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::ProfileAction;
     use crate::config::CloudConfig;
+
+    /// 把配置写入重定向到临时目录（沿用项目 HORAE_CONFIG_DIR 惯例，
+    /// 由 testutil 统一持锁 + panic 安全恢复）。
+    fn with_config_dir(f: impl FnOnce()) {
+        crate::testutil::with_test_config_dir(f);
+    }
 
     #[test]
     fn new_rm_rename_set_default_update_config() {
@@ -140,5 +147,142 @@ mod tests {
         );
         let path = config.db_path(config.profile("p").unwrap());
         assert!(path.to_string_lossy().ends_with("horae/profiles/p.db"));
+    }
+
+    #[test]
+    fn new_defaults_db_path_and_rejects_duplicates() {
+        with_config_dir(|| {
+            run(ProfileAction::New {
+                name: "work".into(),
+                db: None,
+            })
+            .unwrap();
+
+            let config = Config::load().unwrap();
+            let p = config.profile("work").unwrap();
+            assert_eq!(
+                p.db, "profiles/work.db",
+                "缺省 db 路径应为 profiles/<name>.db"
+            );
+            assert!(p.cloud.is_none());
+
+            // 重名创建应被拒绝
+            let err = run(ProfileAction::New {
+                name: "work".into(),
+                db: None,
+            })
+            .unwrap_err();
+            assert!(err.to_string().contains("already exists"), "{}", err);
+        });
+    }
+
+    #[test]
+    fn new_accepts_custom_db_path() {
+        with_config_dir(|| {
+            run(ProfileAction::New {
+                name: "x".into(),
+                db: Some("/abs/custom.db".into()),
+            })
+            .unwrap();
+            let config = Config::load().unwrap();
+            assert_eq!(config.profile("x").unwrap().db, "/abs/custom.db");
+        });
+    }
+
+    #[test]
+    fn rm_rejects_last_profile_and_unknown_profile() {
+        with_config_dir(|| {
+            // 默认配置只有 default 一个 profile，不允许删除
+            let err = run(ProfileAction::Rm {
+                name: "default".into(),
+            })
+            .unwrap_err();
+            assert!(
+                err.to_string().contains("cannot remove the last profile"),
+                "{}",
+                err
+            );
+
+            // 不存在的 profile
+            run(ProfileAction::New {
+                name: "work".into(),
+                db: None,
+            })
+            .unwrap();
+            let err = run(ProfileAction::Rm {
+                name: "ghost".into(),
+            })
+            .unwrap_err();
+            assert!(err.to_string().contains("unknown profile"), "{}", err);
+        });
+    }
+
+    #[test]
+    fn rm_default_reassigns_to_remaining_profile() {
+        with_config_dir(|| {
+            run(ProfileAction::New {
+                name: "work".into(),
+                db: None,
+            })
+            .unwrap();
+            run(ProfileAction::Rm {
+                name: "default".into(),
+            })
+            .unwrap();
+
+            let config = Config::load().unwrap();
+            assert!(!config.profiles.contains_key("default"));
+            assert_eq!(
+                config.default_profile, "work",
+                "删除默认 profile 后应改派到剩余 profile"
+            );
+        });
+    }
+
+    #[test]
+    fn rename_moves_default_and_rejects_unknown() {
+        with_config_dir(|| {
+            let err = run(ProfileAction::Rename {
+                from: "ghost".into(),
+                to: "main".into(),
+            })
+            .unwrap_err();
+            assert!(err.to_string().contains("unknown profile"), "{}", err);
+
+            run(ProfileAction::Rename {
+                from: "default".into(),
+                to: "main".into(),
+            })
+            .unwrap();
+            let config = Config::load().unwrap();
+            assert!(config.profile("main").is_some());
+            assert!(!config.profiles.contains_key("default"));
+            assert_eq!(
+                config.default_profile, "main",
+                "重命名默认 profile 后 default 指针应跟随"
+            );
+        });
+    }
+
+    #[test]
+    fn set_default_persists_and_rejects_unknown() {
+        with_config_dir(|| {
+            let err = run(ProfileAction::SetDefault {
+                name: "ghost".into(),
+            })
+            .unwrap_err();
+            assert!(err.to_string().contains("unknown profile"), "{}", err);
+
+            run(ProfileAction::New {
+                name: "work".into(),
+                db: None,
+            })
+            .unwrap();
+            run(ProfileAction::SetDefault {
+                name: "work".into(),
+            })
+            .unwrap();
+            assert_eq!(Config::load().unwrap().default_profile, "work");
+        });
     }
 }

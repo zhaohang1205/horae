@@ -721,7 +721,7 @@ impl<'a> App<'a> {
                         " 组织: 编辑 标题 @标签 ~时间 *周期 (空/Esc 跳过) ",
                         " Organize: edit title @tags ~time *rrule (empty/Esc to skip) "
                     )
-                } else if self.view == View::Quotes && self.quotes_enabled {
+                } else if self.view == View::Quotes && self.quotes.enabled {
                     crate::tr!(
                         self.lang,
                         " 快速录入金句 (自动 @quote 入库, 支持 @标签 及 Tab 补全) ",
@@ -1150,6 +1150,50 @@ impl<'a> App<'a> {
     fn render_popups(&mut self, f: &mut Frame, size: Rect) {
         let Some(ref popup) = self.popup else { return };
         match popup {
+            crate::tui::app::Popup::ModuleToggles(idx) => {
+                let area = self.centered_rect(40, 15, size);
+                f.render_widget(ratatui::widgets::Clear, area);
+                let block = Block::default()
+                    .title(crate::tr!(
+                        self.lang,
+                        " 模块显示设置 ",
+                        " Module Visibility "
+                    ))
+                    .borders(Borders::ALL)
+                    .border_set(border::ROUNDED)
+                    .border_style(Style::default().fg(self.theme.accent));
+
+                let mut items = vec![];
+                let opts = [
+                    (self.modules.splash, "开屏页 (Splash)"),
+                    (self.modules.reference, "6 参考资料 (Reference)"),
+                    (self.modules.done, "7 已完成 (Done)"),
+                    (self.modules.archived, "8 归档箱 (Archived)"),
+                    (self.modules.tags, "9 标签库 (Tags)"),
+                    (self.quotes.enabled, "0 金句 (Quotes)"),
+                    (self.modules.review, "r 周回顾 (Review)"),
+                    (self.modules.settings, "M 设置 (Settings)"),
+                ];
+                for (i, (enabled, name)) in opts.iter().enumerate() {
+                    let checkbox = if *enabled { "[x]" } else { "[ ]" };
+                    let mut style = Style::default();
+                    if i == *idx {
+                        style = style
+                            .fg(self.theme.bg)
+                            .bg(self.theme.accent)
+                            .add_modifier(Modifier::BOLD);
+                    } else if !*enabled {
+                        style = style.fg(self.theme.text_dim);
+                    }
+                    items.push(ratatui::widgets::ListItem::new(Line::from(Span::styled(
+                        format!(" {} {} ", checkbox, name),
+                        style,
+                    ))));
+                }
+
+                let list = ratatui::widgets::List::new(items).block(block);
+                f.render_widget(list, area);
+            }
             crate::tui::app::Popup::TodayTasks(tasks) => {
                 let mut lines = vec![Line::from(crate::tr!(
                     self.lang,
@@ -1644,8 +1688,8 @@ impl<'a> App<'a> {
                 let active = cur == *v;
                 let (icon, label) = match v {
                     View::Inbox => ("", super::view_label(self.lang, View::Inbox)),
-                    View::Today => ("", super::view_label(self.lang, View::Today)),
-                    View::Tomorrow => ("", super::view_label(self.lang, View::Tomorrow)),
+                    View::Today => ("", super::view_label(self.lang, View::Today)),
+                    View::Tomorrow => ("", super::view_label(self.lang, View::Tomorrow)),
                     View::Next => ("", super::view_label(self.lang, View::Next)),
                     View::Waiting => ("", super::view_label(self.lang, View::Waiting)),
                     View::Scheduled => ("", super::view_label(self.lang, View::Scheduled)),
@@ -1655,8 +1699,8 @@ impl<'a> App<'a> {
                     View::Review => ("", super::view_label(self.lang, View::Review)),
                     View::Archived => ("", super::view_label(self.lang, View::Archived)),
                     View::Tags => ("", super::view_label(self.lang, View::Tags)),
-                    View::Quotes => ("", super::view_label(self.lang, View::Quotes)),
-                    View::Settings => ("⚙", super::view_label(self.lang, View::Settings)),
+                    View::Quotes => ("", super::view_label(self.lang, View::Quotes)),
+                    View::Settings => ("", super::view_label(self.lang, View::Settings)),
                 };
                 let padded_label = pad_right(label, 10);
 
@@ -1677,7 +1721,11 @@ impl<'a> App<'a> {
                             format!("   {} ", key),
                             Style::default().fg(self.theme.text_dim),
                         ),
-                        Span::raw(format!("{} {} {:>3} ", icon, padded_label, cnt)),
+                        Span::styled(
+                            format!("{} ", icon),
+                            Style::default().add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(format!("{} {:>3} ", padded_label, cnt)),
                     ]));
                 }
             }
@@ -1686,7 +1734,7 @@ impl<'a> App<'a> {
             }
         };
 
-        add_group(&[('J', View::Today), ('K', View::Tomorrow)], "  [Day] ⇧+");
+        add_group(&[('J', View::Today), ('K', View::Tomorrow)], "  [Day] ⇧+");
         add_group(&[('1', View::Inbox), ('2', View::Next)], "  [Active]");
         add_group(
             &[
@@ -1696,7 +1744,16 @@ impl<'a> App<'a> {
             ],
             "  [Waiting]",
         );
-        add_group(&[('6', View::Reference), ('7', View::Done)], "  [Archive]");
+        let mut archive_group = vec![];
+        if self.modules.reference {
+            archive_group.push(('6', View::Reference));
+        }
+        if self.modules.done {
+            archive_group.push(('7', View::Done));
+        }
+        if !archive_group.is_empty() {
+            add_group(&archive_group, "  [Archive]");
+        }
 
         lines.push(Line::from(Span::styled(
             "  [Modules]",
@@ -1704,21 +1761,41 @@ impl<'a> App<'a> {
                 .fg(self.theme.text_dim)
                 .add_modifier(Modifier::BOLD),
         )));
-        for (key, v) in &[
-            ("8", View::Archived),
-            ("9", View::Tags),
-            ("r", View::Review),
-            ("F8", View::Settings),
-        ] {
-            let active = cur == *v;
+        let mut mod_group = vec![];
+        if self.modules.archived {
+            mod_group.push(("8", View::Archived));
+        }
+        if self.modules.tags {
+            mod_group.push(("9", View::Tags));
+        }
+        if self.quotes.enabled {
+            mod_group.push(("0", View::Quotes));
+        }
+        if self.modules.review {
+            mod_group.push(("r", View::Review));
+        }
+        if self.modules.settings {
+            mod_group.push(("M", View::Settings));
+        }
+
+        for (key, v) in mod_group {
+            let active = cur == v;
             let (icon, label) = match v {
                 View::Review => ("", super::view_label(self.lang, View::Review)),
                 View::Archived => ("", super::view_label(self.lang, View::Archived)),
                 View::Tags => ("", super::view_label(self.lang, View::Tags)),
-                View::Settings => ("⚙", super::view_label(self.lang, View::Settings)),
+                View::Settings => ("", super::view_label(self.lang, View::Settings)),
+                View::Quotes => ("", super::view_label(self.lang, View::Quotes)),
                 _ => ("", ""),
             };
             let padded_label = pad_right(label, 10);
+
+            let cnt_str = if v == View::Quotes {
+                format!("{:>3} ", self.context_count(View::Quotes))
+            } else {
+                "    ".to_string()
+            };
+
             if active {
                 let mut style = Style::default()
                     .fg(self.theme.accent)
@@ -1727,61 +1804,25 @@ impl<'a> App<'a> {
                     style = style.add_modifier(Modifier::REVERSED);
                 }
                 lines.push(Line::from(Span::styled(
-                    format!(" 󰄾 {} {} {}     ", key, icon, padded_label),
+                    format!(" 󰄾 {:>1} {} {} {}", key, icon, padded_label, cnt_str),
                     style,
                 )));
             } else {
                 lines.push(Line::from(vec![
                     Span::styled(
-                        format!("   {:>3} ", key),
+                        format!("   {:>1} ", key),
                         Style::default().fg(self.theme.text_dim),
                     ),
-                    Span::raw(format!("{} {}     ", icon, padded_label)),
+                    Span::styled(
+                        format!("{} ", icon),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(format!("{} {}", padded_label, cnt_str)),
                 ]));
             }
         }
         if spacious {
             lines.push(Line::from(""));
-        }
-
-        // 金句库：默认隐藏，F7 启用后出现（与 [Modules] 同一视觉风格）。
-        if self.quotes_enabled {
-            lines.push(Line::from(Span::styled(
-                "  [Library]",
-                Style::default()
-                    .fg(self.theme.text_dim)
-                    .add_modifier(Modifier::BOLD),
-            )));
-            let active = cur == View::Quotes;
-            let padded_label = pad_right(super::view_label(self.lang, View::Quotes), 10);
-            if active {
-                let mut style = Style::default()
-                    .fg(self.theme.accent)
-                    .add_modifier(Modifier::BOLD);
-                if is_left_pane {
-                    style = style.add_modifier(Modifier::REVERSED);
-                }
-                lines.push(Line::from(Span::styled(
-                    format!(
-                        " 󰄾 0  {} {:>3} ",
-                        padded_label,
-                        self.context_count(View::Quotes)
-                    ),
-                    style,
-                )));
-            } else {
-                lines.push(Line::from(vec![
-                    Span::styled("   0 ", Style::default().fg(self.theme.text_dim)),
-                    Span::raw(format!(
-                        " {} {:>3} ",
-                        padded_label,
-                        self.context_count(View::Quotes)
-                    )),
-                ]));
-            }
-            if spacious {
-                lines.push(Line::from(""));
-            }
         }
 
         // 动态快捷键：按当前视图/选择态/模式过滤，并严格按剩余行数截断。

@@ -547,9 +547,9 @@ mod tests {
         assert!(rrule_valid("weekday"));
         assert!(rrule_valid("FREQ=DAILY"));
         assert!(rrule_valid("FREQ=WEEKLY;BYDAY=MO,WE"));
-        assert!(rrule_valid("2d[1,3]") == false);
-        assert!(rrule_valid("2w[8]") == false);
-        assert!(rrule_valid("2w[1,x]") == false);
+        assert!(!rrule_valid("2d[1,3]"));
+        assert!(!rrule_valid("2w[8]"));
+        assert!(!rrule_valid("2w[1,x]"));
         assert!(!rrule_valid("xx"));
         assert!(!rrule_valid(""));
         assert!(!rrule_valid("bogus"));

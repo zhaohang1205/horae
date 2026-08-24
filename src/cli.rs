@@ -88,7 +88,10 @@ pub enum Command {
         json: bool,
     },
     /// Show a task with its full event timeline
-    #[command(long_about = "Show a task's details plus its full append-only event timeline.", visible_alias = "s")]
+    #[command(
+        long_about = "Show a task's details plus its full append-only event timeline.",
+        visible_alias = "s"
+    )]
     Show {
         id: String,
         #[arg(long, help = "Print the task as JSON")]
@@ -135,6 +138,24 @@ pub enum Command {
     Review,
     /// List all tags grouped by category
     Tags,
+    /// Calculate and output the single most important task right now
+    #[command(
+        long_about = "Calculate and output the single most important task right now, ending decision fatigue. Considers priority (p1/p2), effective due time, and context.",
+        visible_alias = "do"
+    )]
+    Focus {
+        #[arg(long, help = "Immediately start a pomodoro for this task")]
+        start: bool,
+    },
+    /// Record a timestamped journal entry/event without creating a task
+    #[command(
+        long_about = "Record a pure timestamped event/journal entry into the timeline without creating a to-do task.",
+        after_help = "Examples:\n  horae log \"Drank 3 cups of water\"\n  horae log"
+    )]
+    Log {
+        #[arg(help = "The message to log (if omitted, lists recent logs)")]
+        message: Vec<String>,
+    },
     /// Pomodoro commands (start, stop, daemon, waybar)
     #[command(
         long_about = "Pomodoro focus mode. `start` spawns a background daemon that ticks \
@@ -231,6 +252,11 @@ pub enum Command {
         #[arg(long, help = "Wipe current data and restore the backup exactly")]
         replace: bool,
     },
+    /// Show a terminal dashboard summary (MOTD style)
+    #[command(
+        long_about = "Show a terminal dashboard summary (MOTD style) with today's completed pomodoros, burndown, and pending tasks."
+    )]
+    Stats,
     /// Generate shell completion scripts (bash, elvish, fish, powershell, zsh)
     #[command(
         after_help = "Usage:\n  horae completions bash\n  horae completions fish\n\nInstall into ~/.bashrc or ~/.config/fish/completions/"
@@ -269,4 +295,85 @@ pub enum ProfileAction {
     Rm { name: String },
     /// Set the default profile used when --profile is not given
     SetDefault { name: String },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
+        Cli::try_parse_from(std::iter::once("horae").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn bare_invocation_launches_tui_with_no_command() {
+        let cli = parse(&[]).unwrap();
+        assert!(cli.command.is_none(), "无子命令 = 启动 TUI");
+        assert!(cli.profile.is_none());
+    }
+
+    #[test]
+    fn capture_joins_title_words_and_flags() {
+        let cli = parse(&["capture", "buy", "milk", "--tag", "home", "--p2"]).unwrap();
+        match cli.command.unwrap() {
+            Command::Capture {
+                title,
+                tag,
+                p1,
+                p2,
+                p3,
+                due,
+                status,
+                json,
+            } => {
+                assert_eq!(title.join(" "), "buy milk");
+                assert_eq!(tag, vec!["home".to_string()]);
+                assert!(!p1 && p2 && !p3);
+                assert!(due.is_none() && status.is_none() && !json);
+            }
+            _ => panic!("应为 Capture"),
+        }
+    }
+
+    #[test]
+    fn capture_rejects_conflicting_priorities() {
+        // ArgGroup(priority) 互斥
+        assert!(parse(&["capture", "x", "--p1", "--p2"]).is_err());
+    }
+
+    #[test]
+    fn list_parses_filters() {
+        let cli = parse(&["list", "--status", "next", "--tag", "work", "--json"]).unwrap();
+        match cli.command.unwrap() {
+            Command::List {
+                status,
+                tag,
+                due_before,
+                json,
+            } => {
+                assert_eq!(status.as_deref(), Some("next"));
+                assert_eq!(tag, vec!["work".to_string()]);
+                assert!(due_before.is_none());
+                assert!(json);
+            }
+            _ => panic!("应为 List"),
+        }
+    }
+
+    #[test]
+    fn global_profile_flag_applies_to_subcommands() {
+        let cli = parse(&["--profile", "work", "list"]).unwrap();
+        assert_eq!(cli.profile.as_deref(), Some("work"));
+        assert!(matches!(cli.command, Some(Command::List { .. })));
+    }
+
+    #[test]
+    fn unknown_status_string_is_accepted_by_cli_and_validated_later() {
+        // CLI 层不做枚举校验（status 是 Option<String>），由命令层报错
+        let cli = parse(&["list", "--status", "bogus"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::List { ref status, .. }) if status == &Some("bogus".into())
+        ));
+    }
 }

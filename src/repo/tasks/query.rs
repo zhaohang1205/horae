@@ -39,7 +39,8 @@ pub fn resolve_id(conn: &Connection, key: &str) -> Result<String> {
 /// Count of archived (soft-deleted) tasks, for the guide sidebar badge.
 pub fn count_archived(conn: &Connection) -> Result<usize> {
     let c: usize = conn.query_row(
-        "SELECT COUNT(*) FROM tasks WHERE archived_at IS NOT NULL",
+        // 与 list_archived/filter_where 一致：排除系统内置任务。
+        "SELECT COUNT(*) FROM tasks WHERE archived_at IS NOT NULL AND id != '__journal__'",
         [],
         |r| r.get(0),
     )?;
@@ -49,6 +50,10 @@ pub fn count_archived(conn: &Connection) -> Result<usize> {
 /// Tasks whose `due_at` falls in the inclusive `[start_ms, end_ms]` window.
 /// Lightweight query returning only the columns the due-notification check needs,
 /// instead of scanning every task row on each tick.
+///
+/// 预留给将来的快速到期扫描；当前通知引擎经 `tasks::list` +
+/// `effective_due` 取数（循环任务需要重排），此查询暂无调用方。
+#[expect(dead_code)]
 pub fn due_in_range(
     conn: &Connection,
     start_ms: i64,
@@ -67,7 +72,7 @@ pub fn due_in_range(
 /// List only archived (soft-deleted) tasks, for the restore UI.
 pub fn list_archived(conn: &Connection) -> Result<Vec<Task>> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT {} FROM tasks WHERE archived_at IS NOT NULL \
+        "SELECT {} FROM tasks WHERE archived_at IS NOT NULL AND id != '__journal__' \
          ORDER BY archived_at DESC",
         TASK_COLUMNS
     ))?;
@@ -122,7 +127,7 @@ pub fn count_by_status(
 /// Build the `WHERE` fragment (including its leading ` AND …`) and the bound
 /// parameters shared by `list` and `count`.
 fn filter_where(f: &ListFilter) -> (String, Vec<Box<dyn rusqlite::ToSql>>) {
-    let mut sql = String::new();
+    let mut sql = String::from(" AND id != '__journal__'");
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
     if let Some(s) = &f.status {
         sql.push_str(" AND status = ?");
@@ -140,8 +145,12 @@ fn filter_where(f: &ListFilter) -> (String, Vec<Box<dyn rusqlite::ToSql>>) {
         params.push(Box::new(tag.clone()));
     }
     if let Some(q) = &f.query {
-        sql.push_str(" AND (title LIKE ? OR notes LIKE ?)");
-        let like_q = format!("%{}%", q);
+        sql.push_str(" AND (title LIKE ? ESCAPE '\\' OR notes LIKE ? ESCAPE '\\')");
+        let escaped = q
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let like_q = format!("%{}%", escaped);
         params.push(Box::new(like_q.clone()));
         params.push(Box::new(like_q));
     }
@@ -213,4 +222,37 @@ pub fn events(conn: &Connection, task_id: &str) -> Result<Vec<event::TaskEvent>>
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::repo::tasks::CaptureInput;
+    use crate::testutil::test_conn;
+
+    #[test]
+    fn count_archived_excludes_system_journal() {
+        let (_dir, conn) = test_conn();
+        // migration 0012 插入的 __journal__ 是归档态，但它是系统内置任务，
+        // 不应计入归档徽标（与 list_archived 的排除逻辑保持一致）。
+        assert_eq!(
+            count_archived(&conn).unwrap(),
+            0,
+            "空库归档数应为 0（不含系统 journal）"
+        );
+
+        let t = crate::repo::tasks::create_capture(
+            &conn,
+            &CaptureInput {
+                title: "to-archive".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        crate::repo::tasks::archive(&conn, &t.id).unwrap();
+        assert_eq!(count_archived(&conn).unwrap(), 1);
+
+        // 归档视图同样只含真实任务
+        assert_eq!(list_archived(&conn).unwrap().len(), 1);
+    }
 }

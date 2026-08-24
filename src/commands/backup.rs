@@ -115,7 +115,10 @@ mod tests {
         let (_dir2, conn2) = test_conn();
         set_test_override();
         let stats = repo::backup::import_all(&conn2, &data, false).unwrap();
-        assert_eq!(stats.tasks_skipped, 0, "空库合并不应跳过任何任务");
+        assert_eq!(
+            stats.tasks_skipped, 1,
+            "空库合并不应跳过除系统内置(__journal__)外的任何任务"
+        );
         assert_eq!(stats.events_imported, data.events.len());
 
         // 逐表校验

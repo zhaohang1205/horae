@@ -63,7 +63,12 @@ pub fn run(conn: &Connection, id: &str, json: bool) -> Result<()> {
     println!();
     println!("Timeline (stored as UTC-ms, shown in local time):");
     for e in &events {
-        let meta = e.meta.as_deref().unwrap_or("");
+        let raw = e.meta.as_deref().unwrap_or("");
+        // 结构化 meta（JSON 对象）提取可读字段展示；旧数据/非 JSON 原样输出。
+        let meta = serde_json::from_str::<serde_json::Value>(raw)
+            .ok()
+            .and_then(|v| v.get("reason").and_then(|r| r.as_str()).map(str::to_string))
+            .unwrap_or_else(|| raw.to_string());
         println!(
             "  {}  {:<16} {} -> {}  {}",
             time::format_local(Some(e.at)),

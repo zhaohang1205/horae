@@ -327,7 +327,8 @@ pub fn archive(conn: &Connection, id: &str) -> Result<Task> {
             "UPDATE tasks SET archived_at=?1, archive_reason=?2, updated_at=?3 WHERE id=?4",
             rusqlite::params![now, reason, now, id],
         )?;
-        log_event(tx, id, event::EV_ARCHIVED, None, None, Some(reason), now)?;
+        let meta = format!("{{\"reason\":\"{}\"}}", reason);
+        log_event(tx, id, event::EV_ARCHIVED, None, None, Some(&meta), now)?;
         Ok(())
     })?;
     get(conn, id)
@@ -353,6 +354,10 @@ pub fn unarchive(conn: &Connection, id: &str) -> Result<Task> {
 /// so no event is logged for the purge itself.
 pub fn purge(conn: &Connection, id: &str) -> Result<Task> {
     let id = resolve_id(conn, id)?;
+    if id == super::SYSTEM_JOURNAL_ID {
+        // `__journal__` 是 `horae log` 的外键锚点，删除会导致日志写入永久失败。
+        return Err(Error::SystemTaskProtected(id).into());
+    }
     let t = get(conn, &id)?;
     if t.archived_at.is_none() {
         return Err(Error::NotArchived(id).into());
@@ -362,6 +367,45 @@ pub fn purge(conn: &Connection, id: &str) -> Result<Task> {
         Ok(())
     })?;
     Ok(t)
+}
+
+/** 勾选清单项的结果：完成或重置。 */
+pub enum ToggleResult {
+    Checked(String),
+    Reset,
+}
+
+pub fn toggle_next_checklist_item(conn: &Connection, id: &str) -> Result<Option<ToggleResult>> {
+    let mut task = crate::repo::tasks::get(conn, id)?;
+    if task.checklist.is_empty() {
+        return Ok(None);
+    }
+
+    let mut toggled_title = None;
+    if let Some(item) = task.checklist.iter_mut().find(|i| !i.done) {
+        item.done = true;
+        toggled_title = Some(item.title.clone());
+    }
+
+    let result = if let Some(title) = toggled_title {
+        ToggleResult::Checked(title)
+    } else {
+        for item in task.checklist.iter_mut() {
+            item.done = false;
+        }
+        ToggleResult::Reset
+    };
+
+    update_checklist(conn, &task.id, &task.checklist)?;
+    Ok(Some(result))
+}
+
+pub fn ensure_ready_for_pomodoro(conn: &Connection, id: &str) -> Result<()> {
+    let task = crate::repo::tasks::get(conn, id)?;
+    if task.status != task::Status::Next && task.status != task::Status::Done {
+        transition(conn, id, task::Status::Next)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -377,6 +421,21 @@ mod tests {
             |r| r.get(0),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn purge_rejects_system_journal_task() {
+        let (_dir, conn) = test_conn();
+        // `__journal__` 由 migration 0012 创建且已归档，必须拒绝删除，
+        // 否则 `horae log` 的外键写入会永久失败。
+        let err = purge(&conn, super::super::SYSTEM_JOURNAL_ID).unwrap_err();
+        assert!(
+            format!("{}", err).contains("protected"),
+            "应返回 SystemTaskProtected 错误，实际: {}",
+            err
+        );
+        // 任务仍在
+        assert!(get(&conn, super::super::SYSTEM_JOURNAL_ID).is_ok());
     }
 
     #[test]
@@ -555,42 +614,4 @@ mod tests {
             .count();
         assert_eq!(habit_events, 1, "不重复记录打卡事件");
     }
-}
-
-pub enum ToggleResult {
-    Checked(String),
-    Reset,
-}
-
-pub fn toggle_next_checklist_item(conn: &Connection, id: &str) -> Result<Option<ToggleResult>> {
-    let mut task = crate::repo::tasks::get(conn, id)?;
-    if task.checklist.is_empty() {
-        return Ok(None);
-    }
-
-    let mut toggled_title = None;
-    if let Some(item) = task.checklist.iter_mut().find(|i| !i.done) {
-        item.done = true;
-        toggled_title = Some(item.title.clone());
-    }
-
-    let result = if let Some(title) = toggled_title {
-        ToggleResult::Checked(title)
-    } else {
-        for item in task.checklist.iter_mut() {
-            item.done = false;
-        }
-        ToggleResult::Reset
-    };
-
-    update_checklist(conn, &task.id, &task.checklist)?;
-    Ok(Some(result))
-}
-
-pub fn ensure_ready_for_pomodoro(conn: &Connection, id: &str) -> Result<()> {
-    let task = crate::repo::tasks::get(conn, id)?;
-    if task.status != task::Status::Next && task.status != task::Status::Done {
-        transition(conn, id, task::Status::Next)?;
-    }
-    Ok(())
 }

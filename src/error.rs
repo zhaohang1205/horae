@@ -16,4 +16,7 @@ pub enum Error {
 
     #[error("task is not archived: {0}")]
     NotArchived(String),
+
+    #[error("system task is protected and cannot be modified this way: {0}")]
+    SystemTaskProtected(String),
 }

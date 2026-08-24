@@ -9,7 +9,7 @@ pub fn to_status(conn: &Connection, id: &str, to: &str) -> Result<()> {
     let parsed_status: crate::model::task::Status =
         to.parse().map_err(|e| anyhow::anyhow!("{}", e))?;
     let t = tasks::transition(conn, &id, parsed_status)?;
-    println!("{} -> {}", &t.id[..8], t.status);
+    println!("{} -> {}", &t.id[..t.id.len().min(8)], t.status);
     if to == "done" {
         let _ = crate::commands::notify::completed_feedback(conn);
     }
@@ -41,7 +41,7 @@ pub fn schedule(
     let t = tasks::schedule(conn, &id, start_ms, end_ms, rrule.map(|s| s.to_string()))?;
     println!(
         "scheduled {} at {}",
-        &t.id[..8],
+        &t.id[..t.id.len().min(8)],
         time::format_local(Some(start_ms))
     );
     if let Some(rr) = &t.rrule {
@@ -53,20 +53,178 @@ pub fn schedule(
 pub fn archive(conn: &Connection, id: &str) -> Result<()> {
     let id = tasks::resolve_id(conn, id)?;
     tasks::archive(conn, &id)?;
-    println!("archived {}", &id[..8]);
+    println!("archived {}", &id[..id.len().min(8)]);
     Ok(())
 }
 
 pub fn restore(conn: &Connection, id: &str) -> Result<()> {
     let id = tasks::resolve_id(conn, id)?;
     tasks::unarchive(conn, &id)?;
-    println!("restored {}", &id[..8]);
+    println!("restored {}", &id[..id.len().min(8)]);
     Ok(())
 }
 
 pub fn purge(conn: &Connection, id: &str) -> Result<()> {
     let id = tasks::resolve_id(conn, id)?;
     tasks::purge(conn, &id)?;
-    println!("purged {}", &id[..8]);
+    println!("purged {}", &id[..id.len().min(8)]);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::Command;
+    use crate::model::task::Status;
+    use crate::repo::tasks::{self, CaptureInput};
+    use crate::testutil::test_conn;
+
+    fn mk_task(conn: &Connection, title: &str) -> crate::model::task::Task {
+        tasks::create_capture(
+            conn,
+            &CaptureInput {
+                title: title.into(),
+                status: Status::Inbox,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    }
+
+    fn status_of(conn: &Connection, id: &str) -> Status {
+        tasks::get(conn, id).unwrap().status
+    }
+
+    #[test]
+    fn cli_status_transitions_persist() {
+        let (_dir, conn) = test_conn();
+        let t = mk_task(&conn, "流转");
+
+        // 经完整命令分发驱动，覆盖 mod.rs 分发 + status.rs 处理
+        crate::commands::run(Command::Next { id: t.id.clone() }, &conn, None).unwrap();
+        assert_eq!(status_of(&conn, &t.id), Status::Next);
+
+        crate::commands::run(Command::Wait { id: t.id.clone() }, &conn, None).unwrap();
+        assert_eq!(status_of(&conn, &t.id), Status::Waiting);
+
+        crate::commands::run(Command::Someday { id: t.id.clone() }, &conn, None).unwrap();
+        assert_eq!(status_of(&conn, &t.id), Status::Someday);
+
+        crate::commands::run(Command::Done { id: t.id.clone() }, &conn, None).unwrap();
+        assert_eq!(status_of(&conn, &t.id), Status::Done);
+    }
+
+    #[test]
+    fn cli_accepts_unique_id_prefix() {
+        let (_dir, conn) = test_conn();
+        let t = mk_task(&conn, "前缀解析");
+        let prefix: String = t.id.chars().take(8).collect();
+
+        crate::commands::run(Command::Done { id: prefix }, &conn, None).unwrap();
+        assert_eq!(status_of(&conn, &t.id), Status::Done);
+    }
+
+    #[test]
+    fn schedule_requires_start_and_persists_fields() {
+        let (_dir, conn) = test_conn();
+        let t = mk_task(&conn, "排程");
+
+        // 缺 --start 必须报错
+        let err = crate::commands::run(
+            Command::Schedule {
+                id: t.id.clone(),
+                start: None,
+                end: None,
+                rrule: None,
+            },
+            &conn,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("--start"), "{}", err);
+
+        crate::commands::run(
+            Command::Schedule {
+                id: t.id.clone(),
+                start: Some("+1d".into()),
+                end: Some("+2d".into()),
+                rrule: Some("FREQ=DAILY".into()),
+            },
+            &conn,
+            None,
+        )
+        .unwrap();
+
+        let task = tasks::get(&conn, &t.id).unwrap();
+        assert!(task.scheduled_start_at.is_some(), "start 应落库");
+        assert!(task.scheduled_end_at.is_some(), "end 应落库");
+        assert_eq!(task.rrule.as_deref(), Some("FREQ=DAILY"));
+        assert_eq!(task.status, Status::Scheduled);
+    }
+
+    #[test]
+    fn archive_restore_roundtrip_via_cli() {
+        let (_dir, conn) = test_conn();
+        let t = mk_task(&conn, "归档");
+
+        crate::commands::run(Command::Archive { id: t.id.clone() }, &conn, None).unwrap();
+        assert!(tasks::get(&conn, &t.id).unwrap().archived_at.is_some());
+
+        crate::commands::run(Command::Restore { id: t.id.clone() }, &conn, None).unwrap();
+        assert!(tasks::get(&conn, &t.id).unwrap().archived_at.is_none());
+    }
+
+    #[test]
+    fn purge_requires_archive_then_deletes_permanently() {
+        let (_dir, conn) = test_conn();
+        let t = mk_task(&conn, "清除");
+
+        // 未归档直接 purge 应被拒绝
+        let err =
+            crate::commands::run(Command::Purge { id: t.id.clone() }, &conn, None).unwrap_err();
+        assert!(err.to_string().contains("not archived"), "{}", err);
+        assert!(tasks::get(&conn, &t.id).is_ok());
+
+        crate::commands::run(Command::Archive { id: t.id.clone() }, &conn, None).unwrap();
+        crate::commands::run(Command::Purge { id: t.id.clone() }, &conn, None).unwrap();
+        assert!(
+            tasks::get(&conn, &t.id).is_err(),
+            "purge 后任务应被永久删除"
+        );
+    }
+
+    #[test]
+    fn tag_and_untag_via_cli_dispatch() {
+        let (_dir, conn) = test_conn();
+        let t = mk_task(&conn, "打标签");
+
+        crate::commands::run(
+            Command::Tag {
+                id: t.id.clone(),
+                name: "urgent".into(),
+            },
+            &conn,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::repo::tags::get_task_tags(&conn, &t.id)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        crate::commands::run(
+            Command::Untag {
+                id: t.id.clone(),
+                name: "urgent".into(),
+            },
+            &conn,
+            None,
+        )
+        .unwrap();
+        assert!(crate::repo::tags::get_task_tags(&conn, &t.id)
+            .unwrap()
+            .is_empty());
+    }
 }

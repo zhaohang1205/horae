@@ -146,14 +146,14 @@ impl Mode {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Pane {
     Left,
     Center,
     Right,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) enum Popup {
     /// Show today's tasks summary on startup
     TodayTasks(Vec<String>),

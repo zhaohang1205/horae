@@ -10,7 +10,7 @@ pub fn add(conn: &Connection, id: &str, name: &str) -> Result<()> {
     let id = tasks::resolve_id(conn, id)?;
     let _ = tasks::get(conn, &id)?;
     tags::add_tag_to_task(conn, &id, name)?;
-    println!("tagged {} with {}", &id[..8], name);
+    println!("tagged {} with {}", &id[..id.len().min(8)], name);
     Ok(())
 }
 
@@ -18,7 +18,7 @@ pub fn remove(conn: &Connection, id: &str, name: &str) -> Result<()> {
     let id = tasks::resolve_id(conn, id)?;
     let _ = tasks::get(conn, &id)?;
     tags::remove_tag_from_task(conn, &id, name)?;
-    println!("untagged {} from {}", &id[..8], name);
+    println!("untagged {} from {}", &id[..id.len().min(8)], name);
     Ok(())
 }
 

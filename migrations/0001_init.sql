@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS task_events (
   task_id     TEXT    NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   event_type  TEXT    NOT NULL,  -- event-type consts live in src/model/event.rs and must stay in sync:
                                 -- captured|clarified|organized|status_changed|scheduled|
-                                -- completed|archived|restored|tag_added|tag_removed|habit_completed|pomodoro
+                                -- completed|archived|restored|tag_added|tag_removed|habit_completed|pomodoro|logged
   from_status TEXT,
   to_status   TEXT,
   at          INTEGER NOT NULL, -- UTC ms

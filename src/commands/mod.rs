@@ -6,12 +6,15 @@ use anyhow::Result;
 mod alarm;
 mod backup;
 mod capture;
+mod focus;
 mod list;
+mod log;
 pub mod notify;
 pub mod pomo;
 pub mod profile;
 mod review;
 mod show;
+pub mod stats;
 mod status;
 mod tagging;
 mod watch;
@@ -115,6 +118,9 @@ fn run_inner(cmd: Command, conn: &Connection, profile: Option<&str>) -> Result<(
         ),
         Command::Export { file } => backup::run_export(conn, file.as_deref()),
         Command::Import { file, replace } => backup::run_import(conn, &file, replace),
+        Command::Stats => stats::run(conn),
+        Command::Focus { start } => focus::run(conn, start),
+        Command::Log { message } => log::run(conn, &message),
         Command::Completions { .. } => {
             anyhow::bail!("`horae completions` is handled before the database is opened")
         }

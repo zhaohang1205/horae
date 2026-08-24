@@ -171,7 +171,7 @@ pub fn import_all(conn: &Connection, data: &BackupData, replace: bool) -> Result
             tx.execute("DELETE FROM task_tags", [])?;
             tx.execute("DELETE FROM task_events", [])?;
             tx.execute("DELETE FROM tasks", [])?;
-            tx.execute("DELETE FROM tags", [])?;
+            tx.execute("DELETE FROM tags WHERE is_system = 0", [])?;
             tx.execute("DELETE FROM settings", [])?;
         }
 

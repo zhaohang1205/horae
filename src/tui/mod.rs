@@ -103,7 +103,340 @@ pub(crate) fn row_from_tags_with_due(
 }
 
 /// 启动交互式 TUI。
+/// 内置默认开屏图；允许用户用 `~/.config/horae/splash.png` 覆盖。
+fn load_splash_png() -> Option<Vec<u8>> {
+    load_splash_png_from(None)
+}
+
+/// 从指定目录（或 `None` 表示走 `config_dir()`）加载开屏图，便于测试。
+fn load_splash_png_from(override_dir: Option<&std::path::Path>) -> Option<Vec<u8>> {
+    let base = match override_dir {
+        Some(d) => d.to_path_buf(),
+        None => crate::config::config_dir(),
+    };
+    let override_path = base.join("splash.png");
+    if let Ok(b) = std::fs::read(&override_path) {
+        if looks_like_png(&b) {
+            return Some(b);
+        }
+    }
+    let bundled = include_bytes!("../../assets/horae.png");
+    if looks_like_png(bundled) {
+        Some(bundled.to_vec())
+    } else {
+        None
+    }
+}
+
+fn looks_like_png(b: &[u8]) -> bool {
+    b.len() >= 8 && &b[0..8] == b"\x89PNG\r\n\x1a\n"
+}
+
+/// 从 PNG IHDR 解析像素尺寸（无需完整解码，零依赖）。
+fn png_dimensions(b: &[u8]) -> Option<(u32, u32)> {
+    if !looks_like_png(b) || b.len() < 24 {
+        return None;
+    }
+    let w = u32::from_be_bytes([b[16], b[17], b[18], b[19]]);
+    let h = u32::from_be_bytes([b[20], b[21], b[22], b[23]]);
+    if w == 0 || h == 0 {
+        return None;
+    }
+    Some((w, h))
+}
+
+/// 估算开屏图在终端里占用的单元格尺寸，保持宽高比并在剩余空间内缩放。
+fn png_cell_size(bytes: &[u8], cols: u16, rows: u16, text_h: u16) -> Option<(u16, u16)> {
+    let (iw, ih) = png_dimensions(bytes)?;
+    let max_w = (cols.saturating_sub(4)).clamp(10, 36);
+    let mut w = max_w;
+    // Terminal characters are typically ~1:2 aspect ratio, so multiply height in cells by 0.5
+    let mut h = ((w as f64) * (ih as f64 / iw as f64) * 0.5).round() as u16;
+    let max_h = rows.saturating_sub(text_h + 3);
+    if max_h == 0 {
+        return None;
+    }
+    if h > max_h {
+        let ratio = max_h as f64 / h as f64;
+        h = max_h;
+        w = ((w as f64) * ratio).round() as u16;
+        if w < 4 {
+            w = 4;
+        }
+    }
+    if w == 0 || h == 0 {
+        return None;
+    }
+    Some((w, h))
+}
+
+/// 当前终端是否支持 Kitty 图形协议（Ghostty / Kitty / WezTerm 等均支持）。
+fn is_kitty_terminal() -> bool {
+    // 调试/强制开关：设 `HORAE_FORCE_KITTY_SPLASH=1` 可跳过下面的探测。
+    if std::env::var_os("HORAE_FORCE_KITTY_SPLASH").is_some() {
+        return true;
+    }
+    if std::env::var_os("KITTY_WINDOW_ID").is_some() {
+        return true;
+    }
+    let lower = |v: String| v.to_ascii_lowercase();
+    let tp = std::env::var("TERM_PROGRAM").map(lower).unwrap_or_default();
+    if tp.contains("kitty") || tp.contains("ghostty") || tp.contains("wezterm") {
+        return true;
+    }
+    let term = std::env::var("TERM").map(lower).unwrap_or_default();
+    term.contains("kitty") || term.contains("ghostty") || term.contains("wezterm")
+}
+
+/// 内联标准 base64 编码（含填充），避免引入额外依赖。
+fn base64_encode(input: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = *chunk.get(1).unwrap_or(&0);
+        let b2 = *chunk.get(2).unwrap_or(&0);
+        let n = ((b0 as u32) << 16) | ((b1 as u32) << 8) | (b2 as u32);
+        out.push(ALPHABET[((n >> 18) & 63) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            ALPHABET[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            ALPHABET[(n & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+/// 用 Kitty 图形协议把 PNG 原样（base64）传给终端解码显示，分块以适配转义长度上限。
+/// 关键：参照 kitty 官方示例，`a=T,f=100` 与单元格尺寸 `c/r` 必须放在**首块**，
+/// 末块仅用 `m=0` 收尾，否则 Ghostty 等实现不会触发显示。
+fn write_kitty_image<W: std::io::Write>(
+    out: &mut W,
+    bytes: &[u8],
+    w: u16,
+    h: u16,
+) -> std::io::Result<()> {
+    let b64 = base64_encode(bytes);
+    let chunk_size = 4096usize;
+    let id = 1u32;
+    let n_chunks = b64.len().div_ceil(chunk_size);
+    splash_debug(format!("kitty n_chunks={n_chunks} b64_len={}", b64.len()));
+    for (i, chunk) in b64.as_bytes().chunks(chunk_size).enumerate() {
+        let first = i == 0;
+        let last = i + 1 == n_chunks;
+        let mut control = String::from("\x1b_G");
+        if first {
+            // 显示动作 + PNG 格式 + 单元格尺寸（列/行）都在首块声明。
+            control.push_str(&format!("a=T,f=100,c={},r={},", w, h));
+        }
+        control.push_str(&format!("i={},", id));
+        control.push_str(&format!("m={},", if last { 0 } else { 1 }));
+        control.push_str("q=2;");
+        if first {
+            splash_debug(format!(
+                "kitty first control={:?} first_data_preview={:?}",
+                control,
+                &chunk[..chunk.len().min(24)]
+            ));
+        }
+        if last {
+            splash_debug(format!("kitty last control={:?}", control));
+        }
+        write!(
+            out,
+            "{}{}\x1b\\",
+            control,
+            std::str::from_utf8(chunk).unwrap()
+        )?;
+    }
+    Ok(())
+}
+
+/// 开屏图诊断日志（仅当 `HORAE_SPLASH_DEBUG` 设置时写入临时文件）。
+fn splash_debug(msg: impl std::fmt::Display) {
+    if std::env::var_os("HORAE_SPLASH_DEBUG").is_some() {
+        use std::io::Write;
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(std::env::temp_dir().join("horae_splash.log"))
+            .and_then(|mut f| writeln!(f, "{}", msg));
+    }
+}
+
+fn show_splash(_conn: &rusqlite::Connection) -> anyhow::Result<()> {
+    use crossterm::{cursor, terminal, ExecutableCommand};
+    use std::io::Write;
+
+    let mut stdout = std::io::stdout();
+    let (cols, rows) = terminal::size()?;
+    splash_debug(format!(
+        "start cols={cols} rows={rows} is_kitty={} force={:?} TERM={:?} TERM_PROGRAM={:?} KITTY_WINDOW_ID={:?}",
+        is_kitty_terminal(),
+        std::env::var_os("HORAE_FORCE_KITTY_SPLASH").is_some(),
+        std::env::var("TERM").ok(),
+        std::env::var("TERM_PROGRAM").ok(),
+        std::env::var_os("KITTY_WINDOW_ID").is_some(),
+    ));
+
+    let splash_png = load_splash_png();
+
+    let mut img_w = 0;
+    let mut img_h = 0;
+    let mut use_kitty = false;
+
+    let title_str = "HORAE";
+    let title_lines: Vec<&str> = title_str.lines().collect();
+    let title_h = title_lines.len() as u16;
+    let title_w = 5u16;
+
+    let quote1_lines = ["物有本末，事有终始，", "知所先后，则近道矣", "--《大学》"];
+    let quote2_lines = [
+        "your mind is for having ideas,",
+        "not holding them",
+        "--David Allen",
+    ];
+    let slogan_url = "https://gettingthingsdone.com/";
+
+    let prompt = "Press any key to start...";
+    let author_str = format!("v{} - by zhaohang1205", env!("CARGO_PKG_VERSION"));
+
+    let text_h = title_h + 10; // title + blank + q1(3) + blank + q2(3) + blank + prompt
+
+    if let Some(bytes) = &splash_png {
+        if is_kitty_terminal() {
+            if let Some((w, h)) = png_cell_size(bytes, cols, rows, text_h) {
+                img_w = w;
+                img_h = h;
+                use_kitty = true;
+            }
+        }
+    }
+
+    let render_img_h = if use_kitty { img_h } else { 0 };
+    let render_img_w = if use_kitty { img_w } else { 0 };
+
+    let str_w = |s: &str| -> u16 { s.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum() };
+
+    let max_q1_w = quote1_lines.iter().map(|l| str_w(l)).max().unwrap_or(0);
+    let max_q2_w = quote2_lines.iter().map(|l| str_w(l)).max().unwrap_or(0);
+    let prompt_w = str_w(prompt);
+    let author_w = str_w(&author_str);
+
+    let text_w = max_q1_w.max(max_q2_w).max(prompt_w).max(title_w);
+    let gap = if render_img_w > 0 { 4u16 } else { 0 };
+    let total_w = render_img_w + gap + text_w;
+    let total_h = render_img_h.max(text_h);
+
+    let start_x = if cols > total_w {
+        (cols - total_w) / 2
+    } else {
+        0
+    };
+    let start_y = if rows > total_h {
+        (rows - total_h) / 2
+    } else {
+        0
+    };
+
+    let img_y = if render_img_h < total_h {
+        start_y + (total_h - render_img_h) / 2
+    } else {
+        start_y
+    };
+
+    let text_y = if text_h < total_h {
+        start_y + (total_h - text_h) / 2
+    } else {
+        start_y
+    };
+
+    stdout.execute(terminal::Clear(terminal::ClearType::All))?;
+
+    if render_img_w > 0 && use_kitty {
+        stdout.execute(cursor::MoveTo(start_x, img_y))?;
+        write_kitty_image(&mut stdout, splash_png.as_ref().unwrap(), img_w, img_h)?;
+        splash_debug(format!(
+            "image written at left={start_x} top={img_y} cell=({img_w},{img_h})"
+        ));
+    }
+
+    let text_x = start_x + render_img_w + gap;
+
+    // Title (Catppuccin Blue, Bold)
+    for (i, line) in title_lines.iter().enumerate() {
+        stdout.execute(cursor::MoveTo(text_x, text_y + i as u16))?;
+        write!(stdout, "\x1b[1m\x1b[38;2;137;180;250m{}\x1b[0m", line)?;
+    }
+
+    // Quote 1 (Catppuccin Blue, Italic, source right-aligned)
+    let quote1_y = text_y + title_h + 1;
+    for (i, line) in quote1_lines.iter().enumerate() {
+        let pad = if i == quote1_lines.len() - 1 {
+            max_q1_w.saturating_sub(str_w(line))
+        } else {
+            0
+        };
+        stdout.execute(cursor::MoveTo(text_x + pad, quote1_y + i as u16))?;
+        write!(stdout, "\x1b[38;2;137;180;250m\x1b[3m{}\x1b[0m", line)?;
+    }
+
+    // Quote 2 (Catppuccin Blue, Italic + OSC 8 Hyperlink, source right-aligned)
+    let quote2_y = quote1_y + quote1_lines.len() as u16 + 1;
+    for (i, line) in quote2_lines.iter().enumerate() {
+        let pad = if i == quote2_lines.len() - 1 {
+            max_q2_w.saturating_sub(str_w(line))
+        } else {
+            0
+        };
+        stdout.execute(cursor::MoveTo(text_x + pad, quote2_y + i as u16))?;
+        write!(
+            stdout,
+            "\x1b[38;2;137;180;250m\x1b[3m\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\\x1b[0m",
+            slogan_url, line
+        )?;
+    }
+
+    // Prompt
+    let prompt_y = quote2_y + quote2_lines.len() as u16 + 1;
+    stdout.execute(cursor::MoveTo(text_x, prompt_y))?;
+    write!(stdout, "\x1b[90m\x1b[5m{}\x1b[0m", prompt)?;
+
+    // Author at edge area (bottom right)
+    let author_x = if cols > author_w {
+        cols - author_w - 1
+    } else {
+        0
+    };
+    let author_y = rows.saturating_sub(1);
+    stdout.execute(cursor::MoveTo(author_x, author_y))?;
+    write!(stdout, "\x1b[90m{}\x1b[0m", author_str)?;
+
+    stdout.flush()?;
+
+    crossterm::terminal::enable_raw_mode()?;
+    loop {
+        if crossterm::event::poll(std::time::Duration::from_millis(100))? {
+            if let crossterm::event::Event::Key(_) = crossterm::event::read()? {
+                break;
+            }
+        }
+    }
+    crossterm::terminal::disable_raw_mode()?;
+    Ok(())
+}
+
 pub fn run(conn: &Connection, profile: Option<&str>) -> Result<()> {
+    let mods = crate::repo::modules::ModuleVisibility::load(conn);
+    if mods.splash {
+        let _ = show_splash(conn);
+    }
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(
@@ -161,14 +494,14 @@ fn run_app(
                     let is_left_panel = m.column < left_width;
                     match m.kind {
                         crossterm::event::MouseEventKind::ScrollDown => {
-                            if is_left_panel && app.show_help {
+                            if app.show_help {
                                 app.help_scroll = app.help_scroll.saturating_add(1);
                             } else {
                                 app.move_sel(1);
                             }
                         }
                         crossterm::event::MouseEventKind::ScrollUp => {
-                            if is_left_panel && app.show_help {
+                            if app.show_help {
                                 app.help_scroll = app.help_scroll.saturating_sub(1);
                             } else {
                                 app.move_sel(-1);
@@ -1120,7 +1453,7 @@ mod tests {
         let mut app = App::new(&conn).unwrap();
         app.popup = None;
         // 默认关闭
-        assert!(!app.quotes_enabled, "金句功能默认关闭");
+        assert!(!app.quotes.enabled, "金句功能默认关闭");
         // 功能未启用：0 键与 " 键均无效
         app.handle_key(key('0')).unwrap();
         assert_eq!(app.view, View::Inbox, "未启用时 0 不切视图");
@@ -1129,8 +1462,13 @@ mod tests {
         assert!(tags.is_empty(), "未启用时 \" 不生效");
 
         // F7 启用 + 持久化
-        app.handle_key(kc(KeyCode::F(7))).unwrap();
-        assert!(app.quotes_enabled, "F7 启用金句功能");
+        app.handle_key(kc(KeyCode::F(7))).unwrap(); // open popup
+        for _ in 0..3 {
+            app.handle_key(kc(KeyCode::Up)).unwrap(); // move from 0 to 5 (0->7->6->5)
+        }
+        app.handle_key(key(' ')).unwrap(); // space toggles 5 (Quotes)
+        app.handle_key(kc(KeyCode::Esc)).unwrap(); // close popup
+        assert!(app.quotes.enabled, "F7+Space 启用金句功能");
         assert_eq!(
             crate::repo::settings::get(&conn, "quotes")
                 .unwrap()
@@ -1210,23 +1548,30 @@ mod tests {
         assert_eq!(q[0].status, task::Status::Reference);
         assert_eq!(q[0].title, "灵感: 知行合一");
 
-        // 启用后视图环尾依次接 Settings、金句
-        app.view = View::Review;
+        // 启用后视图环尾依次接 Quotes、Review、Settings
+        app.view = View::Tags;
+        app.next_view(1);
+        assert_eq!(app.view, View::Quotes, "Tags 之后是 Quotes");
+        app.next_view(1);
+        assert_eq!(app.view, View::Review, "Quotes 之后是 Review");
         app.next_view(1);
         assert_eq!(app.view, View::Settings, "Review 之后是 Settings");
-        app.next_view(1);
-        assert_eq!(app.view, View::Quotes, "启用后环尾接金句");
 
         // 重启恢复启用状态
         drop(app);
         let mut app = App::new(&conn).unwrap();
         app.popup = None;
-        assert!(app.quotes_enabled, "重启后恢复启用");
+        assert!(app.quotes.enabled, "重启后恢复启用");
 
         // F7 停用：若在金句视图则跳回收件箱
         app.handle_key(key('0')).unwrap();
         app.handle_key(kc(KeyCode::F(7))).unwrap();
-        assert!(!app.quotes_enabled);
+        for _ in 0..3 {
+            app.handle_key(kc(KeyCode::Up)).unwrap(); // move to index 5
+        }
+        app.handle_key(key(' ')).unwrap();
+        app.handle_key(kc(KeyCode::Esc)).unwrap();
+        assert!(!app.quotes.enabled);
         assert_eq!(app.view, View::Inbox, "停用时离开金句视图");
         assert_eq!(
             crate::repo::settings::get(&conn, "quotes")
@@ -1241,79 +1586,78 @@ mod tests {
     fn settings_view_manages_profiles() {
         use crate::config::Config;
 
-        let tmp = tempfile::tempdir().unwrap();
-        std::env::set_var("HORAE_CONFIG_DIR", tmp.path());
-        let mut conn = Connection::open(":memory:").unwrap();
-        migrate::run(&mut conn).unwrap();
-        let mut app = App::new(&conn).unwrap();
-        app.popup = None;
+        // 隔离配置目录并持锁，避免与其它依赖 HORAE_CONFIG_DIR 的测试竞争
+        crate::testutil::with_test_config_dir(|| {
+            let mut conn = Connection::open(":memory:").unwrap();
+            migrate::run(&mut conn).unwrap();
+            let mut app = App::new(&conn).unwrap();
+            app.popup = None;
 
-        // 进入设置视图：默认 profile 应在列表中
-        app.handle_key(kc(KeyCode::F(8))).unwrap();
-        assert_eq!(app.view, View::Settings);
-        assert!(
-            app.items.iter().any(|r| r.id == "default"),
-            "默认 profile 在设置页"
-        );
-        assert!(app
-            .items
-            .iter()
-            .any(|r| r.tags.iter().any(|t| t == "horae.db")));
+            // 进入设置视图：默认 profile 应在列表中
+            app.handle_key(key('M')).unwrap();
+            assert_eq!(app.view, View::Settings);
+            assert!(
+                app.items.iter().any(|r| r.id == "default"),
+                "默认 profile 在设置页"
+            );
+            assert!(app
+                .items
+                .iter()
+                .any(|r| r.tags.iter().any(|t| t == "horae.db")));
 
-        // n → 新建 work
-        app.handle_key(key('n')).unwrap();
-        assert_eq!(app.mode, Mode::CreatingProfile);
-        for c in "work".chars() {
-            app.handle_key(key(c)).unwrap();
-        }
-        app.handle_key(kc(KeyCode::Enter)).unwrap();
-        assert_eq!(app.mode, Mode::Normal);
-        assert!(
-            app.items.iter().any(|r| r.id == "work"),
-            "新建的 work profile 出现在列表"
-        );
-        let cfg = Config::load().unwrap();
-        assert_eq!(
-            cfg.profile("work").unwrap().db,
-            "profiles/work.db",
-            "work 使用默认 db 路径"
-        );
+            // n → 新建 work
+            app.handle_key(key('n')).unwrap();
+            assert_eq!(app.mode, Mode::CreatingProfile);
+            for c in "work".chars() {
+                app.handle_key(key(c)).unwrap();
+            }
+            app.handle_key(kc(KeyCode::Enter)).unwrap();
+            assert_eq!(app.mode, Mode::Normal);
+            assert!(
+                app.items.iter().any(|r| r.id == "work"),
+                "新建的 work profile 出现在列表"
+            );
+            let cfg = Config::load().unwrap();
+            assert_eq!(
+                cfg.profile("work").unwrap().db,
+                "profiles/work.db",
+                "work 使用默认 db 路径"
+            );
 
-        // 选中 work 并设为默认
-        let idx = app.items.iter().position(|r| r.id == "work").unwrap();
-        app.selected = idx;
-        app.handle_key(key('s')).unwrap();
-        let cfg = Config::load().unwrap();
-        assert_eq!(cfg.default_profile, "work", "work 成为默认");
+            // 选中 work 并设为默认
+            let idx = app.items.iter().position(|r| r.id == "work").unwrap();
+            app.selected = idx;
+            app.handle_key(key('s')).unwrap();
+            let cfg = Config::load().unwrap();
+            assert_eq!(cfg.default_profile, "work", "work 成为默认");
 
-        // r → 重命名为 work2
-        app.handle_key(key('r')).unwrap();
-        assert_eq!(app.mode, Mode::RenamingProfile);
-        assert_eq!(app.input, "work", "重命名预填当前名称");
-        for _ in 0..4 {
-            app.handle_key(kc(KeyCode::Backspace)).unwrap();
-        }
-        for c in "work2".chars() {
-            app.handle_key(key(c)).unwrap();
-        }
-        app.handle_key(kc(KeyCode::Enter)).unwrap();
-        let cfg = Config::load().unwrap();
-        assert!(cfg.profile("work2").is_some(), "重命名后 work2 存在");
-        assert!(cfg.profile("work").is_none(), "work 已不存在");
-        assert_eq!(cfg.default_profile, "work2", "默认跟随重命名");
+            // r → 重命名为 work2
+            app.handle_key(key('r')).unwrap();
+            assert_eq!(app.mode, Mode::RenamingProfile);
+            assert_eq!(app.input, "work", "重命名预填当前名称");
+            for _ in 0..4 {
+                app.handle_key(kc(KeyCode::Backspace)).unwrap();
+            }
+            for c in "work2".chars() {
+                app.handle_key(key(c)).unwrap();
+            }
+            app.handle_key(kc(KeyCode::Enter)).unwrap();
+            let cfg = Config::load().unwrap();
+            assert!(cfg.profile("work2").is_some(), "重命名后 work2 存在");
+            assert!(cfg.profile("work").is_none(), "work 已不存在");
+            assert_eq!(cfg.default_profile, "work2", "默认跟随重命名");
 
-        // d + y → 删除 work2
-        app.handle_key(key('d')).unwrap();
-        assert_eq!(app.mode, Mode::ConfirmProfileDelete);
-        app.handle_key(key('y')).unwrap();
-        let cfg = Config::load().unwrap();
-        assert!(cfg.profile("work2").is_none(), "work2 已删除");
-        assert!(
-            cfg.profile("default").is_some(),
-            "删除默认后保留剩余 default"
-        );
-
-        std::env::remove_var("HORAE_CONFIG_DIR");
+            // d + y → 删除 work2
+            app.handle_key(key('d')).unwrap();
+            assert_eq!(app.mode, Mode::ConfirmProfileDelete);
+            app.handle_key(key('y')).unwrap();
+            let cfg = Config::load().unwrap();
+            assert!(cfg.profile("work2").is_none(), "work2 已删除");
+            assert!(
+                cfg.profile("default").is_some(),
+                "删除默认后保留剩余 default"
+            );
+        });
     }
 
     #[test]
@@ -1557,7 +1901,7 @@ mod tests {
         assert!(!strip.iter().any(|(k, _)| *k == "0-9"), "全局条不含视图键");
         assert!(
             strip.iter().any(|(k, _)| *k == "F7"),
-            "全局条含 F7 金句开关"
+            "全局条含 F7 功能开关"
         );
         // 状态栏全局条按热度降序
         assert!(
@@ -2409,5 +2753,404 @@ mod tests {
             s.contains("y/Enter") && s.contains("n/Esc"),
             "确认/取消提示可见"
         );
+    }
+    // ---------- Phase 4：handlers/render 盲区补测 ----------
+
+    fn ctrl(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn module_toggle_popup_navigates_and_persists() {
+        crate::repo::state::set_test_override();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        seed(&conn);
+        let mut app = App::new(&conn).unwrap();
+        assert!(!app.show_help);
+
+        // F7 打开模块开关弹层，初始 idx=0（splash）
+        app.handle_key(kc(KeyCode::F(7))).unwrap();
+        assert_eq!(
+            app.popup,
+            Some(crate::tui::app::Popup::ModuleToggles(0)),
+            "F7 应打开模块开关弹层"
+        );
+        assert!(app.modules.splash);
+
+        // space 关掉 splash 并持久化
+        app.handle_key(key(' ')).unwrap();
+        assert!(!app.modules.splash, "space 应翻转 splash");
+        assert_eq!(
+            app.popup,
+            Some(crate::tui::app::Popup::ModuleToggles(0)),
+            "切换后弹层保持打开"
+        );
+        // 重新加载后仍为关（已持久化到 settings 表）
+        let reloaded = crate::repo::modules::ModuleVisibility::load(app.conn);
+        assert!(!reloaded.splash);
+
+        // j 向下循环导航（0 → 1），k 反向且在 0 处回绕到 7
+        app.handle_key(key('j')).unwrap();
+        assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(1)));
+        app.popup = Some(crate::tui::app::Popup::ModuleToggles(0));
+        app.handle_key(key('k')).unwrap();
+        assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(7)));
+
+        // Esc 关闭弹层
+        app.handle_key(kc(KeyCode::Esc)).unwrap();
+        assert!(app.popup.is_none());
+    }
+
+    #[test]
+    fn disabled_module_blocks_digit_view_and_quotes_toggle_off_returns_to_inbox() {
+        crate::repo::state::set_test_override();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        seed(&conn);
+        let mut app = App::new(&conn).unwrap();
+
+        // 关闭 reference 模块后按 '6' 不应切视图
+        app.handle_key(kc(KeyCode::F(7))).unwrap(); // idx 0 splash
+        for _ in 0..1 {
+            app.handle_key(key('j')).unwrap(); // idx 1 reference
+        }
+        app.handle_key(key(' ')).unwrap(); // off
+        app.handle_key(kc(KeyCode::Esc)).unwrap();
+
+        app.handle_key(key('6')).unwrap();
+        assert_ne!(app.view, View::Reference, "禁用模块的数字键应被忽略");
+        assert!(!app.modules.reference);
+
+        // 在 Quotes 视图下关闭 quotes 模块应自动回到 Inbox
+        app.view = View::Quotes;
+        app.quotes.enabled = true;
+        app.handle_key(kc(KeyCode::F(7))).unwrap();
+        for _ in 0..5 {
+            app.handle_key(key('j')).unwrap(); // idx 5 quotes
+        }
+        app.handle_key(key(' ')).unwrap();
+        assert!(!app.quotes.enabled);
+        assert_eq!(app.view, View::Inbox, "quotes 关闭时应离开 Quotes 视图");
+    }
+
+    #[test]
+    fn help_drawer_navigation_scrolls_and_closes() {
+        crate::repo::state::set_test_override();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        seed(&conn);
+        let mut app = App::new(&conn).unwrap();
+        app.handle_key(key('?')).unwrap();
+        assert!(app.show_help);
+
+        app.handle_key(key('j')).unwrap();
+        assert_eq!(app.help_scroll, 1);
+        app.handle_key(kc(KeyCode::PageDown)).unwrap();
+        assert_eq!(app.help_scroll, 2);
+        app.handle_key(key('G')).unwrap();
+        assert_eq!(app.help_scroll, usize::MAX, "G 跳到底部");
+        app.handle_key(key('g')).unwrap();
+        assert_eq!(app.help_scroll, 0, "g 回顶部");
+        app.handle_key(kc(KeyCode::Esc)).unwrap();
+        assert!(!app.show_help, "Esc 关闭帮助抽屉");
+        assert_eq!(app.help_scroll, 0);
+    }
+
+    #[test]
+    fn system_keys_toggle_bar_syntax_and_selection() {
+        crate::repo::state::set_test_override();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        seed(&conn);
+        let mut app = App::new(&conn).unwrap();
+
+        // F2 快捷键条
+        let before = app.show_shortcut_bar;
+        app.handle_key(kc(KeyCode::F(2))).unwrap();
+        assert_eq!(app.show_shortcut_bar, !before);
+
+        // Ctrl+P 语法面板
+        assert!(!app.show_syntax);
+        app.handle_key(ctrl('p')).unwrap();
+        assert!(app.show_syntax);
+
+        // Ctrl+A 全选 / Ctrl+U 反选
+        app.pane = Pane::Center;
+        app.reload().unwrap();
+        let total = app.items.len();
+        app.handle_key(ctrl('a')).unwrap();
+        assert_eq!(app.selected_ids.len(), total, "全选覆盖所有行");
+        app.handle_key(ctrl('u')).unwrap();
+        assert_eq!(app.selected_ids.len(), 0, "反选清空（原本全选）");
+    }
+
+    #[test]
+    fn esc_cascades_through_visual_filter_and_selection() {
+        crate::repo::state::set_test_override();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        seed(&conn);
+        let mut app = App::new(&conn).unwrap();
+
+        // 1) 可视模式 Esc → 回 Normal 并清空选择
+        app.handle_key(key('v')).unwrap();
+        assert_eq!(app.mode, Mode::Visual);
+        app.selected_ids.insert("a".to_string());
+        app.handle_key(kc(KeyCode::Esc)).unwrap();
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.selected_ids.is_empty());
+
+        // 2) 有过滤时 Esc → 清除过滤
+        app.tag_filter = Some("work".into());
+        app.search_query.push_str("rust");
+        app.handle_key(kc(KeyCode::Esc)).unwrap();
+        assert!(app.tag_filter.is_none() && app.search_query.is_empty());
+
+        // 3) 有选择时 Esc → 清除选择
+        app.selected_ids.insert("b".to_string());
+        app.handle_key(kc(KeyCode::Esc)).unwrap();
+        assert!(app.selected_ids.is_empty(), "过滤已空时 Esc 应清选择");
+
+        // 4) 无任何状态时 Esc → 隐藏番茄横幅
+        assert!(!app.hide_pomo_banner);
+        app.handle_key(kc(KeyCode::Esc)).unwrap();
+        assert!(app.hide_pomo_banner, "兜底分支应隐藏 pomo banner");
+    }
+
+    #[test]
+    fn archived_view_restore_single_and_batch() {
+        crate::repo::state::set_test_override();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        seed(&conn);
+        let mut app = App::new(&conn).unwrap();
+        app.pane = Pane::Center;
+
+        // 归档两个任务后进入 Archived 视图（数字 8）
+        let ids: Vec<String> = app.items.iter().take(2).map(|r| r.id.clone()).collect();
+        for id in &ids {
+            tasks::archive(app.conn, id).unwrap();
+        }
+        app.handle_key(key('8')).unwrap();
+        assert_eq!(app.view, View::Archived);
+
+        // 单个恢复：光标停在第一行，'u' 恢复
+        app.selected_ids.clear();
+        app.reload().unwrap();
+        app.selected = 0;
+        let first_archived = app.items[app.selected].id.clone();
+        app.handle_key(key('u')).unwrap();
+        assert!(
+            tasks::get(app.conn, &first_archived)
+                .unwrap()
+                .archived_at
+                .is_none(),
+            "'u' 应恢复当前选中的归档任务"
+        );
+
+        // 批量恢复：选中剩余归档行后 'u'
+        app.reload().unwrap();
+        assert!(!app.items.is_empty(), "仍有归档任务可批量恢复");
+        app.selected_ids.clear();
+        for row in &app.items {
+            app.selected_ids.insert(row.id.clone());
+        }
+        app.visual_start_idx = None;
+        app.handle_key(key('u')).unwrap();
+        for row in &tasks::list(
+            app.conn,
+            &ListFilter {
+                status: None,
+                tags: vec![],
+                query: None,
+                review_stale: false,
+            },
+        )
+        .unwrap()
+        {
+            assert!(row.archived_at.is_none(), "{} 仍处于归档", row.id);
+        }
+        assert!(app.selected_ids.is_empty(), "批量恢复后清空选择集");
+    }
+
+    #[test]
+    fn pane_keys_cycle_and_clamp_between_three_columns() {
+        crate::repo::state::set_test_override();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        seed(&conn);
+        let mut app = App::new(&conn).unwrap();
+
+        // l 从 Left → Center → Right → 停在 Right（钳位）
+        app.pane = Pane::Left;
+        app.handle_key(key('l')).unwrap();
+        assert_eq!(app.pane, Pane::Center);
+        app.handle_key(key('l')).unwrap();
+        assert_eq!(app.pane, Pane::Right);
+        app.handle_key(key('l')).unwrap();
+        assert_eq!(app.pane, Pane::Right, "右边界钳位");
+
+        // h 反向：Right → Center → Left → 停在 Left（钳位）
+        app.handle_key(key('h')).unwrap();
+        assert_eq!(app.pane, Pane::Center);
+        app.handle_key(key('h')).unwrap();
+        assert_eq!(app.pane, Pane::Left);
+        app.handle_key(key('h')).unwrap();
+        assert_eq!(app.pane, Pane::Left, "左边界钳位");
+    }
+
+    #[test]
+    fn render_views_smoke_cover_disabled_modules_and_popups() {
+        crate::repo::state::set_test_override();
+        let mut conn = Connection::open(":memory:").unwrap();
+        migrate::run(&mut conn).unwrap();
+        seed(&conn);
+        let mut app = App::new(&conn).unwrap();
+        let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
+
+        let mut draw_contains = |app: &mut App, needle: &str| -> bool {
+            term.clear().unwrap();
+            term.draw(|f| app.render(f)).unwrap();
+            norm(&snap(&term)).contains(needle)
+        };
+
+        // 各视图渲染冒烟：标题出现、无 panic
+        assert!(draw_contains(&mut app, "任务·收件箱"));
+        for (digit, needle) in [
+            ('2', "下一步"),
+            ('3', "等待中"),
+            ('5', "将来"),
+            ('7', "已完成"),
+            ('8', "归档箱"),
+            ('9', "标签库"),
+        ] {
+            app.handle_key(key(digit)).unwrap();
+            assert!(
+                draw_contains(&mut app, needle),
+                "视图 {digit} 应渲染 {needle}"
+            );
+        }
+
+        // 帮助抽屉 + 模块弹层的渲染路径
+        app.handle_key(key('?')).unwrap();
+        assert!(draw_contains(&mut app, "快捷键"), "帮助抽屉渲染标题");
+        app.handle_key(kc(KeyCode::Esc)).unwrap();
+        app.handle_key(kc(KeyCode::F(7))).unwrap();
+        assert!(draw_contains(&mut app, "模块"), "模块弹层应渲染");
+    }
+}
+
+#[cfg(test)]
+mod splash_tests {
+    use super::*;
+
+    #[test]
+    fn load_splash_png_falls_back_to_bundled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let got = load_splash_png_from(Some(tmp.path()));
+        assert!(got.is_some(), "无覆盖文件时应回退到内置默认图");
+        assert!(looks_like_png(&got.unwrap()), "默认图应为 PNG");
+    }
+
+    #[test]
+    fn load_splash_png_uses_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fake = b"\x89PNG\r\n\x1a\nfake".to_vec();
+        std::fs::write(tmp.path().join("splash.png"), &fake).unwrap();
+        let got = load_splash_png_from(Some(tmp.path()));
+        assert_eq!(got, Some(fake), "存在覆盖文件时应优先返回它");
+    }
+
+    #[test]
+    fn png_dimensions_parses_ihdr() {
+        let mut b = Vec::new();
+        b.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+        b.extend_from_slice(&[0, 0, 0, 0]);
+        b.extend_from_slice(b"IHDR");
+        b.extend_from_slice(&481u32.to_be_bytes());
+        b.extend_from_slice(&594u32.to_be_bytes());
+        assert_eq!(png_dimensions(&b), Some((481, 594)));
+        assert_eq!(png_dimensions(b"not a png"), None);
+    }
+
+    #[test]
+    fn base64_encode_known_vectors() {
+        assert_eq!(base64_encode(b"Man"), "TWFu");
+        assert_eq!(base64_encode(b"Ma"), "TWE=");
+        assert_eq!(base64_encode(b"M"), "TQ==");
+    }
+
+    #[test]
+    fn write_kitty_image_emits_kitty_protocol() {
+        let data = vec![0u8; 9000]; // 多块：触发分块（chunk_size=4096）
+        let mut buf = std::io::Cursor::new(Vec::new());
+        write_kitty_image(&mut buf, &data, 40, 20).unwrap();
+        let s = String::from_utf8(buf.into_inner()).unwrap();
+
+        // 首块必须带 a=T,f=100 以及单元格尺寸 c=/r=（kitty 官方示例如此）。
+        let first = s.split("\x1b\\").next().unwrap();
+        assert!(
+            first.contains("\x1b_Ga=T,f=100,c=40,r=20,"),
+            "首块应声明 a=T,f=100,c=40,r=20: {}",
+            first
+        );
+
+        // 末块仅以 m=0 收尾，不应再带 a=T。
+        let last = s.rsplit("\x1b_G").next().unwrap();
+        assert!(last.contains("m=0,"), "末块应为 m=0 收尾: {}", last);
+        assert!(!last.contains("a=T"), "末块不应再带 a=T");
+
+        let chunks = s.matches("\x1b_G").count();
+        assert!(chunks >= 2, "大数据应被分块传输，实际块数 {}", chunks);
+    }
+
+    #[test]
+    fn is_kitty_terminal_detects() {
+        let prev_term = std::env::var("TERM").ok();
+        let prev_tp = std::env::var("TERM_PROGRAM").ok();
+        let had_kw = std::env::var_os("KITTY_WINDOW_ID").is_some();
+
+        std::env::remove_var("KITTY_WINDOW_ID");
+        std::env::set_var("TERM_PROGRAM", "dumb");
+
+        std::env::set_var("TERM", "xterm-kitty");
+        assert!(is_kitty_terminal(), "TERM 含 kitty 应被识别");
+
+        std::env::set_var("TERM", "xterm-256color");
+        assert!(!is_kitty_terminal(), "普通终端不应被识别");
+
+        match prev_term {
+            Some(v) => std::env::set_var("TERM", v),
+            None => std::env::remove_var("TERM"),
+        }
+        match prev_tp {
+            Some(v) => std::env::set_var("TERM_PROGRAM", v),
+            None => std::env::remove_var("TERM_PROGRAM"),
+        }
+        if had_kw {
+            std::env::set_var("KITTY_WINDOW_ID", "1");
+        } else {
+            std::env::remove_var("KITTY_WINDOW_ID");
+        }
+    }
+
+    #[test]
+    fn splash_quotes_and_link() {
+        let q1 = ["物有本末，事有终始，", "知所先后，则近道矣", "--《大学》"];
+        let q2 = [
+            "your mind is for having ideas,",
+            "not holding them",
+            "--David Allen",
+        ];
+        let url = "https://gettingthingsdone.com/";
+        assert_eq!(q1.len(), 3);
+        assert_eq!(q2.len(), 3);
+        assert_eq!(q1[2], "--《大学》");
+        assert_eq!(q2[2], "--David Allen");
+
+        let osc8 = format!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", url, q2[0]);
+        assert!(osc8.contains("https://gettingthingsdone.com/"));
+        assert!(osc8.contains("your mind is for having ideas,"));
     }
 }

@@ -14,7 +14,10 @@ pub fn run(
     json: bool,
 ) -> Result<()> {
     let f = tasks::ListFilter {
-        status: status.map(|s| s.parse().unwrap()),
+        status: status
+            .map(|s| s.parse())
+            .transpose()
+            .map_err(|e| anyhow::anyhow!("{}", e))?,
         tags: tags_filter.to_vec(),
         query: None,
         review_stale: false,
@@ -47,7 +50,7 @@ pub fn run(
         let tags_s = tag_map.get(&t.id).map(|v| v.join(",")).unwrap_or_default();
         println!(
             "{:<8} {:<9} {:<17} {:<22} {}",
-            &t.id[..8],
+            &t.id[..t.id.len().min(8)],
             t.status,
             time::format_local(effective_due(t)),
             tags_s,

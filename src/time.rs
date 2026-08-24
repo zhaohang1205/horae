@@ -71,7 +71,18 @@ fn day_start_ms(ms: i64) -> i64 {
 
 /// Whole calendar days between two timestamps (negative when `to` < `from`).
 fn days_between(from_ms: i64, to_ms: i64) -> i64 {
-    (day_start_ms(to_ms) - day_start_ms(from_ms)) / (24 * 3600 * 1000i64)
+    let d1 = Utc
+        .timestamp_millis_opt(from_ms)
+        .single()
+        .map(|dt| dt.with_timezone(&Local).date_naive());
+    let d2 = Utc
+        .timestamp_millis_opt(to_ms)
+        .single()
+        .map(|dt| dt.with_timezone(&Local).date_naive());
+    match (d1, d2) {
+        (Some(a), Some(b)) => (b - a).num_days(),
+        _ => (day_start_ms(to_ms) - day_start_ms(from_ms)) / (24 * 3600 * 1000i64),
+    }
 }
 
 /// Compact relative description of a due/scheduled timestamp for list rows.
@@ -195,12 +206,12 @@ pub fn parse_time(s: &str) -> Result<i64> {
     }
     if let Some(stripped) = s.strip_prefix("明天") {
         let t = parse_optional_time(stripped.trim(), midnight)?;
-        let day = (now + Duration::days(1)).date_naive();
+        let day = now.date_naive() + Duration::days(1);
         return local_to_utc_ms(day.and_time(t));
     }
     if let Some(stripped) = s.strip_prefix("后天") {
         let t = parse_optional_time(stripped.trim(), midnight)?;
-        let day = (now + Duration::days(2)).date_naive();
+        let day = now.date_naive() + Duration::days(2);
         return local_to_utc_ms(day.and_time(t));
     }
 
@@ -221,7 +232,7 @@ pub fn parse_time(s: &str) -> Result<i64> {
     }
     if let Some(stripped) = s.strip_prefix("tomorrow") {
         let time = parse_optional_time(stripped.trim(), midnight)?;
-        let tomorrow = (now + Duration::days(1)).date_naive();
+        let tomorrow = now.date_naive() + Duration::days(1);
         return local_to_utc_ms(tomorrow.and_time(time));
     }
 
@@ -239,7 +250,7 @@ pub fn parse_time(s: &str) -> Result<i64> {
             let candidate = local_to_utc_ms(now.date_naive().and_time(t))?;
             let now_ms = now.with_timezone(&Utc).timestamp_millis();
             if candidate < now_ms {
-                let tomorrow = (now + Duration::days(1)).date_naive();
+                let tomorrow = now.date_naive() + Duration::days(1);
                 return local_to_utc_ms(tomorrow.and_time(t));
             }
             return Ok(candidate);
