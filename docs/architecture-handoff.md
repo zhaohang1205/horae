@@ -86,6 +86,12 @@
 - **watch.rs 容错降级**：`process_once` 四阶段独立容错（`stage!` 宏收集首错）；队列 lossy 读字节防畸形行丢队列；提醒文件失败跳过+下轮重试（key 不记去重状态）；清除内存缓冲上的 `writeln!.unwrap()`。新增 3 个降级测试（torn UTF-8 / 阶段隔离 / 提醒重试）。
 - 全量测试 201 单测 + 7 集成全绿；clippy `-D warnings` 干净。
 
+### 12. TUI 大文件拆分 — done（render + handlers）
+- **问题**：`tui/render.rs`(2430) 与 `tui/handlers.rs`(1653) 单文件混杂全部视图渲染 / 全部按键处理，导航成本高，是候选 4 同款「上帝模块」。
+- **解决**：沿用 `repo/tasks/` 目录模块模式（目录 + mod 声明，无 pub use 需求——外部只经 trait）。Rust 约束 trait impl 必须单块 → `AppRender`(11 方法) 留 `render/mod.rs`(664)，helpers 按渲染职责拆 `banners/input/popups/help/detail`；`AppHandlers`(5 方法) 留 `handlers/mod.rs`(341)，helpers 按 Mode 变体拆 `normal(共享键组)/actions(任务·Visual·番茄·归档·设置)/confirm(三个确认模式)/input(Tab 补全+输入型 confirm_*)/checklist(ChecklistFocus)`。跨文件入口方法提为 `pub(super)`（仅各自子树可见）——唯一的非移动改动。`crate::tui::render::AppRender` / `handlers::AppHandlers` 路径不变，消费方（mod.rs 的 run 循环、tests.rs）零改动。
+- **验证**：每步独立 commit，fmt/clippy `-D warnings`/201 单测 + 7 集成全绿。
+- **遗留**：`app.rs`(1544) 待评估——状态字段 + 构造器为主，若拆需先收敛字段所有权（与 render/handlers 不同构），另立候选。
+
 ## 下一步建议方向 (Proposed Next Steps)
 
 1. **`horae focus` (或 `horae do`) — Done**

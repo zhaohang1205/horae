@@ -56,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- TUI 大文件拆分（纯移动、行为不变）：`render.rs`（2430 行）拆为
+  `render/{mod,banners,input,popups,help,detail}.rs` 按渲染职责分组，
+  `handlers.rs`（1653 行）拆为 `handlers/{mod,normal,actions,confirm,input,checklist}.rs`
+  按 `Mode` 分组；trait 与其实现留在各自 mod.rs，跨文件入口提为 `pub(super)`。
+  `crate::tui::render::*` / `crate::tui::handlers::*` API 路径不变，消费方零改动。
 - RRULE 单字母简写：`*d`/`*w`/`*m`/`*y` 现在解析为完整的
   `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`，不再把裸 `"d"` 存进数据库。`horae capture`
   也会保留 quick-add 里的 `*rrule` 令牌（此前只有 TUI 生效）。
