@@ -1,9 +1,9 @@
 # 架构工作交接文档
 
-> 用途：开新任务窗口讨论后续架构候选时，无需重复完整上下文。本文件记录已完成工作、剩余候选与关键设计约束。
+> 用途：开新任务窗口讨论后续架构候选时，无需重复完整上下文。本文件记录已完成工作、关键设计约束与拆分判定依据。
 > 基线提交：`c3d0cc6`（repo::mutate seam）
 
-## 已完成（4/5 候选）
+## 已完成（5/5 候选）
 
 ### 1. 排程/循环模块 — `d7a56b5`
 - 新模块 `src/schedule.rs`（顶层，in-process 纯计算，与 `time.rs` 平级）。
@@ -35,8 +35,6 @@
 - **修正原文档**：`delegated_to` 不是死列——capture 写入、TUI 详情显示（`render.rs`），**保留**。
 - 同步：`Task` 模型删 `started_at`；`model/backup.rs::BackupTask` 删 5 个死列，`BACKUP_VERSION` 1→2（备份格式变更，旧版本备份拒绝导入）；`backup.rs` export/import 对应更新。
 - 全测试（112）通过；改动文件 clippy 零警告。
-
-## 剩余候选
 
 ### 5. 金句（quotes）功能单一归属 — Done
 - 现状：功能开关 `quotes_enabled` 散在 7 个文件：`repo/tasks/quotes.rs`（`QUOTE_TAG` + 4 fn）、`tui/app.rs`、`tui/handlers.rs`、`tui/keys.rs`、`tui/ui.rs`、`tui/render.rs`、`migrations/0010`。
