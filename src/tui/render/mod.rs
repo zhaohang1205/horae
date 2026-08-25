@@ -446,7 +446,8 @@ impl<'a> AppRender for App<'a> {
         );
     }
 
-    /// GTD 工作流说明文本（中英文双语）。每个步骤给出含义与对应 horae 视图。
+    /// GTD 工作流说明文本（中英双语）。上半为精简决策树（不含按键），
+    /// 下半为五步法与 horae 视图对照，底部保留常用键提示。
     fn workflow_lines(&self) -> Vec<Line<'static>> {
         use Icon::*;
         let s_title = Style::default()
@@ -458,106 +459,139 @@ impl<'a> AppRender for App<'a> {
         let s_dim = Style::default().fg(self.theme.text_dim);
         let s_map = Style::default().fg(self.theme.hl_fg);
 
-        let mut lines: Vec<Line> = vec![
-            Line::from(Span::styled(
-                crate::tr!(
-                    self.lang,
-                    "GTD (Getting Things Done) 五步法",
-                    "GTD (Getting Things Done) — 5 steps"
-                ),
-                s_title,
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                crate::tr!(
-                    self.lang,
-                    "核心思想：把脑子里的杂事全部倒出，按情境分类，只在合适的时候做合适的行动。",
-                    "Core idea: empty your head, sort by context, and do the right action at the right time."
-                ),
-                s_dim,
-            )),
-            Line::from(""),
-        ];
+        // 局部小工厂：阶段词用强调色，树枝/箭头用暗色，状态名用高亮色，问句用正文色。
+        let step = |s: &'static str| Span::styled(s.to_string(), s_step);
+        let dim = |s: &'static str| Span::styled(s.to_string(), s_dim);
+        let map = |s: &'static str| Span::styled(s.to_string(), s_map);
 
-        let steps: [(&str, &str, Icon, &str, &str); 5] = [
+        let mut lines: Vec<Line> = vec![Line::from(Span::styled(
+            crate::tr!(
+                self.lang,
+                "GTD (Getting Things Done)",
+                "GTD (Getting Things Done)"
+            ),
+            s_title,
+        ))];
+
+        // ── 决策树：捕获 → 理清（可执行？谁做？有固定时间？）→ 完成归档 ──
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            step(crate::tr!(self.lang, "收集", "Capture")),
+            dim(crate::tr!(self.lang, " → ", " → ")),
+            map(crate::tr!(self.lang, "收件箱", "Inbox")),
+        ]));
+        lines.push(Line::from(vec![
+            step(crate::tr!(self.lang, "理清", "Clarify")),
+            Span::from(crate::tr!(self.lang, " ◆ 可执行吗？", " ◆ Actionable?")),
+        ]));
+        lines.push(Line::from(vec![
+            dim(crate::tr!(self.lang, " ├─ 否 → ", " ├─ No → ")),
+            map(crate::tr!(self.lang, "将来也许", "Someday")),
+            dim(" · "),
+            map(crate::tr!(self.lang, "参考资料", "Reference")),
+            dim(" · "),
+            map(crate::tr!(self.lang, "归档", "Archive")),
+        ]));
+        lines.push(Line::from(vec![
+            dim(crate::tr!(self.lang, " └─ 是 ◆ ", " └─ Yes ◆ ")),
+            Span::from(crate::tr!(self.lang, "谁做？", "Who will do it?")),
+        ]));
+        lines.push(Line::from(vec![
+            dim(crate::tr!(
+                self.lang,
+                "     ├─ 别人做 → ",
+                "     ├─ Someone else → "
+            )),
+            map(crate::tr!(self.lang, "等待中", "Waiting")),
+        ]));
+        lines.push(Line::from(vec![
+            dim(crate::tr!(self.lang, "     └─ 我做 ◆ ", "     └─ Me ◆ ")),
+            Span::from(crate::tr!(self.lang, "有固定时间？", "Fixed time?")),
+        ]));
+        lines.push(Line::from(vec![
+            dim(crate::tr!(
+                self.lang,
+                "         ├─ 有 → ",
+                "         ├─ Yes → "
+            )),
+            map(crate::tr!(self.lang, "已排程", "Scheduled")),
+        ]));
+        lines.push(Line::from(vec![
+            dim(crate::tr!(
+                self.lang,
+                "         └─ 无 → ",
+                "         └─ No → "
+            )),
+            map(crate::tr!(self.lang, "下一步行动", "Next action")),
+        ]));
+        lines.push(Line::from(vec![
+            step(crate::tr!(self.lang, "执行", "Engage")),
+            dim(crate::tr!(self.lang, "：做完 → ", ": finished → ")),
+            map(crate::tr!(self.lang, "已完成", "Done")),
+            dim(crate::tr!(self.lang, " / ", " / ")),
+            map(crate::tr!(self.lang, "归档", "Archived")),
+        ]));
+
+        // ── 五步法 × horae 视图对照（此处标注视图数字键）──
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            crate::tr!(self.lang, "五步法 × horae 视图", "5 steps × horae views"),
+            s_title,
+        )));
+
+        let rows: [(Icon, &str, &str, &str); 5] = [
             (
-                crate::tr!(self.lang, "1. 收集 Capture", "1. Capture"),
-                crate::tr!(
-                    self.lang,
-                    "把所有涌上心头的待办、想法、承诺一股脑放进收件箱，先不判断。",
-                    "Dump every todo, idea and commitment into the inbox without judging."
-                ),
                 Inbox,
+                crate::tr!(self.lang, "收集 Capture", "Capture"),
                 crate::tr!(self.lang, "收件箱", "Inbox"),
                 "1",
             ),
             (
-                crate::tr!(self.lang, "2. 理清 Clarify", "2. Clarify"),
-                crate::tr!(
-                    self.lang,
-                    "逐个问：这是什么？是否可执行？不可执行的丢弃 / 留作参考 / 延后。",
-                    "Ask each: what is it? actionable? If not, drop / keep as reference / defer."
-                ),
                 Next,
+                crate::tr!(self.lang, "理清 Clarify", "Clarify"),
                 crate::tr!(self.lang, "下一步", "Next"),
                 "2",
             ),
             (
-                crate::tr!(self.lang, "3. 组织 Organize", "3. Organize"),
+                Scheduled,
+                crate::tr!(self.lang, "组织 Organize", "Organize"),
                 crate::tr!(
                     self.lang,
-                    "把可执行事项按情境分类：下一步 / 等待中 / 已排程 / 将来也许 / 参考资料。",
-                    "Sort actionable items by context: Next / Waiting / Scheduled / Someday / Reference."
+                    "等待/排程/将来/参考",
+                    "Waiting/Scheduled/Someday/Ref"
                 ),
-                Scheduled,
-                crate::tr!(self.lang, "等待/排程/将来/参考", "Waiting/Scheduled/Someday/Ref"),
                 "3,4,5,6",
             ),
             (
-                crate::tr!(self.lang, "4. 回顾 Reflect", "4. Reflect"),
-                crate::tr!(
-                    self.lang,
-                    "每周回顾，清空收件箱、跟进等待事项、重估将来也许，保持系统可信。",
-                    "Weekly review: clear inbox, follow up waiting, re-evaluate someday to keep trust."
-                ),
                 Review,
+                crate::tr!(self.lang, "回顾 Reflect", "Reflect"),
                 crate::tr!(self.lang, "周回顾", "Review"),
                 "r",
             ),
             (
-                crate::tr!(self.lang, "5. 执行 Engage", "5. Engage"),
-                crate::tr!(
-                    self.lang,
-                    "按情境与精力挑选行动，专注推进，完成后归档或标记完成。",
-                    "Pick actions by context and energy; focus, then archive or mark done."
-                ),
                 Done,
-                crate::tr!(self.lang, "已完成 / 归档箱", "Done / Archived"),
+                crate::tr!(self.lang, "执行 Engage", "Engage"),
+                crate::tr!(self.lang, "已完成/归档", "Done/Archived"),
                 "7,8",
             ),
         ];
-
-        for (title, desc, icon, view_name, key) in steps {
+        for (i, (icon, name, view_name, keys)) in rows.iter().enumerate() {
             lines.push(Line::from(vec![
                 Span::styled(
-                    format!("{} ", self.icon(icon)),
+                    format!("{} ", self.icon(*icon)),
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(title, s_step),
-            ]));
-            lines.push(Line::from(Span::styled(format!("   {}", desc), s_dim)));
-            lines.push(Line::from(vec![
-                Span::styled("   ", s_dim),
+                Span::styled(format!("{}. {}", i + 1, name), s_step),
+                Span::styled(" → ", s_dim),
+                Span::styled(view_name.to_string(), s_map),
                 Span::styled(
-                    crate::tr!(self.lang, "→ horae 视图: ", "→ horae view: "),
+                    crate::tr!(self.lang, "  (键 {})", "  (key {})", keys),
                     s_dim,
                 ),
-                Span::styled(view_name.to_string(), s_map),
-                Span::styled(crate::tr!(self.lang, "  (键 {})", "  (key {})", key), s_dim),
             ]));
-            lines.push(Line::from(""));
         }
 
+        lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             crate::tr!(
                 self.lang,
