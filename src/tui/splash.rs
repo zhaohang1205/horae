@@ -285,6 +285,7 @@ pub(super) fn show_splash(conn: &rusqlite::Connection) -> anyhow::Result<()> {
                 splash_png.as_deref(),
                 lang,
                 is_kitty_terminal(),
+                crate::time::boot_elapsed_ms(),
             )?;
             stdout.flush()?;
             let mut redraw = false;
@@ -398,6 +399,7 @@ fn draw_frame_with<W: std::io::Write>(
     png: Option<&[u8]>,
     lang: Lang,
     kitty: bool,
+    boot_ms: Option<u128>,
 ) -> anyhow::Result<bool> {
     use crossterm::{cursor, ExecutableCommand};
 
@@ -458,12 +460,20 @@ fn draw_frame_with<W: std::io::Write>(
     write_centered(out, cols, lay.quote_y, "\x1b[1m", TAGLINE, PEACH)?;
     write_centered(out, cols, lay.quote_y + 1, "", QUOTE_AUTHOR, OVERLAY0)?;
 
-    // 5. 提示语（闪烁暗色）+ F6 提示；版本与作者（底部居中、暗）
+    // 5. 提示语（闪烁暗色）+ F6 提示；版本、作者与启动用时（底部居中、暗）
     let (prompt, hint) = prompts(lang);
     let prompt_y = rows.saturating_sub(BOTTOM_MARGIN + PROMPT_H);
     write_centered(out, cols, prompt_y, "\x1b[5m", prompt, OVERLAY0)?;
     write_centered(out, cols, prompt_y + 1, "", hint, OVERLAY0)?;
-    let version = format!("v{} · by zhaohang1205", env!("CARGO_PKG_VERSION"));
+    let mut version = format!("v{} · by zhaohang1205", env!("CARGO_PKG_VERSION"));
+    if let Some(ms) = boot_ms {
+        version.push_str(&crate::tr!(
+            lang,
+            " · 启动用时 {}ms",
+            " · started in {}ms",
+            ms
+        ));
+    }
     write_centered(out, cols, rows.saturating_sub(1), "", &version, OVERLAY0)?;
 
     Ok(use_kitty)
@@ -648,13 +658,14 @@ mod splash_tests {
         // png=None 时无论环境如何都不会启用 Kitty 图，应安全绘制整帧：
         // 字标 + 副标题 + 名言 + 作者，且不出现悬空分割线。
         let mut buf = std::io::Cursor::new(Vec::new());
-        let drew = draw_frame_with(&mut buf, 80, 24, None, Lang::Zh, false).unwrap();
+        let drew = draw_frame_with(&mut buf, 80, 24, None, Lang::Zh, false, None).unwrap();
         assert!(!drew);
         let s = String::from_utf8(buf.into_inner()).unwrap();
         assert!(s.contains("█"), "应绘制 HORAE 艺术字");
         assert!(s.contains(BRAND_SUBTITLE), "回退时应绘制品牌副标题");
         assert!(s.contains(TAGLINE), "应绘制名言");
         assert!(s.contains(QUOTE_AUTHOR), "应署名作者");
+        assert!(!s.contains("启动用时"), "未打点时不应出现启动用时段");
         assert!(!s.contains('─'), "无图回退不应出现悬空分割线");
     }
 
@@ -663,7 +674,8 @@ mod splash_tests {
         // 注入合法 PNG 头并直接声明 kitty 能力，验证有图路径（不经环境变量，避免竞争）。
         let png = fake_png(2814, 1536);
         let mut buf = std::io::Cursor::new(Vec::new());
-        let drew = draw_frame_with(&mut buf, 100, 30, Some(&png), Lang::Zh, true).unwrap();
+        let drew =
+            draw_frame_with(&mut buf, 100, 30, Some(&png), Lang::Zh, true, Some(42)).unwrap();
 
         assert!(drew, "kitty 可用且 PNG 合法时应绘制横幅");
         let s = String::from_utf8(buf.into_inner()).unwrap();
@@ -673,5 +685,17 @@ mod splash_tests {
             !s.contains(BRAND_SUBTITLE),
             "有图时 hero 已是图片，不应重复副标题"
         );
+    }
+
+    #[test]
+    fn draw_frame_shows_boot_ms_bilingual() {
+        // 打点后底部版本行应携带启动用时；中英文措辞随语言切换。
+        for (lang, needle) in [(Lang::Zh, "启动用时 42ms"), (Lang::En, "started in 42ms")] {
+            let mut buf = std::io::Cursor::new(Vec::new());
+            draw_frame_with(&mut buf, 80, 24, None, lang, false, Some(42)).unwrap();
+            let s = String::from_utf8(buf.into_inner()).unwrap();
+            assert!(s.contains("by zhaohang1205"), "版本行应存在");
+            assert!(s.contains(needle), "{lang:?} 应显示「{needle}」");
+        }
     }
 }

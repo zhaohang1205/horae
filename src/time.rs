@@ -8,6 +8,19 @@ pub fn now_ms() -> i64 {
     Utc::now().timestamp_millis()
 }
 
+/// Process boot instant, set once by `main` before any work.
+static BOOT: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// 记录进程启动时刻（`main` 第一行调用；重复调用只保留第一次）。
+pub fn mark_boot() {
+    let _ = BOOT.set(std::time::Instant::now());
+}
+
+/// 距 [`mark_boot`] 的毫秒数；未打点（如单测直接构造）时为 `None`。
+pub fn boot_elapsed_ms() -> Option<u128> {
+    BOOT.get().map(|t| t.elapsed().as_millis())
+}
+
 /// Local-day boundaries in UTC ms for a day offset (0 = today, 1 = tomorrow).
 /// Returns `(start, end)` where `start` is local midnight and `end` is
 /// 23:59:59.999 of the same day (both inclusive).

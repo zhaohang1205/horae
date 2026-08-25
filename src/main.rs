@@ -18,6 +18,7 @@ use anyhow::Result;
 use clap::Parser;
 
 fn main() -> Result<()> {
+    time::mark_boot();
     let cli = cli::Cli::parse();
     if let Some(cli::Command::Completions { shell }) = cli.command {
         cli::Cli::print_completions(shell);
