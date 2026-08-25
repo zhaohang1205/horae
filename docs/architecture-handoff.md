@@ -79,6 +79,13 @@
 - **解决**：拆出 `tui/splash.rs`（PNG 加载、Kitty 图形协议、base64、按键等待 + 自带 splash_tests；仅 `show_splash` 为 `pub(super)`）与 `tui/tests.rs`（作为 `tui` 的子模块声明，`use super::*` 对父模块私有项的可见性不变，迁移零改动）。`mod.rs` 收敛为 ~210 行：模块声明、label/row 辅助、`run`/`run_app`。顺带把悬空在开屏函数上的 `run` 文档注释归位。
 - **遗留**：TUI 剩余大文件为 `render.rs`(2116) / `app.rs`(1500) / `handlers.rs`(1437)，是下一个拆分候选。
 
+### 11. 测试安全网与守护进程健壮性（Phase 0–2）
+- **集成测试**：新增顶层 `tests/cli.rs`（assert_cmd），在隔离 `HORAE_CONFIG_DIR` 下跑真实二进制，锁 CLI 外部契约：capture→流转→done、循环任务锚点推进、archive/restore/purge 门禁、前缀/标题解析、export/import 跨配置目录往返、log。
+- **顺带修真实缺陷**：AGENTS.md 宣称的「精确标题解析」此前只在 `watch.rs::resolve_ref` 实现，主链路 `resolve_id` 不支持。已按文档契约把标题回退收进 `resolve_id`（精确 id > 唯一前缀 > 唯一精确标题，仅未归档；歧义报错），`resolve_ref` 退化为委托。归档任务只能按 id 寻址。
+- **备份路径补测**：`repo/backup.rs` 自建测试模块——checklist 逐字段往返（顺序+勾选态）、settings merge/replace 双模式、合并模式跳过任务不重复写时间线、pomodoro 备份块存在性与 `pomo_restored` 标记。`ChecklistItem` 补派生 `PartialEq/Eq`。
+- **watch.rs 容错降级**：`process_once` 四阶段独立容错（`stage!` 宏收集首错）；队列 lossy 读字节防畸形行丢队列；提醒文件失败跳过+下轮重试（key 不记去重状态）；清除内存缓冲上的 `writeln!.unwrap()`。新增 3 个降级测试（torn UTF-8 / 阶段隔离 / 提醒重试）。
+- 全量测试 201 单测 + 7 集成全绿；clippy `-D warnings` 干净。
+
 ## 下一步建议方向 (Proposed Next Steps)
 
 1. **`horae focus` (或 `horae do`) — Done**

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 端到端 CLI 集成测试（`tests/cli.rs`）：在隔离的 `HORAE_CONFIG_DIR` 下驱动真实
+  二进制，锁定核心契约——capture→流转→done 全链路、循环任务打卡推进锚点、
+  归档/恢复/清除门禁、id 前缀与精确标题解析、export/import 跨库往返、日志命令。
+- 备份路径补测试：`repo::backup` 新增检查单逐字段往返、设置表 merge/replace
+  双模式还原、合并模式下跳过任务不产生重复时间线、pomodoro 备份块存在性与
+  导入标记等用例。
+- `horae watch` 容错降级：`process_once` 四个阶段相互隔离（单阶段 I/O 失败
+  不阻断其余阶段）；队列文件按字节 lossy 读取（畸形行不再让整份队列丢失）；
+  提醒文件写失败跳过并在下一轮自动重试——常驻守护进程不再因单个文件错误死亡。
+
 - `horae stats` 控制台看板，使用 Catppuccin 摩卡配色的“时间女神” ASCII 像素艺术展示今日番茄钟进度与任务统计。
 - TUI 启动专属“开屏页”（Splash Screen）：复用 `stats` 绝美画面与统计数据，并伴随随机 GTD 哲思标语（“大脑是用来思考的，记忆交给 HORAE”等），增强操作仪式感。
 - 完整备份与还原：`horae export [--file PATH]` 把全部任务（含所有列）、
@@ -64,6 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- CLI 的任务引用解析与文档对齐：`resolve_id` 现在按「精确 id > 唯一前缀 >
+  唯一精确标题（仅未归档任务）」回退，歧义标题报错；此前标题解析只存在于
+  `watch.rs`，主命令链路并不支持。
 - Checklist-adding keybinding was unreachable (`Shift+K` shadowed by the
   Tomorrow view). `Shift+C` now adds checklist items, and the pomodoro-length
   configuration moved to `[`; help/syntax panels updated.
