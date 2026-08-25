@@ -307,3 +307,134 @@ pub fn to_json(data: &BackupData) -> Result<String> {
 pub fn from_json(s: &str) -> Result<BackupData> {
     Ok(serde_json::from_str(s)?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::pomodoro::{Phase, PomoState};
+    use crate::repo::settings;
+    use crate::repo::state::set_test_override;
+    use crate::repo::tasks::{self, CaptureInput};
+    use crate::testutil::test_conn;
+
+    fn seed_task(conn: &Connection, title: &str) -> crate::model::task::Task {
+        tasks::create_capture(
+            conn,
+            &CaptureInput {
+                title: title.into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    }
+
+    /// 导出 → JSON 序列化往返（模拟落盘文件）。
+    fn export_roundtrip(conn: &Connection) -> BackupData {
+        let data = export_all(conn).unwrap();
+        from_json(&to_json(&data).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn checklist_survives_backup_roundtrip() {
+        let (_dir, conn) = test_conn();
+        set_test_override();
+        let t = seed_task(&conn, "带检查单的任务");
+        let first = tasks::add_checklist_item(&conn, &t.id, "第一步")
+            .unwrap()
+            .unwrap();
+        let _second = tasks::add_checklist_item(&conn, &t.id, "第二步")
+            .unwrap()
+            .unwrap();
+        tasks::toggle_checklist_item(&conn, &t.id, &first).unwrap();
+
+        let original = tasks::get(&conn, &t.id).unwrap().checklist.clone();
+        assert_eq!(original.len(), 2);
+        assert!(original[0].done && !original[1].done);
+
+        // 还原进全新库，检查单逐字段保真
+        let (_dir2, conn2) = test_conn();
+        set_test_override();
+        import_all(&conn2, &export_roundtrip(&conn), false).unwrap();
+        let restored = tasks::get(&conn2, &t.id).unwrap().checklist;
+        assert_eq!(restored, original, "条目顺序与勾选状态都应还原");
+    }
+
+    #[test]
+    fn settings_survive_merge_and_replace_import() {
+        let (_dir, conn) = test_conn();
+        set_test_override();
+        settings::set(&conn, "lang", "en").unwrap();
+        settings::set(&conn, "icons", "nerd").unwrap();
+
+        let data = export_roundtrip(&conn);
+        assert!(data
+            .settings
+            .iter()
+            .any(|s| s.key == "lang" && s.value == "en"));
+
+        // merge：全新库里设置被 upsert 进来
+        let (_dir2, conn2) = test_conn();
+        set_test_override();
+        let stats = import_all(&conn2, &data, false).unwrap();
+        assert_eq!(stats.settings_imported, data.settings.len());
+        assert_eq!(
+            settings::get(&conn2, "lang").unwrap().as_deref(),
+            Some("en")
+        );
+
+        // replace：先清空设置表再恢复，最终与备份一致
+        settings::set(&conn2, "lang", "zh").unwrap();
+        import_all(&conn2, &data, true).unwrap();
+        assert_eq!(
+            settings::get(&conn2, "lang").unwrap().as_deref(),
+            Some("en")
+        );
+        assert_eq!(
+            settings::get(&conn2, "icons").unwrap().as_deref(),
+            Some("nerd")
+        );
+    }
+
+    #[test]
+    fn merge_never_duplicates_events_of_skipped_tasks() {
+        let (_dir, conn) = test_conn();
+        set_test_override();
+        let t = seed_task(&conn, "流转过几次");
+        tasks::transition(&conn, &t.id, crate::model::task::Status::Next).unwrap();
+        let events_before = tasks::events(&conn, &t.id).unwrap().len();
+
+        let data = export_roundtrip(&conn);
+        let stats = import_all(&conn, &data, false).unwrap();
+        assert!(stats.tasks_skipped >= 1, "已存在的任务应整体跳过");
+        assert_eq!(
+            tasks::events(&conn, &t.id).unwrap().len(),
+            events_before,
+            "跳过的任务不应产生重复时间线"
+        );
+    }
+
+    #[test]
+    fn pomodoro_block_is_exported_and_flagged_on_import() {
+        // 注意：TEST_OVERRIDE 下 JsonStateStore 为空操作，这里只验证
+        // 备份块的存在性与导入标记；文件级还原由 CLI 集成测试覆盖。
+        let (_dir, conn) = test_conn();
+        set_test_override();
+        let data = export_all(&conn).unwrap();
+        assert!(
+            matches!(
+                &data.pomodoro,
+                Some(PomoState {
+                    phase: Phase::Idle,
+                    ..
+                })
+            ),
+            "导出应包含 pomodoro 状态块"
+        );
+
+        let (_dir2, conn2) = test_conn();
+        set_test_override();
+        let stats =
+            import_all(&conn2, &from_json(&to_json(&data).unwrap()).unwrap(), false).unwrap();
+        assert!(stats.pomo_restored, "导入应报告 pomo 状态已恢复");
+    }
+}

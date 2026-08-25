@@ -45,7 +45,7 @@ impl FromStr for Status {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChecklistItem {
     pub id: String,
     pub title: String,
