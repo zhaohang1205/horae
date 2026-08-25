@@ -15,6 +15,8 @@ fn kc(k: KeyCode) -> KeyEvent {
 }
 
 fn seed(conn: &Connection) {
+    // 既有测试假设 Normal 模式起步：显式关掉"启动即快速录入"（生产默认开启）。
+    crate::repo::settings::set(conn, "start_capture", "0").unwrap();
     let mk = |title: &str, status: task::Status, tags: &[&str]| {
         tasks::create_capture(
             conn,
@@ -34,6 +36,13 @@ fn seed(conn: &Connection) {
     mk("Pay taxes", task::Status::Waiting, &["work", "p2"]);
     mk("Plan vacation", task::Status::Someday, &["home"]);
     mk("Finish report", task::Status::Done, &[]);
+}
+
+/// 构造 Normal 模式起步的测试用 App：显式关闭“启动即快速录入”
+/// （生产环境该开关默认开启）。
+fn app_normal(conn: &Connection) -> App<'_> {
+    crate::repo::settings::set(conn, "start_capture", "0").unwrap();
+    App::new(conn).unwrap()
 }
 
 fn snap(term: &Terminal<TestBackend>) -> String {
@@ -63,7 +72,7 @@ fn drive_tui() {
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
     seed(&conn);
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
     let mut out = std::fs::File::create("/tmp/horae_tui_frames.txt").unwrap();
     let frame = |label: &str,
@@ -302,7 +311,7 @@ fn empty_db_shows_guide() {
     crate::repo::state::set_test_override();
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
     term.draw(|f| app.render(f)).unwrap();
     let raw = snap(&term);
@@ -369,7 +378,7 @@ fn today_tomorrow_views() {
     )
     .unwrap();
 
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None; // 关闭启动时的今日任务弹窗，避免吞掉按键
 
     let collect =
@@ -440,7 +449,7 @@ fn checked_in_habit_stays_in_today_with_next_time() {
     // 今日打卡 → 锚点推进到下次 occurrence
     tasks::transition(&conn, &rec.id, task::Status::Done).unwrap();
 
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
     app.handle_key(key('J')).unwrap(); // 今日视图
     let row = app
@@ -487,7 +496,7 @@ fn enter_opens_organize_on_scheduled() {
     )
     .unwrap();
 
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.handle_key(key('4')).unwrap(); // Scheduled 视图
     let row = app
         .items
@@ -541,7 +550,7 @@ fn a_always_captures_and_e_edits_selected_task() {
     )
     .unwrap();
 
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     // Inbox 视图选中该任务，按 a = 一律新建捕获，绝不修改选中任务
     app.handle_key(key('a')).unwrap();
     assert_eq!(app.mode, Mode::Capturing, "a 打开快速录入");
@@ -594,7 +603,7 @@ fn organize_edit_sets_time_tags_rrule() {
     )
     .unwrap();
 
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.handle_key(kc(KeyCode::Enter)).unwrap();
     assert_eq!(app.mode, Mode::Capturing);
     assert!(app.input.contains("@health"), "预填已有标签: {}", app.input);
@@ -642,7 +651,7 @@ fn missed_habit_shows_overdue_in_today_view() {
     .unwrap();
     tasks::schedule(&conn, &rec.id, slot, None, Some("FREQ=DAILY".into())).unwrap();
 
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
     app.handle_key(key('J')).unwrap();
     let row = app
@@ -684,7 +693,7 @@ fn detail_planned_shows_next_occurrence_for_habit() {
     .unwrap();
     tasks::schedule(&conn, &rec.id, anchor, None, Some("FREQ=DAILY".into())).unwrap();
 
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
     app.handle_key(key('4')).unwrap(); // Scheduled 视图
     let idx = app
@@ -743,7 +752,7 @@ fn x_does_not_double_check_in_habit() {
     .unwrap();
     tasks::transition(&conn, &rec.id, task::Status::Done).unwrap();
 
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.handle_key(key('4')).unwrap(); // Scheduled 视图
     let row = app
         .items
@@ -849,7 +858,7 @@ fn recurring_with_due_only_reschedules_on_done() {
     );
 
     // 明日视图应仍包含它
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
     app.handle_key(key('K')).unwrap();
     assert!(app.items.iter().any(|r| r.title == "standup"));
@@ -859,7 +868,7 @@ fn recurring_with_due_only_reschedules_on_done() {
 fn next_view_cycles_full_ring() {
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
 
     let ring = [
@@ -916,7 +925,7 @@ fn quotes_feature_toggle_and_shortcut() {
     )
     .unwrap();
 
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
     // 默认关闭
     assert!(!app.quotes.enabled, "金句功能默认关闭");
@@ -929,8 +938,8 @@ fn quotes_feature_toggle_and_shortcut() {
 
     // F7 启用 + 持久化
     app.handle_key(kc(KeyCode::F(7))).unwrap(); // open popup
-    for _ in 0..4 {
-        app.handle_key(kc(KeyCode::Up)).unwrap(); // move from 0 to 5 (0->8->7->6->5)
+    for _ in 0..5 {
+        app.handle_key(kc(KeyCode::Up)).unwrap(); // move from 0 to 5 (0->9->8->7->6->5)
     }
     app.handle_key(key(' ')).unwrap(); // space toggles 5 (Quotes)
     app.handle_key(kc(KeyCode::Esc)).unwrap(); // close popup
@@ -1025,15 +1034,15 @@ fn quotes_feature_toggle_and_shortcut() {
 
     // 重启恢复启用状态
     drop(app);
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
     assert!(app.quotes.enabled, "重启后恢复启用");
 
     // F7 停用：若在金句视图则跳回收件箱
     app.handle_key(key('0')).unwrap();
     app.handle_key(kc(KeyCode::F(7))).unwrap();
-    for _ in 0..4 {
-        app.handle_key(kc(KeyCode::Up)).unwrap(); // move to index 5 (0->8->7->6->5)
+    for _ in 0..5 {
+        app.handle_key(kc(KeyCode::Up)).unwrap(); // move to index 5 (0->9->8->7->6->5)
     }
     app.handle_key(key(' ')).unwrap();
     app.handle_key(kc(KeyCode::Esc)).unwrap();
@@ -1056,7 +1065,7 @@ fn settings_view_manages_profiles() {
     crate::testutil::with_test_config_dir(|| {
         let mut conn = Connection::open(":memory:").unwrap();
         migrate::run(&mut conn).unwrap();
-        let mut app = App::new(&conn).unwrap();
+        let mut app = app_normal(&conn);
         app.popup = None;
 
         // 进入设置视图：默认 profile 应在列表中
@@ -1142,7 +1151,7 @@ fn quote_tag_is_plain_when_feature_off() {
         },
     )
     .unwrap();
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
     app.handle_key(key('6')).unwrap(); // Reference 视图
     assert!(
@@ -1458,7 +1467,7 @@ fn done_view_shows_completion_not_overdue() {
     )
     .unwrap();
     tasks::transition(&conn, &t.id, task::Status::Done).unwrap();
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
     app.handle_key(key('7')).unwrap(); // Done 视图
     let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
@@ -1502,7 +1511,7 @@ fn archived_view_shows_reason_not_status_or_overdue() {
     let arch = tasks::archive(&conn, &del.id).unwrap();
     assert_eq!(arch.archive_reason.as_deref(), Some("deleted"));
 
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
     app.handle_key(key('8')).unwrap(); // 归档箱视图
     assert_eq!(app.view, View::Archived);
@@ -1539,7 +1548,7 @@ fn archived_view_can_purge_task() {
     .unwrap();
     tasks::archive(&conn, &t.id).unwrap();
 
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
     app.handle_key(key('8')).unwrap(); // 归档箱视图
     assert_eq!(app.view, View::Archived);
@@ -1589,7 +1598,7 @@ fn archived_view_can_purge_multiple_in_visual_mode() {
         tasks::archive(&conn, &t.id).unwrap();
     }
 
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
     app.handle_key(key('8')).unwrap(); // 归档箱视图
                                        // 归档按 archived_at DESC 排序，但快速连建三条可能落同一毫秒导致并列序不定，
@@ -1642,7 +1651,7 @@ fn normal_mode_space_batch_ops_use_all_selected() {
         tasks::archive(&conn, &t.id).unwrap();
     }
 
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
     app.handle_key(key('8')).unwrap(); // 归档箱视图
     app.handle_key(key('l')).unwrap(); // 焦点移到列表栏（否则 j/k 是切视图）
@@ -1688,7 +1697,7 @@ fn normal_mode_space_batch_ops_use_all_selected() {
         )
         .unwrap();
     }
-    let mut app2 = App::new(&conn2).unwrap();
+    let mut app2 = app_normal(&conn2);
     app2.popup = None;
     app2.handle_key(key('2')).unwrap(); // Next 视图
     app2.handle_key(key('l')).unwrap(); // 焦点移到列表栏
@@ -1731,7 +1740,7 @@ fn archived_view_can_restore_multiple_selected() {
         tasks::archive(&conn, &t.id).unwrap();
     }
 
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
     app.handle_key(key('8')).unwrap(); // 归档箱视图
     app.handle_key(key('l')).unwrap(); // 焦点移到列表栏
@@ -1805,7 +1814,7 @@ fn lang_and_theme_toggle_persist_to_settings() {
     migrate::run(&mut conn).unwrap();
 
     // 默认中文 + 深色主题
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
     assert_eq!(app.lang, crate::i18n::Lang::Zh);
     assert!(app.theme.is_dark, "默认 Catppuccin Mocha 深色");
@@ -1842,7 +1851,7 @@ fn lang_and_theme_toggle_persist_to_settings() {
 
     // 模拟重启：从 DB 恢复语言与主题
     drop(app);
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
     assert_eq!(app.lang, crate::i18n::Lang::En, "重启后恢复英文");
     assert!(!app.theme.is_dark, "重启后恢复亮色主题");
@@ -1853,7 +1862,7 @@ fn shift_c_enters_checklist_adding_and_pomo_config_moved_to_bracket() {
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
     seed(&conn);
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
 
     // Shift+C（Char('C')）→ 新增检查单（不再被番茄钟配置遮蔽）
@@ -1872,7 +1881,7 @@ fn input_cursor_edits_insert_delete_and_move() {
     crate::repo::state::set_test_override();
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
 
     // 打开快速录入：光标默认在末尾。
     app.handle_key(key('a')).unwrap();
@@ -1931,7 +1940,7 @@ fn input_cursor_edits_mid_string_for_full_edit() {
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
     seed(&conn);
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
 
     // 进入全量编辑（e = 一句话编辑器），预填当前任务，光标在末尾。
@@ -1954,7 +1963,7 @@ fn tab_completion_works_at_cursor() {
     crate::repo::state::set_test_override();
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
 
     app.handle_key(key('a')).unwrap();
     assert_eq!(app.mode, Mode::Capturing);
@@ -2027,7 +2036,7 @@ fn completion_extends_to_time_and_rrule() {
     crate::repo::state::set_test_override();
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
 
     app.handle_key(key('a')).unwrap();
 
@@ -2062,7 +2071,7 @@ fn capture_rejects_invalid_rrule_and_preserves_input() {
     crate::repo::state::set_test_override();
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
 
     app.handle_key(key('a')).unwrap();
     assert_eq!(app.mode, Mode::Capturing);
@@ -2107,7 +2116,7 @@ fn visual_mode_does_not_render_input_overlay() {
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
     seed(&conn);
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
 
     let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
@@ -2132,7 +2141,7 @@ fn space_toggles_and_ctrl_selects_non_contiguous() {
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
     seed(&conn);
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
 
     // 普通模式下 Space 切换当前行加入选择集。
@@ -2187,7 +2196,7 @@ fn confirm_dialog_renders_centered_for_batch_ops() {
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
     seed(&conn);
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.popup = None;
 
     let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
@@ -2231,7 +2240,7 @@ fn module_toggle_popup_navigates_and_persists() {
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
     seed(&conn);
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     assert!(!app.show_help);
 
     // F7 打开模块开关弹层，初始 idx=0（splash）
@@ -2255,12 +2264,12 @@ fn module_toggle_popup_navigates_and_persists() {
     let reloaded = crate::repo::modules::ModuleVisibility::load(app.conn);
     assert!(!reloaded.splash);
 
-    // j 向下循环导航（0 → 1），k 反向且在 0 处回绕到 8（最后一项：图标）
+    // j 向下循环导航（0 → 1），k 反向且在 0 处回绕到 9（最后一项：启动即快速录入）
     app.handle_key(key('j')).unwrap();
     assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(1)));
     app.popup = Some(crate::tui::app::Popup::ModuleToggles(0));
     app.handle_key(key('k')).unwrap();
-    assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(8)));
+    assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(9)));
 
     // Esc 关闭弹层
     app.handle_key(kc(KeyCode::Esc)).unwrap();
@@ -2273,7 +2282,7 @@ fn disabled_module_blocks_digit_view_and_quotes_toggle_off_returns_to_inbox() {
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
     seed(&conn);
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
 
     // 关闭 reference 模块后按 '6' 不应切视图
     app.handle_key(kc(KeyCode::F(7))).unwrap(); // idx 0 splash
@@ -2305,7 +2314,7 @@ fn icons_toggle_persists_and_switches_style() {
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
     seed(&conn);
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
 
     use crate::tui::icons::IconStyle;
 
@@ -2343,12 +2352,86 @@ fn icons_toggle_persists_and_switches_style() {
 }
 
 #[test]
+fn start_capture_default_on_enters_capturing() {
+    crate::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+
+    // 无 settings 记录 = 默认开启：启动直接进入快速录入，输入为空。
+    let mut app = App::new(&conn).unwrap();
+    assert!(app.start_in_capture, "缺省应视为开启");
+    assert_eq!(app.mode, Mode::Capturing, "启动即快速录入");
+    assert!(app.input.is_empty(), "空输入等待录入");
+
+    // Esc 退出后回到 Normal 列表浏览。
+    app.handle_key(kc(KeyCode::Esc)).unwrap();
+    assert_eq!(app.mode, Mode::Normal);
+
+    // 显式写 "0" 后启动保持 Normal（既有行为）。
+    crate::repo::settings::set(&conn, "start_capture", "0").unwrap();
+    let app = App::new(&conn).unwrap();
+    assert!(!app.start_in_capture);
+    assert_eq!(app.mode, Mode::Normal, "显式关闭后 Normal 起步");
+}
+
+#[test]
+fn start_capture_toggle_via_module_popup_persists() {
+    crate::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    seed(&conn);
+    let mut app = app_normal(&conn);
+
+    // F7 打开弹层，j*9 到第 10 项（idx 9：启动即快速录入），space 打开。
+    app.handle_key(kc(KeyCode::F(7))).unwrap();
+    for _ in 0..9 {
+        app.handle_key(key('j')).unwrap();
+    }
+    assert_eq!(
+        app.popup,
+        Some(crate::tui::app::Popup::ModuleToggles(9)),
+        "j*9 应停在“启动即快速录入”项"
+    );
+    app.handle_key(key(' ')).unwrap();
+    assert!(app.start_in_capture, "space 应翻转开关");
+    assert_eq!(
+        crate::repo::settings::get(app.conn, "start_capture")
+            .unwrap()
+            .as_deref(),
+        Some("1"),
+        "应持久化到 settings 表"
+    );
+
+    // 重新构造 App 应以 Capturing 起步；Esc 退出后再经弹层关掉则回到 Normal。
+    drop(app.popup.take());
+    let mut app2 = App::new(&conn).unwrap();
+    assert_eq!(app2.mode, Mode::Capturing, "重启后保持开启状态");
+    assert!(app2.start_in_capture);
+
+    app2.handle_key(kc(KeyCode::Esc)).unwrap();
+    assert_eq!(app2.mode, Mode::Normal);
+    app2.handle_key(kc(KeyCode::F(7))).unwrap();
+    for _ in 0..9 {
+        app2.handle_key(key('j')).unwrap();
+    }
+    app2.handle_key(key(' ')).unwrap();
+    assert!(!app2.start_in_capture, "再次 space 关闭");
+    assert_eq!(
+        crate::repo::settings::get(app2.conn, "start_capture")
+            .unwrap()
+            .as_deref(),
+        Some("0"),
+        "关闭也应持久化"
+    );
+}
+
+#[test]
 fn help_drawer_navigation_scrolls_and_closes() {
     crate::repo::state::set_test_override();
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
     seed(&conn);
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.handle_key(key('?')).unwrap();
     assert!(app.show_help);
 
@@ -2371,7 +2454,7 @@ fn system_keys_toggle_bar_syntax_and_selection() {
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
     seed(&conn);
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
 
     // F2 快捷键条
     let before = app.show_shortcut_bar;
@@ -2399,7 +2482,7 @@ fn esc_cascades_through_visual_filter_and_selection() {
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
     seed(&conn);
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
 
     // 1) 可视模式 Esc → 回 Normal 并清空选择
     app.handle_key(key('v')).unwrap();
@@ -2432,7 +2515,7 @@ fn archived_view_restore_single_and_batch() {
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
     seed(&conn);
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     app.pane = Pane::Center;
 
     // 归档两个任务后进入 Archived 视图（数字 8）
@@ -2488,7 +2571,7 @@ fn pane_keys_cycle_and_clamp_between_three_columns() {
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
     seed(&conn);
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
 
     // l 从 Left → Center → Right → 停在 Right（钳位）
     app.pane = Pane::Left;
@@ -2514,7 +2597,7 @@ fn render_views_smoke_cover_disabled_modules_and_popups() {
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
     seed(&conn);
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
 
     let mut draw_contains = |app: &mut App, needle: &str| -> bool {
@@ -2566,7 +2649,7 @@ fn checklist_manage_toggle_delete_reorder_rename() {
     tasks::add_checklist_item(&conn, &t.id, "clothes").unwrap();
     tasks::add_checklist_item(&conn, &t.id, "toothbrush").unwrap();
 
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     assert_eq!(app.selected, 0, "唯一任务应被选中");
 
     // Tab 进入检查单逐项管理
@@ -2652,7 +2735,7 @@ fn checklist_all_done_shows_complete_hint() {
         .unwrap();
     tasks::toggle_checklist_item(&conn, &t.id, &a).unwrap();
 
-    let mut app = App::new(&conn).unwrap();
+    let mut app = app_normal(&conn);
     let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
     term.draw(|f| app.render(f)).unwrap();
     let frame = norm(&snap(&term));

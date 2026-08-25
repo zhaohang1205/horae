@@ -259,6 +259,8 @@ pub(crate) struct App<'a> {
     pub(crate) pending_profile_delete: Option<String>,
     /// 检查单管理（ChecklistFocus）模式下的光标位置（指向当前任务的某一项）。
     pub(crate) checklist_cursor: Option<usize>,
+    /// 启动即进入快速录入（settings 键 `start_capture`，默认开启）。
+    pub(crate) start_in_capture: bool,
 }
 
 impl<'a> App<'a> {
@@ -283,6 +285,14 @@ impl<'a> App<'a> {
         let quotes = crate::repo::quotes::Quotes::load(conn);
         let modules = crate::repo::modules::ModuleVisibility::load(conn);
         let icon_style = crate::tui::icons::IconStyle::load(conn);
+        // 启动即快速录入：缺省视为开启（settings 显式写 "0" 才关闭）。
+        let start_in_capture = !matches!(
+            crate::repo::settings::get(conn, "start_capture")
+                .ok()
+                .flatten()
+                .as_deref(),
+            Some("0")
+        );
         let mut app = App {
             conn,
             view: View::Inbox,
@@ -331,6 +341,7 @@ impl<'a> App<'a> {
             profile_name: String::new(),
             pending_profile_delete: None,
             checklist_cursor: None,
+            start_in_capture,
         };
         app.refresh()?;
 
@@ -368,11 +379,22 @@ impl<'a> App<'a> {
             }
         }
 
-        if !todays.is_empty() {
+        if !todays.is_empty() && !start_in_capture {
             app.popup = Some(Popup::TodayTasks(todays));
         }
 
         app.load_detail();
+        if start_in_capture {
+            // 启动即快速录入：空输入，光标就位，并抑制今日弹层让输入框直达。
+            app.input.clear();
+            app.set_mode(Mode::Capturing);
+            app.status_message = crate::tr!(
+                lang,
+                "快速录入: @标签 ~时间 *周期 (Esc 返回列表)",
+                "Quick capture: @tag ~time *rrule (Esc for list)"
+            )
+            .into();
+        }
         app.switch_to_english_ime();
         Ok(app)
     }

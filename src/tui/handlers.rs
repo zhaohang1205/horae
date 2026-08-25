@@ -32,11 +32,11 @@ impl<'a> AppHandlers for App<'a> {
                             // close, implicitly handled because popup is taken and not put back
                         }
                         KeyCode::Char('j') | KeyCode::Down => {
-                            idx = (idx + 1) % 9;
+                            idx = (idx + 1) % 10;
                             self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
                         }
                         KeyCode::Char('k') | KeyCode::Up => {
-                            idx = idx.checked_sub(1).unwrap_or(8);
+                            idx = idx.checked_sub(1).unwrap_or(9);
                             self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
                         }
                         KeyCode::Char(' ') => {
@@ -109,6 +109,15 @@ impl<'a> AppHandlers for App<'a> {
                                         self.conn,
                                         "icons",
                                         self.icon_style.key(),
+                                    );
+                                }
+                                9 => {
+                                    // 启动即快速录入：翻转并持久化到 settings 表。
+                                    self.start_in_capture = !self.start_in_capture;
+                                    let _ = crate::repo::settings::set(
+                                        self.conn,
+                                        "start_capture",
+                                        if self.start_in_capture { "1" } else { "0" },
                                     );
                                 }
                                 _ => {}

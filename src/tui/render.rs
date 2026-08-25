@@ -1334,7 +1334,7 @@ impl<'a> App<'a> {
         let Some(ref popup) = self.popup else { return };
         match popup {
             crate::tui::app::Popup::ModuleToggles(idx) => {
-                let area = self.centered_rect(40, 15, size);
+                let area = self.centered_rect(40, 18, size);
                 f.render_widget(ratatui::widgets::Clear, area);
                 let block = Block::default()
                     .title(crate::tr!(
@@ -1363,6 +1363,14 @@ impl<'a> App<'a> {
                     (self.modules.review, "r 周回顾 (Review)"),
                     (self.modules.settings, "M 设置 (Settings)"),
                     (nerd, icons_label),
+                    (
+                        self.start_in_capture,
+                        crate::tr!(
+                            self.lang,
+                            "启动即快速录入 (Capture)",
+                            "Start in capture mode"
+                        ),
+                    ),
                 ];
                 for (i, (enabled, name)) in opts.iter().enumerate() {
                     let checkbox = if *enabled { "[x]" } else { "[ ]" };
