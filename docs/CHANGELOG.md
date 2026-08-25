@@ -61,6 +61,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `handlers.rs`（1653 行）拆为 `handlers/{mod,normal,actions,confirm,input,checklist}.rs`
   按 `Mode` 分组；trait 与其实现留在各自 mod.rs，跨文件入口提为 `pub(super)`。
   `crate::tui::render::*` / `crate::tui::handlers::*` API 路径不变，消费方零改动。
+- TUI 状态模块拆分（纯移动、行为不变）：`app.rs`（1544 行）拆为
+  `app/{mod,completion,data,profiles,ops}.rs` 按职责分组——mod.rs 保留共享类型
+  （View/Mode/Pane/Popup/Row/DetailData/App 字段）、构造器与状态管理方法，
+  输入编辑+Tab 补全 / refresh 数据管线+计数 / 设置页 profile 管理 / 任务操作
+  各自成块。私有辅助随调用者迁移后保持私有，跨文件入口本就是 `pub(crate)`，
+  零可见性改动。`crate::tui::app::*` API 路径不变，消费方零改动。
 - RRULE 单字母简写：`*d`/`*w`/`*m`/`*y` 现在解析为完整的
   `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`，不再把裸 `"d"` 存进数据库。`horae capture`
   也会保留 quick-add 里的 `*rrule` 令牌（此前只有 TUI 生效）。

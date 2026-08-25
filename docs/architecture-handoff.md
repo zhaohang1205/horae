@@ -90,7 +90,13 @@
 - **问题**：`tui/render.rs`(2430) 与 `tui/handlers.rs`(1653) 单文件混杂全部视图渲染 / 全部按键处理，导航成本高，是候选 4 同款「上帝模块」。
 - **解决**：沿用 `repo/tasks/` 目录模块模式（目录 + mod 声明，无 pub use 需求——外部只经 trait）。Rust 约束 trait impl 必须单块 → `AppRender`(11 方法) 留 `render/mod.rs`(664)，helpers 按渲染职责拆 `banners/input/popups/help/detail`；`AppHandlers`(5 方法) 留 `handlers/mod.rs`(341)，helpers 按 Mode 变体拆 `normal(共享键组)/actions(任务·Visual·番茄·归档·设置)/confirm(三个确认模式)/input(Tab 补全+输入型 confirm_*)/checklist(ChecklistFocus)`。跨文件入口方法提为 `pub(super)`（仅各自子树可见）——唯一的非移动改动。`crate::tui::render::AppRender` / `handlers::AppHandlers` 路径不变，消费方（mod.rs 的 run 循环、tests.rs）零改动。
 - **验证**：每步独立 commit，fmt/clippy `-D warnings`/201 单测 + 7 集成全绿。
-- **遗留**：`app.rs`(1544) 待评估——状态字段 + 构造器为主，若拆需先收敛字段所有权（与 render/handlers 不同构），另立候选。
+- **遗留**：`app.rs`(1544) 已按 #13 评估并执行拆分（结论 A），「需先收敛字段所有权」的担忧实测不成立。
+
+### 13. app.rs 拆分评估与执行 — done（结论 A：纯移动）
+- **判断依据**：与 render/handlers 的「不同构」仅指主体内容（状态字段+构造器 vs 可切分的渲染/按键逻辑），但方法清单显示 46 个固有方法仍按职责成块且互不交叠。三个事实使子结构化不必要：① 私有辅助（cursor_prev/cursor_next、completion_typed、tag_candidates、day_lists_from、row_due、refresh_counts）恰好只被本簇调用，随调用者同文件迁移后保持私有；② 跨文件入口（refresh/load_detail/reload/settings_*/act_on_selected/toggle_quotes 等）本来就是 `pub(crate)`——**零可见性改动**，比 render/handlers（需 pub(super) 提升）更干净；③ App 全部字段已是 `pub(crate)`，不存在必须收敛所有权才能拆的字段簇。
+- **布局**（`10217af`）：`app/mod.rs`(601) 保共享词汇（View/Mode/Pane/Popup/Row/DetailData/App 字段）+ 构造器 + 状态管理（set_mode/note/IME/通知/pomo/selection/navigation/icon）；`completion.rs`(217)、`data.rs`(352，STATUS_VIEWS+DayList 随计数读写方同迁)、`profiles.rs`(180)、`ops.rs`(221)。`crate::tui::app::*` 路径不变，消费方（run 循环、render、handlers、tests）零改动；mod.rs 相对原 app.rs 仅 6 行新增（mod 声明 + import 收敛）。
+- **验证**：fmt / clippy `-D warnings` / 201 单测 + 7 集成全绿。
+- 至此 TUI 生产代码无千行文件；剩余较大者为 tests.rs（测试）与 keys/splash/render/mod（≤703）。
 
 ## 下一步建议方向 (Proposed Next Steps)
 
