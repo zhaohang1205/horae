@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::fmt::Write as FmtWrite;
 use std::fs::{self, OpenOptions};
 use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
@@ -91,15 +90,38 @@ pub fn run(conn: &Connection, args: WatchArgs) -> Result<()> {
 /// 2. 执行 `actions.txt` 的新操作行；
 /// 3. 到点/逾期的任务写 `reminders/*.md`；
 /// 4. 重写 `today.md` 活动任务快照。
+///
+/// 各阶段独立容错：单个文件/阶段失败不阻断其余阶段（守护进程下一轮重试
+/// 失败的阶段），最后把首个错误上报给调用方。
 pub fn process_once(conn: &Connection, dir: &Path) -> Result<ProcessSummary> {
     fs::create_dir_all(dir)?;
     fs::create_dir_all(dir.join(DIR_REMINDERS))?;
-    Ok(ProcessSummary {
-        captures: ingest_queue(conn, dir, FILE_CAPTURE, do_capture)?,
-        actions: ingest_queue(conn, dir, FILE_ACTIONS, do_action)?,
-        reminders: write_reminders(conn, dir)?,
-        today_written: write_today(conn, dir)?,
-    })
+
+    let mut summary = ProcessSummary::default();
+    let mut first_err: Option<anyhow::Error> = None;
+
+    macro_rules! stage {
+        ($field:ident, $expr:expr) => {
+            match $expr {
+                Ok(v) => summary.$field = v,
+                Err(e) => {
+                    if first_err.is_none() {
+                        first_err = Some(e);
+                    }
+                }
+            }
+        };
+    }
+
+    stage!(captures, ingest_queue(conn, dir, FILE_CAPTURE, do_capture));
+    stage!(actions, ingest_queue(conn, dir, FILE_ACTIONS, do_action));
+    stage!(reminders, write_reminders(conn, dir));
+    stage!(today_written, write_today(conn, dir));
+
+    match first_err {
+        Some(e) => Err(e),
+        None => Ok(summary),
+    }
 }
 
 /// 消费一个意图队列文件。协议（以 capture 为例）：
@@ -121,8 +143,9 @@ where
     }
 
     let done_set = read_done_set(&done)?;
-    let content = match fs::read_to_string(&proc) {
-        Ok(c) => c,
+    // lossy 读取：畸形字节只影响所在行（变成替换符），不丢整份队列。
+    let content = match fs::read(&proc) {
+        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
         Err(_) => {
             let _ = fs::remove_file(&proc);
             return Ok(0);
@@ -137,10 +160,10 @@ where
             continue;
         }
         match handler(conn, line) {
-            Ok(()) => writeln!(out, "[ok] {line}").unwrap(),
+            Ok(()) => out.push_str(&format!("[ok] {line}\n")),
             Err(e) => {
                 eprintln!("watch {name} failed for {line:?}: {e:#}");
-                writeln!(out, "[fail] {line}").unwrap();
+                out.push_str(&format!("[fail] {line}\n"));
             }
         }
         processed += 1;
@@ -297,12 +320,10 @@ fn write_today(conn: &Connection, dir: &Path) -> Result<bool> {
     }
 
     let mut md = String::new();
-    writeln!(
-        md,
-        "# 今日待办 · {}\n> horae watch 自动生成 · 采集写 capture.txt · 操作写 actions.txt\n",
+    md.push_str(&format!(
+        "# 今日待办 · {}\n> horae watch 自动生成 · 采集写 capture.txt · 操作写 actions.txt\n\n",
         chrono::Local::now().format("%Y-%m-%d")
-    )
-    .unwrap();
+    ));
 
     let mut any = false;
     any |= render_section(&mut md, "已逾期", &overdue, &tag_map);
@@ -311,7 +332,7 @@ fn write_today(conn: &Connection, dir: &Path) -> Result<bool> {
     any |= render_section(&mut md, "Waiting", &waiting, &tag_map);
     any |= render_section(&mut md, "今日收件箱", &inbox_today, &tag_map);
     if !any {
-        writeln!(md, "暂无活动任务").unwrap();
+        md.push_str("暂无活动任务\n");
     }
 
     let path = dir.join(FILE_TODAY);
@@ -344,7 +365,7 @@ fn render_section(
     if items.is_empty() {
         return false;
     }
-    writeln!(md, "## {title}").unwrap();
+    md.push_str(&format!("## {title}\n"));
     for t in items {
         let due = time::format_local(effective_due(t));
         let due_s = if due.is_empty() {
@@ -359,9 +380,9 @@ fn render_section(
             format!(" · @{tag_names}")
         };
         let id8 = &t.id[..t.id.len().min(8)];
-        writeln!(md, "- [ ] `{id8}` {}{}{}", t.title, due_s, tags_s).unwrap();
+        md.push_str(&format!("- [ ] `{id8}` {}{}{}\n", t.title, due_s, tags_s));
     }
-    writeln!(md).unwrap();
+    md.push('\n');
     true
 }
 
@@ -384,7 +405,12 @@ fn write_reminders(conn: &Connection, dir: &Path) -> Result<usize> {
         if let Some(d) = effective_due(t) {
             let key = format!("{}:{}", t.id, d);
             if now >= d - REMIND_LEAD_MS && !state.reminded.contains(&key) {
-                write_reminder_file(dir, t, d)?;
+                // 单个提醒文件写失败不阻断其余任务；key 不记入状态，
+                // 下一轮自动重试。
+                if let Err(e) = write_reminder_file(dir, t, d) {
+                    eprintln!("watch reminder failed for {}: {e:#}", t.id);
+                    continue;
+                }
                 state.reminded.push(key);
                 wrote += 1;
             }
@@ -665,5 +691,85 @@ mod tests {
         assert_eq!(resolve_ref(&conn, &t.id[..8]).unwrap(), t.id, "唯一前缀");
         assert_eq!(resolve_ref(&conn, "唯一标题").unwrap(), t.id, "精确标题");
         assert!(resolve_ref(&conn, "查无此任务").is_err(), "不存在报错");
+    }
+
+    // ---------------------------------------------------- 容错降级（daemon 不死）
+
+    #[test]
+    fn malformed_utf8_line_does_not_lose_the_queue() {
+        let (root, conn) = test_conn();
+        let dir = sync_dir(root.path());
+        // 畸形字节夹在正常行之间：好行必须照常入库，坏行消费掉并写回执
+        let mut bytes = b"buy milk @home\n".to_vec();
+        bytes.extend_from_slice(b"\xff\xfe torn line\n");
+        bytes.extend_from_slice("second ok line\n".as_bytes());
+        fs::write(dir.join("capture.txt"), bytes).unwrap();
+
+        let s = process_once(&conn, &dir).unwrap();
+        assert_eq!(s.captures, 3, "三行都被消费（含畸形行）");
+        assert!(all_tasks(&conn).iter().any(|t| t.title == "buy milk"));
+        let done = fs::read_to_string(dir.join("capture.done")).unwrap();
+        assert!(done.contains("[ok] buy milk @home"), "{done}");
+        assert!(
+            !dir.join("capture.processing").exists(),
+            "队列不因畸形字节滞留"
+        );
+    }
+
+    #[test]
+    fn stage_failure_does_not_block_other_stages() {
+        let (root, conn) = test_conn();
+        let dir = sync_dir(root.path());
+        // today.md 被目录占用 → write_today 必败，但采集阶段不受牵连
+        fs::create_dir_all(dir.join(FILE_TODAY)).unwrap();
+        fs::write(dir.join("capture.txt"), "隔离故障\n").unwrap();
+
+        let _ = process_once(&conn, &dir).unwrap_err();
+        assert_eq!(
+            all_tasks(&conn).len(),
+            1,
+            "today.md 写失败不应阻断 capture 摄取"
+        );
+        assert!(
+            !dir.join("capture.processing").exists(),
+            "capture 队列已正常消费完毕"
+        );
+
+        // 故障解除后下一轮自愈
+        fs::remove_dir(dir.join(FILE_TODAY)).unwrap();
+        let s = process_once(&conn, &dir).unwrap();
+        assert!(s.today_written, "恢复后 today.md 正常写出");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reminder_write_failure_retries_next_round() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (root, conn) = test_conn();
+        let dir = sync_dir(root.path());
+        let due = time::now_ms() - 1000;
+        tasks::create_capture(
+            &conn,
+            &tasks::CaptureInput {
+                title: "提醒重试".into(),
+                status: Status::Next,
+                due_at: Some(due),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // reminders 目录只读 → 本轮跳过且不报错、不记去重状态
+        let rem = dir.join(DIR_REMINDERS);
+        fs::create_dir_all(&rem).unwrap();
+        fs::set_permissions(&rem, fs::Permissions::from_mode(0o555)).unwrap();
+        let s = process_once(&conn, &dir).unwrap();
+        assert_eq!(s.reminders, 0, "只读目录下提醒被跳过而非崩溃");
+
+        // 权限恢复 → 下一轮自动补写
+        fs::set_permissions(&rem, fs::Permissions::from_mode(0o755)).unwrap();
+        let s2 = process_once(&conn, &dir).unwrap();
+        assert_eq!(s2.reminders, 1, "失败提醒下一轮重试成功");
     }
 }
