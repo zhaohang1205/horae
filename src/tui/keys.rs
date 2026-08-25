@@ -46,8 +46,6 @@ pub(crate) enum When {
     Reviewing,
     /// 番茄钟活动时（需选中任务）。
     PomoActive,
-    /// 番茄钟空闲时（需选中任务）。
-    PomoIdle,
     /// 需要选中任务行，且该任务状态不在列内。
     StatusNot(&'static [Status]),
     /// 需要选中任务行，且该任务含检查单。
@@ -56,8 +54,6 @@ pub(crate) enum When {
     QuoteAdd,
     /// 金句功能启用且选中金句视图行：移出金句。
     QuoteRemove,
-    /// 检查单逐项管理（ChecklistFocus）模式下可用。
-    ChecklistFocus,
 }
 
 /// 非任务视图：行不是任务，任务操作键不适用。
@@ -110,7 +106,6 @@ impl KeyDef {
             ViewSel(v) => c.view == v && c.has_selection,
             Reviewing => c.is_reviewing,
             PomoActive => c.pomo_active && sel_task(c),
-            PomoIdle => !c.pomo_active && sel_task(c),
             StatusNot(ss) => sel_task(c) && c.task_status.is_some_and(|s| !ss.contains(&s)),
             HasChecklist => sel_task(c) && c.has_checklist,
             QuoteAdd => {
@@ -122,7 +117,6 @@ impl KeyDef {
             QuoteRemove => {
                 c.quotes_enabled && c.view == crate::tui::View::Quotes && c.has_selection
             }
-            ChecklistFocus => c.mode == Mode::ChecklistFocus,
         }
     }
 
@@ -549,75 +543,12 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         heat: 62,
     },
     KeyDef {
-        keys: "j/k",
-        zh: "移动光标",
-        en: "move cursor",
-        group: KeyGroup::Task,
-        status: false,
-        when: When::ChecklistFocus,
-        heat: 60,
-    },
-    KeyDef {
-        keys: "Space",
-        zh: "勾选/取消",
-        en: "tick / untick",
-        group: KeyGroup::Task,
-        status: false,
-        when: When::ChecklistFocus,
-        heat: 64,
-    },
-    KeyDef {
-        keys: "d",
-        zh: "删除项",
-        en: "delete item",
-        group: KeyGroup::Task,
-        status: false,
-        when: When::ChecklistFocus,
-        heat: 58,
-    },
-    KeyDef {
-        keys: "J/K",
-        zh: "上下排序",
-        en: "reorder",
-        group: KeyGroup::Task,
-        status: false,
-        when: When::ChecklistFocus,
-        heat: 56,
-    },
-    KeyDef {
-        keys: "e",
-        zh: "改名",
-        en: "rename",
-        group: KeyGroup::Task,
-        status: false,
-        when: When::ChecklistFocus,
-        heat: 54,
-    },
-    KeyDef {
-        keys: "Tab/Esc",
-        zh: "退出管理",
-        en: "exit manage",
-        group: KeyGroup::Task,
-        status: false,
-        when: When::ChecklistFocus,
-        heat: 52,
-    },
-    KeyDef {
         keys: "P",
         zh: "专注/续杯",
         en: "focus/continue",
         group: KeyGroup::Task,
         status: false,
-        when: When::PomoActive,
-        heat: 66,
-    },
-    KeyDef {
-        keys: "P",
-        zh: "专注",
-        en: "focus",
-        group: KeyGroup::Task,
-        status: false,
-        when: When::PomoIdle,
+        when: When::SelectionNot(NON_TASK_VIEWS),
         heat: 66,
     },
     KeyDef {
@@ -715,7 +646,7 @@ fn view_task_keys(c: &Ctx, lang: Lang) -> Vec<(&'static str, &'static str)> {
         picked.push(k);
     }
 
-    // 按热度降序；同一物理键只保留最高热度的定义（如 P 专注/续杯 与 专注）。
+    // 按热度降序；同一物理键只保留最高热度的定义。
     picked.sort_by_key(|b| std::cmp::Reverse(b.heat));
     picked.dedup_by(|a, b| a.keys == b.keys);
 
@@ -737,6 +668,7 @@ pub(crate) fn help_rows(c: &Ctx, lang: Lang) -> Vec<(KeyGroup, &'static str, &'s
 }
 
 /// 输入/确认模式下的动态键（用于引导栏动态条）。
+/// 检查单逐项管理（ChecklistFocus）的键也在这里：该模式下 strip_keys 不走 KEY_TABLE。
 fn mode_keys(mode: Mode, lang: Lang) -> Vec<(&'static str, &'static str)> {
     use Mode::*;
     let mut v: Vec<(&'static str, &'static str)> = Vec::new();
@@ -753,6 +685,14 @@ fn mode_keys(mode: Mode, lang: Lang) -> Vec<(&'static str, &'static str)> {
         Search => {
             v.push(("Enter", lang.tr("搜索", "search")));
             v.push(("Esc", lang.tr("清除", "clear")));
+        }
+        ChecklistFocus => {
+            v.push(("j/k", lang.tr("移动光标", "move cursor")));
+            v.push(("Space", lang.tr("勾选/取消", "tick / untick")));
+            v.push(("d", lang.tr("删除项", "delete item")));
+            v.push(("J/K", lang.tr("上下排序", "reorder")));
+            v.push(("e", lang.tr("改名", "rename")));
+            v.push(("Tab/Esc", lang.tr("退出管理", "exit manage")));
         }
         _ => {
             v.push(("Enter", lang.tr("确认", "confirm")));

@@ -1341,6 +1341,20 @@ fn key_table_respects_view_selection_and_mode() {
         "确认模式→含 y/Enter"
     );
 
+    // 检查单管理模式 → 专用模式键（不走 KEY_TABLE，无 j/k 等条目则说明回归）
+    let chk_mode = Ctx {
+        mode: Mode::ChecklistFocus,
+        ..ctx(View::Inbox, true)
+    };
+    let chk_strip = strip_keys(&chk_mode, Lang::Zh);
+    for k in ["j/k", "Space", "d", "J/K", "e", "Tab/Esc"] {
+        assert!(
+            chk_strip.iter().any(|(key, _)| *key == k),
+            "检查单管理模式动态条应含 {}",
+            k
+        );
+    }
+
     // 金句：默认关闭 → " 不出现；启用 + 选中任务 → " 加入金句；
     // 金句视图选中 → " 变为"移出金句"
     let quotes_off = keys(View::Inbox, true);

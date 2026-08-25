@@ -18,7 +18,8 @@ pub fn get(conn: &Connection, id: &str) -> Result<Task> {
 }
 
 /// Resolve a task reference to its full id: exact match, else a unique id
-/// prefix (like git), else `TaskNotFound`.
+/// prefix (like git), else a unique exact title among non-archived tasks,
+/// else `TaskNotFound`.
 pub fn resolve_id(conn: &Connection, key: &str) -> Result<String> {
     // 一次查询同时命中精确匹配与 id 前缀（精确匹配排在最前），避免先 `get` 再前缀查询两次往返。
     let mut stmt = conn.prepare(
@@ -31,8 +32,22 @@ pub fn resolve_id(conn: &Connection, key: &str) -> Result<String> {
         // 精确匹配优先：即使同时存在多个前缀命中，精确命中仍然胜出（git 语义）。
         [first, ..] if first.as_str() == key => Ok(key.to_string()),
         [first] => Ok(first.clone()),
-        [] => Err(Error::TaskNotFound(key.to_string()).into()),
+        [] => resolve_by_title(conn, key),
         _ => anyhow::bail!("ambiguous id prefix: {}", key),
+    }
+}
+
+/// Fallback of `resolve_id`: a unique exact title among visible (non-archived)
+/// tasks resolves to its id. Archived tasks are only addressable by id.
+fn resolve_by_title(conn: &Connection, key: &str) -> Result<String> {
+    let mut stmt =
+        conn.prepare("SELECT id FROM tasks WHERE title = ?1 AND archived_at IS NULL ORDER BY id")?;
+    let rows = stmt.query_map([key], |r| r.get::<usize, String>(0))?;
+    let ids: Vec<String> = rows.collect::<rusqlite::Result<_>>()?;
+    match ids.as_slice() {
+        [id] => Ok(id.clone()),
+        [] => Err(Error::TaskNotFound(key.to_string()).into()),
+        _ => anyhow::bail!("ambiguous title: {key}"),
     }
 }
 
@@ -227,6 +242,7 @@ pub fn events(conn: &Connection, task_id: &str) -> Result<Vec<event::TaskEvent>>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repo::tasks::create_capture;
     use crate::repo::tasks::CaptureInput;
     use crate::testutil::test_conn;
 
@@ -254,5 +270,59 @@ mod tests {
 
         // 归档视图同样只含真实任务
         assert_eq!(list_archived(&conn).unwrap().len(), 1);
+    }
+
+    fn mk_task(conn: &Connection, title: &str) -> crate::model::task::Task {
+        create_capture(
+            conn,
+            &CaptureInput {
+                title: title.into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn resolve_id_falls_back_to_unique_title() {
+        let (_dir, conn) = test_conn();
+        let t = mk_task(&conn, "写周报");
+
+        assert_eq!(resolve_id(&conn, "写周报").unwrap(), t.id);
+        assert!(resolve_id(&conn, "不存在").is_err());
+    }
+
+    #[test]
+    fn resolve_id_rejects_ambiguous_title() {
+        let (_dir, conn) = test_conn();
+        mk_task(&conn, "重复");
+        mk_task(&conn, "重复");
+        let err = resolve_id(&conn, "重复").unwrap_err();
+        assert!(err.to_string().contains("ambiguous title"), "{}", err);
+    }
+
+    #[test]
+    fn resolve_id_by_title_ignores_archived_tasks() {
+        let (_dir, conn) = test_conn();
+        let t = mk_task(&conn, "已归档的标题");
+        crate::repo::tasks::archive(&conn, &t.id).unwrap();
+
+        // 归档任务不可按标题寻址，只能按 id
+        assert!(resolve_id(&conn, "已归档的标题").is_err());
+        assert_eq!(resolve_id(&conn, &t.id).unwrap(), t.id);
+
+        // 同名新任务出现后按标题解析到可见的那个
+        let t2 = mk_task(&conn, "已归档的标题");
+        assert_eq!(resolve_id(&conn, "已归档的标题").unwrap(), t2.id);
+    }
+
+    #[test]
+    fn resolve_id_exact_id_beats_title_of_other_task() {
+        let (_dir, conn) = test_conn();
+        let a = mk_task(&conn, "A");
+        mk_task(&conn, &a.id); // 另一个任务标题恰好是 A 的完整 id
+
+        // id 精确匹配优先于标题回退（git 语义）
+        assert_eq!(resolve_id(&conn, &a.id).unwrap(), a.id);
     }
 }

@@ -539,7 +539,10 @@ impl<'a> AppRender for App<'a> {
 
         for (title, desc, icon, view_name, key) in steps {
             lines.push(Line::from(vec![
-                Span::styled(format!("{} ", self.icon(icon)), Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{} ", self.icon(icon)),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(title, s_step),
             ]));
             lines.push(Line::from(Span::styled(format!("   {}", desc), s_dim)));
@@ -550,10 +553,7 @@ impl<'a> AppRender for App<'a> {
                     s_dim,
                 ),
                 Span::styled(view_name.to_string(), s_map),
-                Span::styled(
-                    crate::tr!(self.lang, "  (键 {})", "  (key {})", key),
-                    s_dim,
-                ),
+                Span::styled(crate::tr!(self.lang, "  (键 {})", "  (key {})", key), s_dim),
             ]));
             lines.push(Line::from(""));
         }

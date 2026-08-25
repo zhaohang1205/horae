@@ -233,22 +233,8 @@ fn do_action(conn: &Connection, line: &str) -> Result<()> {
 
 /// 解析任务引用：id 精确 / 唯一前缀，退回精确标题匹配。
 fn resolve_ref(conn: &Connection, key: &str) -> Result<String> {
-    if let Ok(id) = tasks::resolve_id(conn, key) {
-        return Ok(id);
-    }
-    let all = tasks::list(conn, &all_filter())?;
-    let mut found: Vec<String> = all
-        .into_iter()
-        .filter(|t| t.title == key)
-        .map(|t| t.id)
-        .collect();
-    found.sort();
-    found.dedup();
-    match found.as_slice() {
-        [id] => Ok(id.clone()),
-        [] => Err(crate::error::Error::TaskNotFound(key.to_string()).into()),
-        _ => anyhow::bail!("ambiguous title: {key}"),
-    }
+    // resolve_id 自带标题回退（id 精确 > id 前缀 > 唯一精确标题）
+    tasks::resolve_id(conn, key)
 }
 
 fn all_filter() -> tasks::ListFilter {
