@@ -16,9 +16,13 @@ pub fn mark_boot() {
     let _ = BOOT.set(std::time::Instant::now());
 }
 
+/// 首次查询 [`boot_elapsed_ms`] 时的快照；此后恒定返回同一值。
+static BOOT_MS: std::sync::OnceLock<Option<u128>> = std::sync::OnceLock::new();
+
 /// 距 [`mark_boot`] 的毫秒数；未打点（如单测直接构造）时为 `None`。
+/// 每次进程只计算一次：首次调用即快照，重绘等后续调用拿到同一值。
 pub fn boot_elapsed_ms() -> Option<u128> {
-    BOOT.get().map(|t| t.elapsed().as_millis())
+    *BOOT_MS.get_or_init(|| BOOT.get().map(|t| t.elapsed().as_millis()))
 }
 
 /// Local-day boundaries in UTC ms for a day offset (0 = today, 1 = tomorrow).
@@ -467,5 +471,12 @@ mod tests {
         assert_eq!(parse_time("+3d 15:30").unwrap(), local_ms(base, t));
         assert!(parse_time("+2h").is_ok());
         assert!(parse_time("+1d").is_ok());
+    }
+
+    #[test]
+    fn boot_elapsed_snapshot_is_stable() {
+        // 启动用时只计算一次：重复查询应返回同一快照值。
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        assert_eq!(boot_elapsed_ms(), boot_elapsed_ms());
     }
 }
