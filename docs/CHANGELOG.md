@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 番茄“成就结清”横幅不再整天常驻：`PomoState` 新增 `break_ended_at`
+  （休息结束时由 daemon 盖章，开启新一轮/显式停止时清空），横幅仅在
+  休息结束后的 10 分钟窗口内提示“再接再厉”，当天重启 TUI 不再弹出旧提示。
+
 ### Added
 
 - 端到端 CLI 集成测试（`tests/cli.rs`）：在隔离的 `HORAE_CONFIG_DIR` 下驱动真实

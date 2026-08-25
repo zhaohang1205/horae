@@ -27,6 +27,8 @@ pub fn start(conn: &Connection, task_id: &str) -> Result<()> {
     state.task_title = Some(task.title.clone());
     state.start_ts = Some(now);
     state.end_ts = Some(now + duration_ms);
+    // 新一轮已开启，“休息完成，再接再厉”横幅不再有意义
+    state.break_ended_at = None;
     pomodoro::save_state(&state)?;
 
     let exe_path = std::env::current_exe().unwrap_or_else(|_| "horae".into());
@@ -53,6 +55,7 @@ pub fn stop() -> Result<()> {
     // 显式停止就是中断：streak 归零 + cycle 归零（下次 start 从第 1 个开始计）
     state.streak = 0;
     state.cycle = 0;
+    state.break_ended_at = None;
     pomodoro::save_state(&state)?;
     notify("⏹️ 专注已终止", "番茄钟与专注模式已停止");
     Ok(())
@@ -228,6 +231,8 @@ pub(crate) fn advance_phase(
         }
         Phase::ShortBreak | Phase::LongBreak => {
             state.phase = Phase::Idle;
+            // 盖章“休息刚结束”：横幅只在此后短窗口内提示，不整天常驻
+            state.break_ended_at = Some(now);
             notify(
                 "⏰ 休息结束！战报结清",
                 "休息已完成！按 [Space / P] 再接再厉开启新一轮，或按 [S] 结束专注。💪",
@@ -462,6 +467,41 @@ mod tests {
         assert_eq!(state.phase, Phase::Idle);
         assert_eq!(state.cycle, 1, "休息结束不增加计数");
         assert_eq!(state.streak, 1);
+        assert_eq!(
+            state.break_ended_at,
+            Some(2_000),
+            "休息结束应盖 break_ended_at 时间戳（横幅窗口依据）"
+        );
+    }
+
+    #[test]
+    fn work_end_does_not_stamp_break_ended() {
+        let (_dir, conn) = test_conn();
+        let mut state = work_state(None, "x", 1_000);
+        assert!(advance_phase(&conn, &mut state, 2_000));
+        assert_eq!(
+            state.break_ended_at, None,
+            "只有休息→Idle 的转换才算“刚休息完”"
+        );
+    }
+
+    #[test]
+    fn break_prompt_visible_only_within_window() {
+        use crate::model::pomodoro::BREAK_PROMPT_WINDOW_MS;
+
+        let mut s = PomoState::default();
+        assert!(!s.break_prompt_visible(1_000), "从未休息完 → 不显示");
+
+        s.break_ended_at = Some(1_000);
+        assert!(s.break_prompt_visible(1_000), "窗口起点可见");
+        assert!(
+            s.break_prompt_visible(1_000 + BREAK_PROMPT_WINDOW_MS - 1),
+            "窗口末尾仍可见"
+        );
+        assert!(
+            !s.break_prompt_visible(1_000 + BREAK_PROMPT_WINDOW_MS),
+            "过窗后不再显示（重启 TUI 不再常驻旧横幅）"
+        );
     }
 
     #[test]

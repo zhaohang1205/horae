@@ -2524,6 +2524,45 @@ fn esc_cascades_through_visual_filter_and_selection() {
 }
 
 #[test]
+fn pomo_banner_shows_only_shortly_after_break_end() {
+    crate::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    seed(&conn);
+    let mut app = app_normal(&conn);
+    let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
+
+    let mut draw_contains = |app: &mut App, needle: &str| -> bool {
+        term.clear().unwrap();
+        term.draw(|f| app.render(f)).unwrap();
+        norm(&snap(&term)).contains(needle)
+    };
+
+    // 今日已积 1 个番茄，但不是刚结束休息（典型：当天重启 TUI）→ 不显示横幅
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    app.pomo.last_date = Some(today);
+    app.pomo.today_count = 1;
+    app.pomo.break_ended_at = None;
+    assert!(
+        !draw_contains(&mut app, "成就结清"),
+        "启动时不应常驻“成就结清”横幅"
+    );
+
+    // 刚结束休息（窗口内）→ 显示“再接再厉”横幅
+    app.hide_pomo_banner = false;
+    app.pomo.break_ended_at = Some(crate::time::now_ms());
+    assert!(draw_contains(&mut app, "成就结清"));
+
+    // 休息结束已久（窗口外）→ 横幅消失
+    app.pomo.break_ended_at =
+        Some(crate::time::now_ms() - crate::model::pomodoro::BREAK_PROMPT_WINDOW_MS - 1_000);
+    assert!(
+        !draw_contains(&mut app, "成就结清"),
+        "过窗后不应再显示旧横幅"
+    );
+}
+
+#[test]
 fn archived_view_restore_single_and_batch() {
     crate::repo::state::set_test_override();
     let mut conn = Connection::open(":memory:").unwrap();

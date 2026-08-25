@@ -47,8 +47,10 @@ impl<'a> App<'a> {
             let pomo = &self.pomo;
             let today = chrono::Local::now().format("%Y-%m-%d").to_string();
             let today_active = pomo.last_date.as_deref() == Some(today.as_str());
+            // 仅在休息刚结束的窗口内提示“再接再厉”，避免当天每次启动都常驻旧横幅
+            let break_prompt_visible = pomo.break_prompt_visible(crate::time::now_ms());
 
-            if today_active && pomo.today_count > 0 {
+            if today_active && pomo.today_count > 0 && break_prompt_visible {
                 let chunks = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([Constraint::Length(1), Constraint::Min(0)])

@@ -22,6 +22,10 @@ fn default_long_break_interval() -> u32 {
     4
 }
 
+/// 休息结束后“成就结清/再接再厉”横幅的展示窗口：仅在此时长内提示，
+/// 过窗不再显示，避免当天每次启动 TUI 都常驻旧提示。
+pub const BREAK_PROMPT_WINDOW_MS: i64 = 10 * 60 * 1000;
+
 impl Default for PomoConfig {
     fn default() -> Self {
         Self {
@@ -53,6 +57,17 @@ pub struct PomoState {
     /// 最近一次完成番茄的日期（"YYYY-MM-DD"），用于跨天重置 today_count / cycle。
     #[serde(default)]
     pub last_date: Option<String>,
+    /// 最近一次休息结束的时刻（UTC ms）。横幅仅在窗口内提示“再接再厉”；
+    /// 开启新一轮或显式停止时清空。
+    #[serde(default)]
+    pub break_ended_at: Option<i64>,
+}
+
+impl PomoState {
+    /// “成就结清”横幅可见性：仅当休息刚结束（在 [`BREAK_PROMPT_WINDOW_MS`] 窗口内）为 true。
+    pub fn break_prompt_visible(&self, now_ms: i64) -> bool {
+        matches!(self.break_ended_at, Some(ts) if now_ms.saturating_sub(ts) < BREAK_PROMPT_WINDOW_MS)
+    }
 }
 
 impl Default for PomoState {
@@ -70,6 +85,7 @@ impl Default for PomoState {
             last_completed_task_title: None,
             config: PomoConfig::default(),
             last_date: None,
+            break_ended_at: None,
         }
     }
 }
