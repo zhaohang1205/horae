@@ -876,6 +876,7 @@ fn next_view_cycles_full_ring() {
         View::Tags,
         View::Review,
         View::Settings,
+        View::Workflow,
     ];
     for (i, v) in ring.iter().enumerate() {
         app.view = *v;
@@ -2545,4 +2546,118 @@ fn render_views_smoke_cover_disabled_modules_and_popups() {
     app.handle_key(kc(KeyCode::Esc)).unwrap();
     app.handle_key(kc(KeyCode::F(7))).unwrap();
     assert!(draw_contains(&mut app, "模块"), "模块弹层应渲染");
+}
+
+#[test]
+fn checklist_manage_toggle_delete_reorder_rename() {
+    crate::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let t = tasks::create_capture(
+        &conn,
+        &CaptureInput {
+            title: "Pack bags".into(),
+            status: task::Status::Inbox,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    tasks::add_checklist_item(&conn, &t.id, "charger").unwrap();
+    tasks::add_checklist_item(&conn, &t.id, "clothes").unwrap();
+    tasks::add_checklist_item(&conn, &t.id, "toothbrush").unwrap();
+
+    let mut app = App::new(&conn).unwrap();
+    assert_eq!(app.selected, 0, "唯一任务应被选中");
+
+    // Tab 进入检查单逐项管理
+    app.handle_key(kc(KeyCode::Tab)).unwrap();
+    assert_eq!(app.mode, Mode::ChecklistFocus);
+    assert_eq!(app.checklist_cursor, Some(0));
+
+    // 管理模式下应渲染操作提示，且不应弹出输入浮层（无 "Quick capture" 等输入框标题）
+    let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let frame = norm(&snap(&term));
+    assert!(
+        frame.contains("检查单管理") || frame.contains("managing:"),
+        "检查单管理模式应显示操作提示，实际帧:\n{frame}"
+    );
+    assert!(
+        !frame.contains("Quickcapture") && !frame.contains("Renameitem"),
+        "检查单管理模式不应弹出输入浮层"
+    );
+
+    // 勾选第一项
+    app.handle_key(key(' ')).unwrap();
+    assert!(tasks::get(&conn, &t.id).unwrap().checklist[0].done);
+
+    // 下移并排序（J 下移）
+    app.handle_key(key('j')).unwrap();
+    assert_eq!(app.checklist_cursor, Some(1));
+    app.handle_key(key('J')).unwrap();
+    let after_move = tasks::get(&conn, &t.id).unwrap().checklist;
+    assert_eq!(after_move[2].title, "clothes", "clothes 应被下移到底");
+
+    // 删除当前项（clothes）
+    let before = tasks::get(&conn, &t.id).unwrap().checklist.len();
+    app.handle_key(key('d')).unwrap();
+    assert_eq!(
+        tasks::get(&conn, &t.id).unwrap().checklist.len(),
+        before - 1
+    );
+
+    // 改名：进入 rename（预填当前标题），清空后输入新标题，回车
+    app.handle_key(key('e')).unwrap();
+    assert_eq!(app.mode, Mode::RenamingChecklist);
+    for _ in 0..16 {
+        app.handle_key(kc(KeyCode::Backspace)).unwrap();
+    }
+    for c in "adapter".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+    assert_eq!(app.mode, Mode::ChecklistFocus);
+    let titles: Vec<String> = tasks::get(&conn, &t.id)
+        .unwrap()
+        .checklist
+        .iter()
+        .map(|i| i.title.clone())
+        .collect();
+    assert!(
+        titles.iter().any(|t| t == "adapter"),
+        "应出现改名后的项: {titles:?}"
+    );
+
+    // Esc 退出管理
+    app.handle_key(kc(KeyCode::Esc)).unwrap();
+    assert_eq!(app.mode, Mode::Normal);
+}
+
+#[test]
+fn checklist_all_done_shows_complete_hint() {
+    crate::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let t = tasks::create_capture(
+        &conn,
+        &CaptureInput {
+            title: "One step".into(),
+            status: task::Status::Inbox,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let a = tasks::add_checklist_item(&conn, &t.id, "only")
+        .unwrap()
+        .unwrap();
+    tasks::toggle_checklist_item(&conn, &t.id, &a).unwrap();
+
+    let mut app = App::new(&conn).unwrap();
+    let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let frame = norm(&snap(&term));
+    assert!(
+        frame.contains("所有步骤已完成") || frame.contains("allstepsdone"),
+        "全勾选应在详情区显示完成提示"
+    );
 }

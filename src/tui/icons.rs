@@ -30,6 +30,8 @@ pub enum Icon {
     Tags,
     Quotes,
     Settings,
+    /// GTD 工作流说明视图
+    Workflow,
     /// 当前选中行的前缀标记（Nerd: 󰄾）
     Active,
     GroupDay,
@@ -108,6 +110,7 @@ pub fn glyph(kind: Icon, style: IconStyle) -> &'static str {
             Tags => "\u{f02b}",
             Quotes => "\u{f10d}",
             Settings => "\u{f013}",
+            Workflow => "\u{f0e8}",
             Active => "\u{f013e}",
             GroupDay => "\u{f017}",
             GroupActive => "\u{f192}",
@@ -133,6 +136,7 @@ pub fn glyph(kind: Icon, style: IconStyle) -> &'static str {
             Tags => "@",
             Quotes => "\"",
             Settings => "*",
+            Workflow => "G",
             Active => ">",
             GroupDay | GroupActive | GroupWaiting | GroupArchive | GroupModules | GroupKeys => "",
             Tomato => "o",
@@ -162,6 +166,7 @@ mod tests {
             Icon::Tags,
             Icon::Quotes,
             Icon::Settings,
+            Icon::Workflow,
             Icon::Active,
             Icon::Tomato,
             Icon::Achievement,

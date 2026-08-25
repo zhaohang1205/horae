@@ -435,7 +435,11 @@ mod tests {
         state.config.long_break_interval = 2;
 
         assert!(advance_phase(&conn, &mut state, 2_000));
-        assert_eq!(state.phase, Phase::LongBreak, "interval=2 时第 2 个番茄应进入长休");
+        assert_eq!(
+            state.phase,
+            Phase::LongBreak,
+            "interval=2 时第 2 个番茄应进入长休"
+        );
         assert_eq!(state.cycle, 2);
         let expected = 2_000 + (PomoConfig::default().long_break_mins as i64) * 60 * 1000;
         assert_eq!(state.end_ts, Some(expected));

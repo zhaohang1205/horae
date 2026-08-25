@@ -28,3 +28,4 @@ pub const EV_TAG_REMOVED: &str = "tag_removed";
 pub const EV_HABIT_COMPLETED: &str = "habit_completed"; // a recurring task's occurrence done; rescheduled
 pub const EV_POMODORO: &str = "pomodoro"; // a Pomodoro work session completed
 pub const EV_LOGGED: &str = "logged"; // a pure journal/log event
+pub const EV_CHECKLIST: &str = "checklist"; // a checklist item added/toggled/deleted/renamed/moved

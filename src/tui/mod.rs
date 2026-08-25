@@ -54,6 +54,7 @@ pub(crate) fn view_label(lang: crate::i18n::Lang, v: View) -> &'static str {
         View::Tags => crate::tr!(lang, "标签库", "Tags"),
         View::Quotes => crate::tr!(lang, "金句", "Quotes"),
         View::Settings => crate::tr!(lang, "设置", "Settings"),
+        View::Workflow => crate::tr!(lang, "GTD 工作流", "GTD Workflow"),
     }
 }
 

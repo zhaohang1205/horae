@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selection at once. Visual mode now takes priority over the left pane so
   `j`/`k` always move the selection. ConfirmArchive also clears the visual
   selection after confirming/cancelling (was silently kept before).
-- Open-source release: MIT `LICENSE`, `README.md`, `CHANGELOG.md`, Cargo
+- Open-source release: GPL-3.0 `LICENSE`, `README.md`, `CHANGELOG.md`, Cargo
   metadata (`license`, `repository`, `rust-version`), and GitHub Actions CI +
   release workflows.
 - Count caching for the guide sidebar (`App::counts`) so rendering performs
@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `horae completions <bash|zsh|fish|...>` generates shell completion scripts via
   `clap_complete`, handled before the database is opened so it has no side
   effects.
+- Checklist overhaul: `Tab` enters per-item management — `j/k` move the cursor,
+  `Space` ticks the selected item, `d` deletes it, `J`/`K` reorder, `e` renames.
+  The list shows an `n/total` progress badge; ticking the last item no longer
+  auto-resets the list, and a fully-checked list shows a "press x to complete"
+  hint (it never auto-marks the task done). Every structural change is recorded
+  as a `checklist` event in the audit timeline.
 - Richer `--help` output: top-level `long_about` + usage examples, per-command
   examples for `capture`/`list`/`schedule`/`pomo`/`alarm`, and value-name/help
   hints for flags. `--p1`/`--p2`/`--p3` are now mutually exclusive.
@@ -45,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   也会保留 quick-add 里的 `*rrule` 令牌（此前只有 TUI 生效）。
 - 新增迁移 v6，把历史遗留的裸 `"d"`/`"w"`/`"m"`/`"y"` 循环规则规范化为完整 RRULE。
 
-- `README.md` is now a bilingual (中文/English) user manual.
+- `README.md` is now a single-language index that links to `README_cn.md` (中文) and `README_en.md` (English); the user manual is kept as two separate single-language files rather than one bilingual file.
 - Removed the stale `CODEBUDDY.md`; `AGENTS.md` is the single authoritative
   contributor guide, with test locations and CI usage corrected.
 - List-row status now follows the human's perspective for habits/scheduled

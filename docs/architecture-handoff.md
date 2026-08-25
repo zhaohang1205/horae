@@ -47,7 +47,7 @@
 ## 关键设计约束（不要违反）
 
 - 时间戳一律 UTC ms INTEGER，所有时间数学走 `time.rs`，展示走 `format_local`。
-- 迁移：不改已有 `migrations/*.sql`，新增文件 + `migrate.rs` 新版本块（当前 v1~v9）。
+- 迁移：不改已有 `migrations/*.sql`，新增文件 + `migrate.rs` 新版本块（当前 v1~v11，即 0001–0012）。
 - 新事件类型：`model/event.rs` 加 const + 同步 `migrations/0001_init.sql` 注释。
 - DB 路径全部由 `dirs::config_dir()` 派生，绝不硬编码；`HORAE_CONFIG_DIR` 覆盖（测试用）。
 - 命令层返回 `anyhow::Result`，域错误用 `crate::error::Error`。

@@ -29,6 +29,8 @@ pub(crate) trait AppRender {
     fn centered_rect(&self, percent_x: u16, percent_y: u16, r: Rect) -> Rect;
     fn render_guide(&self, f: &mut Frame, area: Rect);
     fn render_list(&mut self, f: &mut Frame, area: Rect);
+    fn render_workflow(&self, f: &mut Frame, area: Rect);
+    fn workflow_lines(&self) -> Vec<Line<'static>>;
     fn render_detail(&mut self, f: &mut Frame, area: Rect);
 }
 
@@ -74,7 +76,7 @@ impl<'a> AppRender for App<'a> {
             Mode::ConfirmArchive | Mode::ConfirmPurge | Mode::ConfirmProfileDelete => {
                 self.render_confirm_overlay(f, size);
             }
-            Mode::Normal | Mode::Visual => {}
+            Mode::Normal | Mode::Visual | Mode::ChecklistFocus => {}
             _ => self.render_input_overlay(f, size),
         }
 
@@ -372,6 +374,10 @@ impl<'a> AppRender for App<'a> {
     }
 
     fn render_list(&mut self, f: &mut ratatui::Frame, area: Rect) {
+        if self.view == View::Workflow {
+            self.render_workflow(f, area);
+            return;
+        }
         let border_color = if self.pane == Pane::Center {
             self.theme.accent
         } else {
@@ -414,6 +420,153 @@ impl<'a> AppRender for App<'a> {
                 Style::default().bg(self.theme.hl_bg)
             });
         f.render_stateful_widget(list, area, &mut self.list_state);
+    }
+
+    /// GTD 工作流说明视图（中心面板）。五步法 + 与当前 horae 视图的映射。
+    fn render_workflow(&self, f: &mut ratatui::Frame, area: Rect) {
+        let border_color = if self.pane == Pane::Center {
+            self.theme.accent
+        } else {
+            self.theme.text_dim
+        };
+        let title = crate::tr!(self.lang, " GTD 工作流 ", " GTD Workflow ");
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_set(border::ROUNDED)
+            .padding(ratatui::widgets::Padding::horizontal(1))
+            .border_style(Style::default().fg(border_color))
+            .title(title);
+        let lines = self.workflow_lines();
+        f.render_widget(
+            Paragraph::new(lines)
+                .block(block)
+                .wrap(ratatui::widgets::Wrap { trim: false })
+                .scroll((0, 0)),
+            area,
+        );
+    }
+
+    /// GTD 工作流说明文本（中英文双语）。每个步骤给出含义与对应 horae 视图。
+    fn workflow_lines(&self) -> Vec<Line<'static>> {
+        use Icon::*;
+        let s_title = Style::default()
+            .fg(self.theme.accent)
+            .add_modifier(Modifier::BOLD);
+        let s_step = Style::default()
+            .fg(self.theme.text_success)
+            .add_modifier(Modifier::BOLD);
+        let s_dim = Style::default().fg(self.theme.text_dim);
+        let s_map = Style::default().fg(self.theme.hl_fg);
+
+        let mut lines: Vec<Line> = vec![
+            Line::from(Span::styled(
+                crate::tr!(
+                    self.lang,
+                    "GTD (Getting Things Done) 五步法",
+                    "GTD (Getting Things Done) — 5 steps"
+                ),
+                s_title,
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                crate::tr!(
+                    self.lang,
+                    "核心思想：把脑子里的杂事全部倒出，按情境分类，只在合适的时候做合适的行动。",
+                    "Core idea: empty your head, sort by context, and do the right action at the right time."
+                ),
+                s_dim,
+            )),
+            Line::from(""),
+        ];
+
+        let steps: [(&str, &str, Icon, &str, &str); 5] = [
+            (
+                crate::tr!(self.lang, "1. 收集 Capture", "1. Capture"),
+                crate::tr!(
+                    self.lang,
+                    "把所有涌上心头的待办、想法、承诺一股脑放进收件箱，先不判断。",
+                    "Dump every todo, idea and commitment into the inbox without judging."
+                ),
+                Inbox,
+                crate::tr!(self.lang, "收件箱", "Inbox"),
+                "1",
+            ),
+            (
+                crate::tr!(self.lang, "2. 理清 Clarify", "2. Clarify"),
+                crate::tr!(
+                    self.lang,
+                    "逐个问：这是什么？是否可执行？不可执行的丢弃 / 留作参考 / 延后。",
+                    "Ask each: what is it? actionable? If not, drop / keep as reference / defer."
+                ),
+                Next,
+                crate::tr!(self.lang, "下一步", "Next"),
+                "2",
+            ),
+            (
+                crate::tr!(self.lang, "3. 组织 Organize", "3. Organize"),
+                crate::tr!(
+                    self.lang,
+                    "把可执行事项按情境分类：下一步 / 等待中 / 已排程 / 将来也许 / 参考资料。",
+                    "Sort actionable items by context: Next / Waiting / Scheduled / Someday / Reference."
+                ),
+                Scheduled,
+                crate::tr!(self.lang, "等待/排程/将来/参考", "Waiting/Scheduled/Someday/Ref"),
+                "3,4,5,6",
+            ),
+            (
+                crate::tr!(self.lang, "4. 回顾 Reflect", "4. Reflect"),
+                crate::tr!(
+                    self.lang,
+                    "每周回顾，清空收件箱、跟进等待事项、重估将来也许，保持系统可信。",
+                    "Weekly review: clear inbox, follow up waiting, re-evaluate someday to keep trust."
+                ),
+                Review,
+                crate::tr!(self.lang, "周回顾", "Review"),
+                "r",
+            ),
+            (
+                crate::tr!(self.lang, "5. 执行 Engage", "5. Engage"),
+                crate::tr!(
+                    self.lang,
+                    "按情境与精力挑选行动，专注推进，完成后归档或标记完成。",
+                    "Pick actions by context and energy; focus, then archive or mark done."
+                ),
+                Done,
+                crate::tr!(self.lang, "已完成 / 归档箱", "Done / Archived"),
+                "7,8",
+            ),
+        ];
+
+        for (title, desc, icon, view_name, key) in steps {
+            lines.push(Line::from(vec![
+                Span::styled(format!("{} ", self.icon(icon)), Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled(title, s_step),
+            ]));
+            lines.push(Line::from(Span::styled(format!("   {}", desc), s_dim)));
+            lines.push(Line::from(vec![
+                Span::styled("   ", s_dim),
+                Span::styled(
+                    crate::tr!(self.lang, "→ horae 视图: ", "→ horae view: "),
+                    s_dim,
+                ),
+                Span::styled(view_name.to_string(), s_map),
+                Span::styled(
+                    crate::tr!(self.lang, "  (键 {})", "  (key {})", key),
+                    s_dim,
+                ),
+            ]));
+            lines.push(Line::from(""));
+        }
+
+        lines.push(Line::from(Span::styled(
+            crate::tr!(
+                self.lang,
+                "提示：按 a 快速捕获，按 w 设为等待，按 x 标记完成，按 r 开始周回顾。",
+                "Tip: press a to capture, w to wait, x to complete, r for weekly review."
+            ),
+            s_dim,
+        )));
+        lines
     }
 
     fn render_detail(&mut self, f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
@@ -630,11 +783,13 @@ impl<'a> App<'a> {
         let mode_str = match self.mode {
             Mode::Normal => " NORMAL ",
             Mode::Visual => " VISUAL ",
+            Mode::ChecklistFocus => crate::tr!(self.lang, " 检查单 ", " CHECKLIST "),
             _ => " INSERT ",
         };
         let mode_bg = match self.mode {
             Mode::Normal => self.theme.text_success,
             Mode::Visual => self.theme.accent,
+            Mode::ChecklistFocus => self.theme.accent,
             _ => self.theme.text_urgent,
         };
         let mode_fg = self.theme.bg;
@@ -794,8 +949,16 @@ impl<'a> App<'a> {
                 " 重命名 profile (输入新名称) ",
                 " Rename profile (enter new name) "
             ),
+            Mode::RenamingChecklist => {
+                crate::tr!(
+                    self.lang,
+                    " 改名检查项 (Enter 保存) ",
+                    " Rename item (Enter to save) "
+                )
+            }
             Mode::Normal
             | Mode::Visual
+            | Mode::ChecklistFocus
             | Mode::ConfirmArchive
             | Mode::ConfirmPurge
             | Mode::ConfirmProfileDelete => "",
@@ -1626,24 +1789,24 @@ impl<'a> App<'a> {
                 Span::styled("w → Alice → +1d", Style::default().fg(self.theme.accent)),
             ]),
             Line::from(vec![
-                Span::raw(crate::tr!(self.lang, "  子任务 ", "  subtasks ")),
+                Span::raw(crate::tr!(self.lang, "  检查单 ", "  checklist ")),
                 Span::styled(
                     "C",
                     Style::default()
                         .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(crate::tr!(self.lang, " 新增, ", " add, ")),
+                Span::raw(crate::tr!(self.lang, " 新增; ", " add; ")),
                 Span::styled(
-                    "Space",
+                    "Tab",
                     Style::default()
                         .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(crate::tr!(
                     self.lang,
-                    " 依次打卡, 全部完成自动重置",
-                    " to tick; auto-resets when all done"
+                    " 逐项管理: j/k 移动, Space 勾选, d 删除, J/K 排序, e 改名",
+                    " manage: j/k move, Space tick, d delete, J/K reorder, e rename"
                 )),
             ]),
             Line::from(vec![
@@ -1770,6 +1933,7 @@ impl<'a> App<'a> {
                         self.icon(Icon::Settings),
                         super::view_label(self.lang, View::Settings),
                     ),
+                    _ => ("", ""),
                 };
                 let padded_label = pad_right(label, 10);
 
@@ -1862,6 +2026,7 @@ impl<'a> App<'a> {
         if self.modules.settings {
             mod_group.push(("M", View::Settings));
         }
+        mod_group.push(("W", View::Workflow));
 
         for (key, v) in mod_group {
             let active = cur == v;
@@ -1885,6 +2050,10 @@ impl<'a> App<'a> {
                 View::Quotes => (
                     self.icon(Icon::Quotes),
                     super::view_label(self.lang, View::Quotes),
+                ),
+                View::Workflow => (
+                    self.icon(Icon::Workflow),
+                    super::view_label(self.lang, View::Workflow),
                 ),
                 _ => ("", ""),
             };
@@ -2117,16 +2286,33 @@ impl<'a> App<'a> {
                 crate::tr!(self.lang, "检查单:", "Checklist:"),
                 Style::default().fg(self.theme.text_dim),
             )));
-            for item in &d.task.checklist {
+            for (i, item) in d.task.checklist.iter().enumerate() {
+                let is_cursor = self.checklist_cursor == Some(i);
                 let check = if item.done { "[x]" } else { "[ ]" };
                 let c = if item.done {
                     self.theme.text_success
                 } else {
                     self.theme.text_dim
                 };
+                let prefix = if is_cursor { "▶ " } else { "  " };
                 lines.push(Line::from(Span::styled(
-                    format!("  {} {}", check, item.title),
-                    Style::default().fg(c),
+                    format!("{}{} {}", prefix, check, item.title),
+                    Style::default().fg(c).add_modifier(if is_cursor {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
+                )));
+            }
+            // 全勾选提示（不自动改任务状态）：引导用户用 x 标记完成。
+            if d.task.checklist.iter().all(|i| i.done) {
+                lines.push(Line::from(Span::styled(
+                    crate::tr!(
+                        self.lang,
+                        "✓ 所有步骤已完成 — 按 x 标记任务完成",
+                        "✓ all steps done — press x to complete the task"
+                    ),
+                    Style::default().fg(self.theme.text_success),
                 )));
             }
         }
@@ -2215,6 +2401,19 @@ impl<'a> App<'a> {
                 time::format_local(Some(e.at)),
                 event_cn,
                 action
+            )));
+        }
+
+        // 检查单管理模式（ChecklistFocus）的操作提示，吸引注意并告知按键。
+        if self.mode == Mode::ChecklistFocus {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                crate::tr!(
+                    self.lang,
+                    "▶ 检查单管理：j/k 移动 · Space 勾选 · d 删除 · J/K 排序 · e 改名 · Tab 退出",
+                    "▶ managing: j/k move · Space tick · d delete · J/K reorder · e rename · Tab exit"
+                ),
+                Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD),
             )));
         }
 

@@ -58,6 +58,8 @@ pub(crate) enum View {
     Tags,
     Quotes,
     Settings,
+    /// GTD 工作流说明视图（纯展示，无任务主体）。
+    Workflow,
 }
 
 /// 有状态的 7 个主视图（Inbox..Done），用于按状态统计计数。
@@ -91,7 +93,8 @@ impl View {
             | View::Archived
             | View::Tags
             | View::Quotes
-            | View::Settings => None,
+            | View::Settings
+            | View::Workflow => None,
         }
     }
 
@@ -138,11 +141,15 @@ pub(crate) enum Mode {
     RenamingProfile,
     /// 删除 profile 确认：等待 y/Enter 确认或 n/Esc 取消。
     ConfirmProfileDelete,
+    /// 检查单逐项管理：光标在清单项间移动，可单独勾选/删除/排序/改名。
+    ChecklistFocus,
+    /// 检查单项改名：输入新标题。
+    RenamingChecklist,
 }
 
 impl Mode {
     pub(crate) fn is_input(&self) -> bool {
-        !matches!(self, Mode::Normal | Mode::Visual)
+        !matches!(self, Mode::Normal | Mode::Visual | Mode::ChecklistFocus)
     }
 }
 
@@ -250,6 +257,8 @@ pub(crate) struct App<'a> {
     pub(crate) profile_name: String,
     /// 设置页待删除的 profile 名。
     pub(crate) pending_profile_delete: Option<String>,
+    /// 检查单管理（ChecklistFocus）模式下的光标位置（指向当前任务的某一项）。
+    pub(crate) checklist_cursor: Option<usize>,
 }
 
 impl<'a> App<'a> {
@@ -321,6 +330,7 @@ impl<'a> App<'a> {
             icon_style,
             profile_name: String::new(),
             pending_profile_delete: None,
+            checklist_cursor: None,
         };
         app.refresh()?;
 
@@ -1290,6 +1300,7 @@ impl<'a> App<'a> {
         if self.modules.settings {
             views.push(View::Settings);
         }
+        views.push(View::Workflow);
         let idx = views.iter().position(|v| *v == self.view).unwrap_or(0) as isize;
         let next_idx = (idx + delta).rem_euclid(views.len() as isize);
         self.set_view(views[next_idx as usize]);

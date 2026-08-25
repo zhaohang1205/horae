@@ -5,7 +5,7 @@ GTD terminal task manager (`horae`) — a Rust binary (edition 2021, **no lib ta
 ## Commands
 
 - Build/run: `cargo run -- capture "buy milk" --tag home` — note the `--` before subcommand args.
-- Test: `cargo test` — unit tests live in `src/tui/tests.rs`, `src/parser.rs`, and `src/commands/alarm.rs`; run one with `cargo test <name>`.
+- Test: `cargo test` — unit tests live in `src/tui/tests.rs`, `src/parser.rs`, `src/commands/alarm.rs`, `src/commands/pomo.rs`, and `src/schedule.rs`; run one with `cargo test <name>`.
 - Lint/format: `cargo clippy`, `cargo fmt`. Clippy must stay clean with `-- -D warnings`.
 - CI: GitHub Actions (`.github/workflows/ci.yml`) runs fmt, clippy `-D warnings`, tests, and an MSRV job; `release.yml` builds tagged releases (`v*`). `tempfile` is available for test DBs.
 
@@ -21,14 +21,14 @@ GTD terminal task manager (`horae`) — a Rust binary (edition 2021, **no lib ta
 - `time.rs` — pure time primitives: `parse_time` (human input: `now`, `+2h`, `today`, `2026-07-24 14:30` → UTC ms), `now_ms`, `local_day_bounds`, `format_local`.
 - `schedule.rs` — the recurrence/scheduling engine (in-process, pure): `occurrences` (RRULE expansion, no external crate, 366-horizon hidden inside), `effective_due` / `effective_due_from` (missed-or-next slot picking, `now` injected), `next_window` (pure reschedule computation), `display_due` (display precedence ladder). DB writes stay in callers (`tasks/transition.rs` calls `next_window` then writes).
 - `parser.rs` — `parse_quick_add`: splits input into `@tag` words and `~time` words.
-- `tui/` — `app.rs`, `handlers.rs` (key handling), `render.rs`, `ui.rs`, `calendar.rs`, `theme.rs` (Catppuccin), `i18n.rs`. `mod.rs` is thin: module decls, the label/row helpers, and `run`/`run_app`; splash-screen machinery lives in `splash.rs`, TUI tests in `tests.rs` (child of `tui`, so its `use super::*` still sees `mod.rs` items). **UI strings are Chinese by default and localized via `crate::tr!` / `Lang` (F6 toggles to English, F5 toggles theme); never hardcode UI text.**
+- `tui/` — `app.rs`, `handlers.rs` (key handling), `render.rs`, `ui.rs`, `theme.rs` (Catppuccin), `keys.rs` (keybinding definitions), `icons.rs` (Nerd-Font/ASCII glyph resolution), `splash.rs` (splash-screen machinery), `tests.rs` (TUI tests, child of `tui`). `mod.rs` is thin: module decls, the label/row helpers, and `run`/`run_app`. **UI strings are Chinese by default and localized via `crate::tr!` / `Lang` (F6 toggles to English, F5 toggles theme); never hardcode UI text.** (Crate-level `src/i18n.rs` holds the `tr!` macro and `Lang` enum.)
 - `tui/icons.rs` — every glyph goes through `App::icon(Icon::…)`; never inline Nerd Font PUA literals in render code. Style selection: env `HORAE_ICONS` (`nerd`/`ascii`) > settings key `icons` > auto-probe (`fc-list` contains "nerd"; probe failure → ASCII). ASCII fallbacks are pure single-char ASCII so `visual_len` alignment holds. Toggle lives in the F7 ModuleToggles popup (9th row).
-- `config.rs` (TUI): `HORAE_CONFIG_DIR` env var overrides `dirs::config_dir()` (used by tests); Settings view (`F8` key, side group `[Modules]`) manages profiles in `config.json` — n new / r rename / d delete (confirm) / s set default. The TUI session's `profile_name` is threaded in from `main.rs` via `commands::run`/`tui::run`; profile switching takes effect next launch (the `Connection` is borrowed, no hot-swap).
+- `config.rs` (TUI): `HORAE_CONFIG_DIR` env var overrides `dirs::config_dir()` (used by tests); Settings view (`M` key, side group `[Modules]`) manages profiles in `config.json` — n new / r rename / d delete (confirm) / s set default. The TUI session's `profile_name` is threaded in from `main.rs` via `commands::run`/`tui::run`; profile switching takes effect next launch (the `Connection` is borrowed, no hot-swap).
 
 ## Non-obvious rules (violating these breaks things)
 
 - **Timestamps**: store UTC ms INTEGER, never formatted strings. All time math goes through `time.rs`; display via `format_local`.
-- **Migrations**: never edit existing `migrations/*.sql`. Add a new file plus a new version block in `migrate.rs` (currently v1 = 0001+0002, v2 = +0003, v3 = +0004, v4 = +0005, v5 = +0006, v6 = +0007, v7 = +0008, v8 = +0009, v9 = +0010, v10 = +0011). Migration SQL is idempotent (IF NOT EXISTS / INSERT OR IGNORE); the `DROP COLUMN` in 0011 relies on the `user_version` guard rather than SQL-level idempotency.
+- **Migrations**: never edit existing `migrations/*.sql`. Add a new file plus a new version block in `migrate.rs` (currently v1 = 0001+0002, v2 = +0003, v3 = +0004, v4 = +0005, v5 = +0006, v6 = +0007, v7 = +0008, v8 = +0009, v9 = +0010, v10 = +0011, v11 = +0012). Migration SQL is idempotent (IF NOT EXISTS / INSERT OR IGNORE); the `DROP COLUMN` in 0011 relies on the `user_version` guard rather than SQL-level idempotency.
 - **New event types**: add a const in `model/event.rs` AND keep the `task_events` comment in `migrations/0001_init.sql` in sync.
 - **DB paths**: `~/.config/horae/horae.db`, `~/.config/horae/config.json` and `~/.config/horae/pomo.json` all derive from `dirs::config_dir()` — never hardcode.
 - **ID resolution**: commands accept a task id, a unique id-prefix, or an exact title (`resolve_id`).
@@ -46,4 +46,4 @@ Domain errors use `crate::error::Error` (thiserror); command handlers return `an
 
 ## Existing docs
 
-`README.md` is the bilingual user manual (中文/English). This file is the authoritative contributor guide.
+`README.md` is an index that points to `README_cn.md` (中文) and `README_en.md` (English) — the user manual is kept as two separate single-language files, not one bilingual file. This file is the authoritative contributor guide.

@@ -114,18 +114,134 @@ pub fn update_notes(conn: &Connection, id: &str, new_notes: &str) -> Result<Task
     get(conn, id)
 }
 
-pub fn update_checklist(
+/// Write the checklist JSON inside the mutate seam and log a `checklist` event
+/// (time-datafication: every structural change leaves an audit-trail entry).
+fn write_checklist(
     conn: &Connection,
     id: &str,
-    checklist: &Vec<task::ChecklistItem>,
-) -> Result<Task> {
-    let now = time::now_ms();
+    checklist: &[task::ChecklistItem],
+    meta: &str,
+) -> Result<()> {
     let cl_str = serde_json::to_string(checklist).unwrap_or_else(|_| "[]".to_string());
-    conn.execute(
-        "UPDATE tasks SET checklist=?1, updated_at=?2 WHERE id=?3",
-        rusqlite::params![cl_str, now, id],
-    )?;
-    get(conn, id)
+    crate::repo::mutate(conn, |tx, now| {
+        tx.execute(
+            "UPDATE tasks SET checklist=?1, updated_at=?2 WHERE id=?3",
+            rusqlite::params![cl_str, now, id],
+        )?;
+        log_event(tx, id, event::EV_CHECKLIST, None, None, Some(meta), now)?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// Append a new checklist item (done=false). Returns the new item's id.
+pub fn add_checklist_item(conn: &Connection, id: &str, title: &str) -> Result<Option<String>> {
+    let mut task = get(conn, id)?;
+    if title.trim().is_empty() {
+        return Ok(None);
+    }
+    let item_id = Uuid::new_v4().to_string();
+    task.checklist.push(task::ChecklistItem {
+        id: item_id.clone(),
+        title: title.to_string(),
+        done: false,
+    });
+    write_checklist(conn, id, &task.checklist, &format!("add:{}", title))?;
+    Ok(Some(item_id))
+}
+
+/// Toggle (flip `done`) a specific checklist item by id. Returns the item title if found.
+pub fn toggle_checklist_item(conn: &Connection, id: &str, item_id: &str) -> Result<Option<String>> {
+    let mut task = get(conn, id)?;
+    let mut toggled = None;
+    for item in task.checklist.iter_mut() {
+        if item.id == item_id {
+            item.done = !item.done;
+            toggled = Some(item.title.clone());
+            break;
+        }
+    }
+    if let Some(title) = &toggled {
+        write_checklist(conn, id, &task.checklist, &format!("toggle:{}", title))?;
+    }
+    Ok(toggled)
+}
+
+/// Quick path used by the `=` shortcut: tick the first still-undone item.
+/// Returns the ticked title, or `None` when every item is already done
+/// (the list is no longer auto-reset once fully checked).
+pub fn toggle_next_checklist_item(conn: &Connection, id: &str) -> Result<Option<String>> {
+    let task = get(conn, id)?;
+    let next = task
+        .checklist
+        .iter()
+        .find(|i| !i.done)
+        .map(|i| i.id.clone());
+    match next {
+        Some(item_id) => toggle_checklist_item(conn, id, &item_id),
+        None => Ok(None),
+    }
+}
+
+/// Remove a checklist item by id. Returns the removed title if found.
+pub fn delete_checklist_item(conn: &Connection, id: &str, item_id: &str) -> Result<Option<String>> {
+    let mut task = get(conn, id)?;
+    let before = task.checklist.len();
+    let removed: Vec<String> = task
+        .checklist
+        .iter()
+        .filter(|i| i.id == item_id)
+        .map(|i| i.title.clone())
+        .collect();
+    task.checklist.retain(|i| i.id != item_id);
+    if task.checklist.len() != before {
+        write_checklist(
+            conn,
+            id,
+            &task.checklist,
+            &format!("delete:{}", removed.join(",")),
+        )?;
+        Ok(removed.into_iter().next())
+    } else {
+        Ok(None)
+    }
+}
+
+/// Rename a checklist item by id. Returns the new title if found.
+pub fn rename_checklist_item(
+    conn: &Connection,
+    id: &str,
+    item_id: &str,
+    new_title: &str,
+) -> Result<Option<String>> {
+    let mut task = get(conn, id)?;
+    let mut renamed = None;
+    for item in task.checklist.iter_mut() {
+        if item.id == item_id {
+            item.title = new_title.to_string();
+            renamed = Some(new_title.to_string());
+            break;
+        }
+    }
+    if renamed.is_some() {
+        write_checklist(conn, id, &task.checklist, &format!("rename:{}", new_title))?;
+    }
+    Ok(renamed)
+}
+
+/// Move a checklist item by id up (-1) or down (+1) within the list; no-op at edges.
+pub fn move_checklist_item(conn: &Connection, id: &str, item_id: &str, dir: isize) -> Result<bool> {
+    let mut task = get(conn, id)?;
+    if let Some(idx) = task.checklist.iter().position(|i| i.id == item_id) {
+        let new_idx = idx as isize + dir;
+        if new_idx >= 0 && new_idx < task.checklist.len() as isize {
+            let new_idx = new_idx as usize;
+            task.checklist.swap(idx, new_idx);
+            write_checklist(conn, id, &task.checklist, "move")?;
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Transition a task from its current status to `to_status`,
@@ -369,37 +485,6 @@ pub fn purge(conn: &Connection, id: &str) -> Result<Task> {
     Ok(t)
 }
 
-/** 勾选清单项的结果：完成或重置。 */
-pub enum ToggleResult {
-    Checked(String),
-    Reset,
-}
-
-pub fn toggle_next_checklist_item(conn: &Connection, id: &str) -> Result<Option<ToggleResult>> {
-    let mut task = crate::repo::tasks::get(conn, id)?;
-    if task.checklist.is_empty() {
-        return Ok(None);
-    }
-
-    let mut toggled_title = None;
-    if let Some(item) = task.checklist.iter_mut().find(|i| !i.done) {
-        item.done = true;
-        toggled_title = Some(item.title.clone());
-    }
-
-    let result = if let Some(title) = toggled_title {
-        ToggleResult::Checked(title)
-    } else {
-        for item in task.checklist.iter_mut() {
-            item.done = false;
-        }
-        ToggleResult::Reset
-    };
-
-    update_checklist(conn, &task.id, &task.checklist)?;
-    Ok(Some(result))
-}
-
 pub fn ensure_ready_for_pomodoro(conn: &Connection, id: &str) -> Result<()> {
     let task = crate::repo::tasks::get(conn, id)?;
     if task.status != task::Status::Next && task.status != task::Status::Done {
@@ -613,5 +698,95 @@ mod tests {
             .filter(|e| e.event_type == event::EV_HABIT_COMPLETED)
             .count();
         assert_eq!(habit_events, 1, "不重复记录打卡事件");
+    }
+
+    #[test]
+    fn checklist_add_toggle_delete_rename_move_and_audit() {
+        let (_dir, conn) = test_conn();
+        let t = create_capture(
+            &conn,
+            &CaptureInput {
+                title: "task".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let a = add_checklist_item(&conn, &t.id, "step A").unwrap().unwrap();
+        let b = add_checklist_item(&conn, &t.id, "step B").unwrap().unwrap();
+        let c = add_checklist_item(&conn, &t.id, "step C").unwrap().unwrap();
+        assert_eq!(get(&conn, &t.id).unwrap().checklist.len(), 3);
+
+        // toggle a specific item
+        assert_eq!(
+            toggle_checklist_item(&conn, &t.id, &a).unwrap(),
+            Some("step A".to_string())
+        );
+        assert!(get(&conn, &t.id).unwrap().checklist[0].done);
+
+        // toggle_next ticks the first still-undone item (B), then C
+        assert_eq!(
+            toggle_next_checklist_item(&conn, &t.id).unwrap(),
+            Some("step B".to_string())
+        );
+        assert_eq!(
+            toggle_next_checklist_item(&conn, &t.id).unwrap(),
+            Some("step C".to_string())
+        );
+        // all done -> no auto-reset, returns None
+        assert_eq!(toggle_next_checklist_item(&conn, &t.id).unwrap(), None);
+        assert!(
+            get(&conn, &t.id).unwrap().checklist.iter().all(|i| i.done),
+            "全勾选后清单不应被重置"
+        );
+
+        // rename B
+        assert_eq!(
+            rename_checklist_item(&conn, &t.id, &b, "step B2").unwrap(),
+            Some("step B2".to_string())
+        );
+        assert!(get(&conn, &t.id)
+            .unwrap()
+            .checklist
+            .iter()
+            .any(|i| i.title == "step B2"));
+
+        // move A down (swap with B2)
+        assert!(move_checklist_item(&conn, &t.id, &a, 1).unwrap());
+        assert_eq!(get(&conn, &t.id).unwrap().checklist[1].id, a);
+
+        // delete C
+        assert_eq!(
+            delete_checklist_item(&conn, &t.id, &c).unwrap(),
+            Some("step C".to_string())
+        );
+        assert_eq!(get(&conn, &t.id).unwrap().checklist.len(), 2);
+
+        // every structural change logged as a checklist event
+        let ev_types = events(&conn, &t.id)
+            .unwrap()
+            .iter()
+            .map(|e| e.event_type.clone())
+            .collect::<Vec<_>>();
+        assert!(
+            ev_types.iter().any(|e| e == event::EV_CHECKLIST),
+            "检查单变更应记录 EV_CHECKLIST 审计事件"
+        );
+    }
+
+    #[test]
+    fn checklist_move_at_edges_is_noop() {
+        let (_dir, conn) = test_conn();
+        let t = create_capture(
+            &conn,
+            &CaptureInput {
+                title: "task".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let a = add_checklist_item(&conn, &t.id, "only").unwrap().unwrap();
+        assert!(!move_checklist_item(&conn, &t.id, &a, 1).unwrap());
+        assert!(!move_checklist_item(&conn, &t.id, &a, -1).unwrap());
     }
 }

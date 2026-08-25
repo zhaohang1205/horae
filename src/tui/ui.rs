@@ -26,21 +26,21 @@ pub fn status_letter(s: &Status) -> &'static str {
 pub fn status_color(s: &Status, is_dark: bool) -> Color {
     match (s, is_dark) {
         // Mocha（深色）
-        (Status::Inbox, true) => Color::Rgb(147, 153, 178),     // Overlay2
-        (Status::Next, true) => Color::Rgb(166, 227, 161),      // Green
-        (Status::Waiting, true) => Color::Rgb(249, 226, 175),   // Yellow
+        (Status::Inbox, true) => Color::Rgb(147, 153, 178), // Overlay2
+        (Status::Next, true) => Color::Rgb(166, 227, 161),  // Green
+        (Status::Waiting, true) => Color::Rgb(249, 226, 175), // Yellow
         (Status::Scheduled, true) => Color::Rgb(137, 180, 250), // Blue
-        (Status::Someday, true) => Color::Rgb(203, 166, 229),   // Mauve
+        (Status::Someday, true) => Color::Rgb(203, 166, 229), // Mauve
         (Status::Reference, true) => Color::Rgb(148, 226, 213), // Teal
-        (Status::Done, true) => Color::Rgb(127, 132, 156),      // Overlay1
+        (Status::Done, true) => Color::Rgb(127, 132, 156),  // Overlay1
         // Latte（浅色）
-        (Status::Inbox, false) => Color::Rgb(138, 143, 161),    // Overlay1
-        (Status::Next, false) => Color::Rgb(64, 160, 43),       // Green
-        (Status::Waiting, false) => Color::Rgb(223, 142, 29),   // Yellow
+        (Status::Inbox, false) => Color::Rgb(138, 143, 161), // Overlay1
+        (Status::Next, false) => Color::Rgb(64, 160, 43),    // Green
+        (Status::Waiting, false) => Color::Rgb(223, 142, 29), // Yellow
         (Status::Scheduled, false) => Color::Rgb(30, 102, 245), // Blue
-        (Status::Someday, false) => Color::Rgb(136, 58, 234),   // Mauve
+        (Status::Someday, false) => Color::Rgb(136, 58, 234), // Mauve
         (Status::Reference, false) => Color::Rgb(23, 146, 153), // Teal
-        (Status::Done, false) => Color::Rgb(138, 143, 161),     // Overlay1
+        (Status::Done, false) => Color::Rgb(138, 143, 161),  // Overlay1
     }
 }
 
@@ -136,7 +136,10 @@ pub fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
             } else if is_quote {
                 ("\"", app.theme.accent)
             } else {
-                (status_letter(&status_enum), status_color(&status_enum, app.theme.is_dark))
+                (
+                    status_letter(&status_enum),
+                    status_color(&status_enum, app.theme.is_dark),
+                )
             };
 
             let mut spans = vec![Span::styled(
@@ -198,13 +201,13 @@ pub fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
             if !due_text.is_empty() || !reason_cn.is_empty() {
                 spans.push(Span::styled(
                     format!("  {}{}", reason_cn, due_text),
-                    Style::default()
-                        .fg(due_color)
-                        .add_modifier(if due_color == app.theme.text_urgent {
+                    Style::default().fg(due_color).add_modifier(
+                        if due_color == app.theme.text_urgent {
                             Modifier::BOLD
                         } else {
                             Modifier::empty()
-                        }),
+                        },
+                    ),
                 ));
             }
 

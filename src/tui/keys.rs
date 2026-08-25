@@ -56,6 +56,8 @@ pub(crate) enum When {
     QuoteAdd,
     /// 金句功能启用且选中金句视图行：移出金句。
     QuoteRemove,
+    /// 检查单逐项管理（ChecklistFocus）模式下可用。
+    ChecklistFocus,
 }
 
 /// 非任务视图：行不是任务，任务操作键不适用。
@@ -120,6 +122,7 @@ impl KeyDef {
             QuoteRemove => {
                 c.quotes_enabled && c.view == crate::tui::View::Quotes && c.has_selection
             }
+            ChecklistFocus => c.mode == Mode::ChecklistFocus,
         }
     }
 
@@ -313,6 +316,15 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         keys: "M",
         zh: "设置",
         en: "settings",
+        group: KeyGroup::Global,
+        status: false,
+        when: When::Always,
+        heat: 50,
+    },
+    KeyDef {
+        keys: "W",
+        zh: "工作流",
+        en: "workflow",
         group: KeyGroup::Global,
         status: false,
         when: When::Always,
@@ -526,6 +538,69 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         status: false,
         when: When::HasChecklist,
         heat: 64,
+    },
+    KeyDef {
+        keys: "Tab",
+        zh: "检查单管理",
+        en: "manage checklist",
+        group: KeyGroup::Task,
+        status: false,
+        when: When::HasChecklist,
+        heat: 62,
+    },
+    KeyDef {
+        keys: "j/k",
+        zh: "移动光标",
+        en: "move cursor",
+        group: KeyGroup::Task,
+        status: false,
+        when: When::ChecklistFocus,
+        heat: 60,
+    },
+    KeyDef {
+        keys: "Space",
+        zh: "勾选/取消",
+        en: "tick / untick",
+        group: KeyGroup::Task,
+        status: false,
+        when: When::ChecklistFocus,
+        heat: 64,
+    },
+    KeyDef {
+        keys: "d",
+        zh: "删除项",
+        en: "delete item",
+        group: KeyGroup::Task,
+        status: false,
+        when: When::ChecklistFocus,
+        heat: 58,
+    },
+    KeyDef {
+        keys: "J/K",
+        zh: "上下排序",
+        en: "reorder",
+        group: KeyGroup::Task,
+        status: false,
+        when: When::ChecklistFocus,
+        heat: 56,
+    },
+    KeyDef {
+        keys: "e",
+        zh: "改名",
+        en: "rename",
+        group: KeyGroup::Task,
+        status: false,
+        when: When::ChecklistFocus,
+        heat: 54,
+    },
+    KeyDef {
+        keys: "Tab/Esc",
+        zh: "退出管理",
+        en: "exit manage",
+        group: KeyGroup::Task,
+        status: false,
+        when: When::ChecklistFocus,
+        heat: 52,
     },
     KeyDef {
         keys: "P",

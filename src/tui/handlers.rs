@@ -174,10 +174,22 @@ impl<'a> AppHandlers for App<'a> {
         if self.handle_archive_keys(key)? {
             return Ok(());
         }
+        if self.handle_checklist_enter(key)? {
+            return Ok(());
+        }
         Ok(())
     }
 
     fn handle_input(&mut self, key: KeyEvent) -> Result<()> {
+        if self.mode == Mode::ChecklistFocus {
+            return self.handle_checklist_keys(key);
+        }
+        if self.mode == Mode::RenamingChecklist && key.code == KeyCode::Esc {
+            self.set_mode(Mode::ChecklistFocus);
+            self.input.clear();
+            self.load_detail();
+            return Ok(());
+        }
         if self.mode == Mode::ConfirmArchive {
             return self.handle_confirm_archive(key);
         }
@@ -254,12 +266,14 @@ impl<'a> AppHandlers for App<'a> {
             Mode::WaitingWho => self.confirm_waiting_who(input)?,
             Mode::WaitingWhen => self.confirm_waiting_when(input)?,
             Mode::ChecklistAdding => self.confirm_checklist_adding(input)?,
+            Mode::RenamingChecklist => self.confirm_checklist_rename(input)?,
             Mode::CreatingTag => self.confirm_creating_tag(input)?,
             Mode::ConfiguringPomo => self.confirm_pomo_config(input)?,
             Mode::CreatingProfile => self.confirm_creating_profile(input)?,
             Mode::RenamingProfile => self.confirm_renaming_profile(input)?,
             Mode::Normal
             | Mode::Visual
+            | Mode::ChecklistFocus
             | Mode::ConfirmArchive
             | Mode::ConfirmPurge
             | Mode::ConfirmProfileDelete => {}
@@ -510,6 +524,7 @@ impl<'a> App<'a> {
                 }
                 self.set_view(View::Settings);
             }
+            KeyCode::Char('W') => self.set_view(View::Workflow),
             KeyCode::Char('g') => self.move_sel(-10000),
             KeyCode::Char('G') => self.move_sel(10000),
             _ => return Ok(false),
@@ -741,22 +756,22 @@ impl<'a> App<'a> {
         match key.code {
             KeyCode::Char('=') => {
                 if let Some(row) = self.items.get(self.selected).cloned() {
-                    if let Ok(Some(result)) =
-                        crate::repo::tasks::toggle_next_checklist_item(self.conn, &row.id)
-                    {
-                        match result {
-                            crate::repo::tasks::ToggleResult::Checked(title) => {
-                                self.status_message =
-                                    crate::tr!(self.lang, "打卡: {}", "Checked: {}", title);
-                            }
-                            crate::repo::tasks::ToggleResult::Reset => {
-                                self.status_message =
-                                    crate::tr!(self.lang, "已重置检查单", "Checklist reset")
-                                        .to_string();
-                            }
+                    match crate::repo::tasks::toggle_next_checklist_item(self.conn, &row.id) {
+                        Ok(Some(title)) => {
+                            self.status_message =
+                                crate::tr!(self.lang, "打卡: {}", "Checked: {}", title);
                         }
-                        self.load_detail();
+                        Ok(None) => {
+                            self.status_message = crate::tr!(
+                                self.lang,
+                                "检查单已全部完成，可按 x 标记任务完成",
+                                "All steps done — press x to complete the task"
+                            )
+                            .to_string();
+                        }
+                        Err(_) => {}
                     }
+                    self.load_detail();
                 }
             }
             KeyCode::Char('P') => {
@@ -1352,22 +1367,11 @@ impl<'a> App<'a> {
     fn confirm_checklist_adding(&mut self, input: &str) -> Result<()> {
         if !input.is_empty() {
             if let Some(row) = self.items.get(self.selected).cloned() {
-                if let Ok(mut task) = tasks::get(self.conn, &row.id) {
-                    task.checklist.push(task::ChecklistItem {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        title: input.to_string(),
-                        done: false,
-                    });
-                    if self.note(tasks::update_checklist(
-                        self.conn,
-                        &task.id,
-                        &task.checklist,
-                    )) {
-                        self.status_message =
-                            crate::tr!(self.lang, "检查单 +1", "Checklist +1").to_string();
-                    }
-                    self.load_detail();
+                if tasks::add_checklist_item(self.conn, &row.id, input).is_ok() {
+                    self.status_message =
+                        crate::tr!(self.lang, "检查单 +1", "Checklist +1").to_string();
                 }
+                self.load_detail();
             }
         }
         self.set_mode(Mode::Normal);
@@ -1383,6 +1387,182 @@ impl<'a> App<'a> {
         }
         self.set_mode(Mode::Normal);
         self.input.clear();
+        Ok(())
+    }
+
+    /// 从普通模式按 `Tab` 进入检查单逐项管理（仅当当前任务含检查单）。
+    fn handle_checklist_enter(&mut self, key: KeyEvent) -> Result<bool> {
+        if key.code == KeyCode::Tab && !key.modifiers.contains(KeyModifiers::CONTROL) {
+            if let Some(row) = self.items.get(self.selected).cloned() {
+                if row.done.is_some() {
+                    if let Ok(task) = tasks::get(self.conn, &row.id) {
+                        if !task.checklist.is_empty() {
+                            let cursor = task
+                                .checklist
+                                .iter()
+                                .position(|i| !i.done)
+                                .unwrap_or(0)
+                                .min(task.checklist.len() - 1);
+                            self.checklist_cursor = Some(cursor);
+                            self.set_mode(Mode::ChecklistFocus);
+                            self.status_message = crate::tr!(
+                                self.lang,
+                                "检查单管理：j/k 移动 · Space 勾选 · d 删除 · J/K 排序 · e 改名 · Tab 退出",
+                                "managing: j/k move · Space tick · d delete · J/K reorder · e rename · Tab exit"
+                            )
+                            .to_string();
+                            self.load_detail();
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    /// 检查单管理模式下处理光标移动与各项操作。
+    fn handle_checklist_keys(&mut self, key: KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Tab | KeyCode::Esc => {
+                self.set_mode(Mode::Normal);
+                self.checklist_cursor = None;
+                self.load_detail();
+            }
+            KeyCode::Char('j') | KeyCode::Down => self.checklist_cursor_move(1),
+            KeyCode::Char('k') | KeyCode::Up => self.checklist_cursor_move(-1),
+            KeyCode::Char(' ') | KeyCode::Enter => self.checklist_toggle(),
+            KeyCode::Char('d') | KeyCode::Delete => self.checklist_delete(),
+            KeyCode::Char('J') => self.checklist_move(1),
+            KeyCode::Char('K') => self.checklist_move(-1),
+            KeyCode::Char('e') => self.checklist_rename_start(),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn checklist_cursor_move(&mut self, delta: isize) {
+        let idx = match (
+            self.items.get(self.selected).cloned(),
+            self.checklist_cursor,
+        ) {
+            (Some(row), Some(cur)) => {
+                if let Ok(task) = tasks::get(self.conn, &row.id) {
+                    let len = task.checklist.len();
+                    if len == 0 {
+                        return;
+                    }
+                    Some((cur as isize + delta).clamp(0, (len - 1) as isize) as usize)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        if let Some(i) = idx {
+            self.checklist_cursor = Some(i);
+        }
+    }
+
+    fn checklist_toggle(&mut self) {
+        if let (Some(row), Some(cur)) = (
+            self.items.get(self.selected).cloned(),
+            self.checklist_cursor,
+        ) {
+            if let Ok(task) = tasks::get(self.conn, &row.id) {
+                if let Some(item) = task.checklist.get(cur) {
+                    let item_id = item.id.clone();
+                    let title = item.title.clone();
+                    if tasks::toggle_checklist_item(self.conn, &row.id, &item_id).is_ok() {
+                        self.status_message =
+                            crate::tr!(self.lang, "打卡: {}", "Checked: {}", title).to_string();
+                        self.load_detail();
+                    }
+                }
+            }
+        }
+    }
+
+    fn checklist_delete(&mut self) {
+        if let (Some(row), Some(cur)) = (
+            self.items.get(self.selected).cloned(),
+            self.checklist_cursor,
+        ) {
+            if let Ok(task) = tasks::get(self.conn, &row.id) {
+                if let Some(item) = task.checklist.get(cur) {
+                    let item_id = item.id.clone();
+                    if tasks::delete_checklist_item(self.conn, &row.id, &item_id).is_ok() {
+                        let len = task.checklist.len().saturating_sub(1);
+                        if len == 0 {
+                            self.checklist_cursor = None;
+                            self.set_mode(Mode::Normal);
+                        } else {
+                            self.checklist_cursor = Some(cur.min(len - 1));
+                        }
+                        self.status_message =
+                            crate::tr!(self.lang, "已删除检查项", "Checklist item deleted")
+                                .to_string();
+                        self.load_detail();
+                    }
+                }
+            }
+        }
+    }
+
+    fn checklist_move(&mut self, dir: isize) {
+        if let (Some(row), Some(cur)) = (
+            self.items.get(self.selected).cloned(),
+            self.checklist_cursor,
+        ) {
+            if let Ok(task) = tasks::get(self.conn, &row.id) {
+                if let Some(item) = task.checklist.get(cur) {
+                    let item_id = item.id.clone();
+                    let max = task.checklist.len().saturating_sub(1) as isize;
+                    if tasks::move_checklist_item(self.conn, &row.id, &item_id, dir)
+                        .unwrap_or(false)
+                    {
+                        self.checklist_cursor = Some((cur as isize + dir).clamp(0, max) as usize);
+                        self.load_detail();
+                    }
+                }
+            }
+        }
+    }
+
+    fn checklist_rename_start(&mut self) {
+        if let (Some(row), Some(cur)) = (
+            self.items.get(self.selected).cloned(),
+            self.checklist_cursor,
+        ) {
+            if let Ok(task) = tasks::get(self.conn, &row.id) {
+                if let Some(item) = task.checklist.get(cur) {
+                    self.input.clear();
+                    self.input.push_str(&item.title);
+                    self.input_cursor = self.input.len();
+                    self.set_mode(Mode::RenamingChecklist);
+                }
+            }
+        }
+    }
+
+    fn confirm_checklist_rename(&mut self, input: &str) -> Result<()> {
+        if let (Some(row), Some(cur)) = (
+            self.items.get(self.selected).cloned(),
+            self.checklist_cursor,
+        ) {
+            if let Ok(task) = tasks::get(self.conn, &row.id) {
+                if let Some(item) = task.checklist.get(cur) {
+                    let item_id = item.id.clone();
+                    if !input.trim().is_empty() {
+                        tasks::rename_checklist_item(self.conn, &row.id, &item_id, input.trim())?;
+                        self.status_message =
+                            crate::tr!(self.lang, "已改名", "Renamed").to_string();
+                    }
+                }
+            }
+        }
+        self.set_mode(Mode::ChecklistFocus);
+        self.load_detail();
         Ok(())
     }
 
@@ -1442,8 +1622,12 @@ impl<'a> App<'a> {
                     );
                 }
             } else {
-                self.status_message =
-                    crate::tr!(self.lang, "时长与周期必须大于0", "lengths & interval must be > 0").into();
+                self.status_message = crate::tr!(
+                    self.lang,
+                    "时长与周期必须大于0",
+                    "lengths & interval must be > 0"
+                )
+                .into();
             }
         } else {
             self.status_message = crate::tr!(

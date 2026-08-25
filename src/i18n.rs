@@ -30,6 +30,14 @@ impl Lang {
             Lang::En => en,
         }
     }
+
+    /// Toggle between Chinese and English.
+    pub fn toggle(self) -> Self {
+        match self {
+            Lang::Zh => Lang::En,
+            Lang::En => Lang::Zh,
+        }
+    }
 }
 
 /// Pick the translation for the current language.
