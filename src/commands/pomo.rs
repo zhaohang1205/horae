@@ -192,7 +192,7 @@ pub(crate) fn advance_phase(
             let current_title = state.task_title.as_deref().unwrap_or("无标题");
             let total_mins = state.today_count * state.config.work_mins;
 
-            if state.cycle.is_multiple_of(4) {
+            if state.cycle.is_multiple_of(state.config.long_break_interval) {
                 state.phase = Phase::LongBreak;
                 let long_break_ms = (state.config.long_break_mins as i64) * 60 * 1000;
                 state.end_ts = Some(now + long_break_ms);
@@ -419,6 +419,24 @@ mod tests {
         assert!(advance_phase(&conn, &mut state, 2_000));
         assert_eq!(state.phase, Phase::LongBreak);
         assert_eq!(state.cycle, 4);
+        let expected = 2_000 + (PomoConfig::default().long_break_mins as i64) * 60 * 1000;
+        assert_eq!(state.end_ts, Some(expected));
+    }
+
+    #[test]
+    fn custom_interval_enters_long_break_early() {
+        let (_dir, conn) = test_conn();
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let mut state = work_state(None, "x", 1_000);
+        state.cycle = 1;
+        state.streak = 1;
+        state.today_count = 1;
+        state.last_date = Some(today);
+        state.config.long_break_interval = 2;
+
+        assert!(advance_phase(&conn, &mut state, 2_000));
+        assert_eq!(state.phase, Phase::LongBreak, "interval=2 时第 2 个番茄应进入长休");
+        assert_eq!(state.cycle, 2);
         let expected = 2_000 + (PomoConfig::default().long_break_mins as i64) * 60 * 1000;
         assert_eq!(state.end_ts, Some(expected));
     }

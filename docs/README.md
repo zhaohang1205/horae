@@ -87,7 +87,7 @@ id-prefix, or an exact title.
 | `=` | 勾选检查单 / 重置 · tick / reset checklist |
 | `T` | 批量打标签（可视模式多选）· bulk tag (visual multi-select) |
 | `n` | 编辑长备注（`$EDITOR`）· edit notes |
-| `P` / `S` / `[` | 开始/续杯 / 停止番茄 / 番茄时长配置 · pomodoro start/continue/stop/config |
+| `P` / `S` / `[` | 开始/续杯 / 停止番茄 / 番茄时长配置（格式 `工作;短休;长休[;长休周期]`，如 `25;5;15;4`）· pomodoro start/continue/stop/config |
 | `A` / `D` | 归档（y 确认 / n 取消）· archive (y/n) |
 | `u` | 恢复归档（支持批量）· restore from archive (batch-capable) |
 | `c` | 标签库视图新增标签 · add tag (Tags view) |

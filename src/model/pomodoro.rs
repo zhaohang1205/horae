@@ -14,6 +14,12 @@ pub struct PomoConfig {
     pub work_mins: u32,
     pub short_break_mins: u32,
     pub long_break_mins: u32,
+    #[serde(default = "default_long_break_interval")]
+    pub long_break_interval: u32,
+}
+
+fn default_long_break_interval() -> u32 {
+    4
 }
 
 impl Default for PomoConfig {
@@ -22,6 +28,7 @@ impl Default for PomoConfig {
             work_mins: 25,
             short_break_mins: 5,
             long_break_mins: 15,
+            long_break_interval: default_long_break_interval(),
         }
     }
 }

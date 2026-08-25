@@ -597,10 +597,11 @@ impl<'a> App<'a> {
             KeyCode::Char('[') => {
                 let pomo = crate::repo::pomodoro::get_state().unwrap_or_default();
                 self.input = format!(
-                    "{};{};{}",
+                    "{};{};{};{}",
                     pomo.config.work_mins,
                     pomo.config.short_break_mins,
-                    pomo.config.long_break_mins
+                    pomo.config.long_break_mins,
+                    pomo.config.long_break_interval
                 );
                 self.set_mode(Mode::ConfiguringPomo);
             }
@@ -1401,44 +1402,54 @@ impl<'a> App<'a> {
 
     fn confirm_pomo_config(&mut self, input: &str) -> Result<()> {
         let parts: Vec<&str> = input.split(';').map(|s| s.trim()).collect();
-        if parts.len() == 3 {
-            if let (Ok(w), Ok(s), Ok(l)) = (
-                parts[0].parse::<u32>(),
-                parts[1].parse::<u32>(),
-                parts[2].parse::<u32>(),
-            ) {
-                if w > 0 && s > 0 && l > 0 {
-                    let mut pomo = crate::repo::pomodoro::get_state().unwrap_or_default();
-                    pomo.config.work_mins = w;
-                    pomo.config.short_break_mins = s;
-                    pomo.config.long_break_mins = l;
-                    if crate::repo::pomodoro::save_state(&pomo).is_ok() {
-                        self.status_message = crate::tr!(
-                            self.lang,
-                            "🍅 番茄钟配置已更新: 工作 {}m / 短休 {}m / 长休 {}m",
-                            "🍅 Pomo config updated: work {}m / short {}m / long {}m",
-                            w,
-                            s,
-                            l
-                        );
-                    }
-                } else {
-                    self.status_message =
-                        crate::tr!(self.lang, "时长必须大于0", "lengths must be > 0").into();
+        if !(3..=4).contains(&parts.len()) {
+            self.status_message = crate::tr!(
+                self.lang,
+                "格式需包含3或4项 (工作;短休;长休[;长休周期])",
+                "need 3 or 4 parts (work;short;long[;interval])"
+            )
+            .into();
+            self.set_mode(Mode::Normal);
+            self.input.clear();
+            return Ok(());
+        }
+
+        let w = parts[0].parse::<u32>();
+        let s = parts[1].parse::<u32>();
+        let l = parts[2].parse::<u32>();
+        let i = if parts.len() == 4 {
+            parts[3].parse::<u32>()
+        } else {
+            Ok(crate::model::pomodoro::PomoConfig::default().long_break_interval)
+        };
+
+        if let (Ok(w), Ok(s), Ok(l), Ok(i)) = (w, s, l, i) {
+            if w > 0 && s > 0 && l > 0 && i > 0 {
+                let mut pomo = crate::repo::pomodoro::get_state().unwrap_or_default();
+                pomo.config.work_mins = w;
+                pomo.config.short_break_mins = s;
+                pomo.config.long_break_mins = l;
+                pomo.config.long_break_interval = i;
+                if crate::repo::pomodoro::save_state(&pomo).is_ok() {
+                    self.status_message = crate::tr!(
+                        self.lang,
+                        "🍅 番茄钟配置已更新: 工作 {}m / 短休 {}m / 长休 {}m / 长休周期 {} 个",
+                        "🍅 Pomo config updated: work {}m / short {}m / long {}m / interval {}",
+                        w,
+                        s,
+                        l,
+                        i
+                    );
                 }
             } else {
-                self.status_message = crate::tr!(
-                    self.lang,
-                    "配置格式错误 (示例: 25;5;15)",
-                    "invalid format (e.g. 25;5;15)"
-                )
-                .into();
+                self.status_message =
+                    crate::tr!(self.lang, "时长与周期必须大于0", "lengths & interval must be > 0").into();
             }
         } else {
             self.status_message = crate::tr!(
                 self.lang,
-                "格式必须包含3项 (工作;短休;长休)",
-                "must have 3 parts (work;short;long)"
+                "配置格式错误 (示例: 25;5;15;4)",
+                "invalid format (e.g. 25;5;15;4)"
             )
             .into();
         }
