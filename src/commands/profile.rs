@@ -56,6 +56,7 @@ fn new(config: &mut Config, name: &str, db: Option<&str>) -> anyhow::Result<()> 
         Profile {
             db: db.to_string(),
             cloud: None,
+            ntfy: None,
         },
     );
     config.save()?;
@@ -120,6 +121,7 @@ mod tests {
                     url: "libsql://x.turso.io".to_string(),
                     token_env: None,
                 }),
+                ntfy: None,
             },
         );
         assert!(config.profile("work").unwrap().cloud.is_some());
@@ -143,6 +145,7 @@ mod tests {
             Profile {
                 db: "profiles/p.db".to_string(),
                 cloud: None,
+                ntfy: None,
             },
         );
         let path = config.db_path(config.profile("p").unwrap());

@@ -193,6 +193,18 @@ pub enum Command {
     },
     /// Launch the interactive TUI
     Tui,
+    /// Push mobile reminders via ntfy (requires `ntfy` config in the profile)
+    #[command(
+        long_about = "Send task reminders to your phone via ntfy (https://ntfy.sh). \
+        Configure the `ntfy` block in your profile (url, topic, optional token_env, priority, lead_minutes). \
+        The `watch` daemon pushes a native notification when a timed task comes due; \
+        `ntfy test` fires a sample push so you can confirm your phone receives it.",
+        after_help = "Examples:\n  horae ntfy test\n  horae --profile work ntfy test"
+    )]
+    Ntfy {
+        #[arg(value_name = "ACTION", help = "test (send a sample push)")]
+        action: String,
+    },
     /// Watch a Syncthing-shared folder (phone <-> computer bridge)
     #[command(
         long_about = "Watch a folder synced with the phone (e.g. via Syncthing) and reconcile \

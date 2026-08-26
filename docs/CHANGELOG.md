@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 手机提醒推送（ntfy）：`watch` 守护进程新增第五 stage，定时任务到点前
+  （默认 10 分钟，`lead_minutes` 可调）向 ntfy 主题 POST 一条消息，手机上
+  订阅该主题的 ntfy App 即收原生推送——补齐移动端提醒短板，零自建应用、
+  零服务器。新增 `horae ntfy test` 发送样例推送验证链路；profile 配置新增
+  `ntfy` 块（`url`/`topic`/`token_env`/`priority`/`lead_minutes`/`tags`），
+  访问令牌只走环境变量、绝不落盘。仅推送带有效到期时间的任务；未配置时该
+  stage 为空操作，单条推送失败不阻断其它阶段、下一轮自动重试（沿用 watch
+  容错契约）。网络层抽象为 `NtfyTransport` trait（ureq + rustls），测试用
+  `FakeTransport` 无网断言。
+
 ## [0.1.1] - 2026-08-26
 
 ### Fixed

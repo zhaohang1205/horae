@@ -111,6 +111,23 @@ alias hw='horae --profile work'   # 加进 rc 文件
 - 到期任务电脑会往 `reminders/` 写 markdown，Syncthing 推送文件变更通知到手机。
 - 注意：提醒只在**电脑开机期间**触发；关机期间到期，开机会补发。
 
+### 补强：ntfy 实时推送提醒（推荐）
+
+`reminders/*.md` 只是文件变更通知，不是真正的系统推送。要「到点手机弹原生通知」，
+加配 ntfy（零自建应用、零服务器）：
+
+1. 手机装 ntfy App，订阅一个**随机主题**（如 `horae-<uuid>`——主题名即凭据，
+   可猜的主题任何人都能读取你的提醒或伪造推送；要更稳就在 ntfy Web 给主题设令牌）。
+2. profile 的 config.json 加：
+   ```json
+   "ntfy": { "url": "https://ntfy.sh", "topic": "horae-<随机串>",
+             "priority": 5, "lead_minutes": 10 }
+   ```
+   设了令牌再加 `"token_env": "HORAE_NTFY_TOKEN"` 并 `export` 该变量。
+3. `horae ntfy test` 发样例推送验证；常驻的 `horae watch` 会自动在定时任务
+   到点前（默认 10 分钟）推送。仅带排程/截止时间的任务会推送；未配置时该
+   功能完全静默。
+
 ## 八、灵感与知识：金句库
 
 - F7 开启金句功能（持久化），侧栏出现 `[Library]`。

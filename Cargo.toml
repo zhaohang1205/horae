@@ -24,6 +24,7 @@ dirs = "5"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "layout-cache", "underline-color"] }
 crossterm = "0.29"
 unicode-width = "0.2"
+ureq = { version = "2", default-features = false, features = ["tls"] }
 
 [dev-dependencies]
 assert_cmd = "2"

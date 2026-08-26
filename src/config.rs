@@ -21,6 +21,39 @@ pub struct Profile {
     pub db: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cloud: Option<CloudConfig>,
+    /// ntfy 手机提醒推送配置（可选；未配置则 watch 的 ntfy stage 为空操作）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ntfy: Option<NtfyConfig>,
+}
+
+/// ntfy 推送配置：桌面 `watch` 守护进程在任务到点前（默认 10 分钟）向手机发
+/// 原生推送。凭据沿用 `CloudConfig` 惯例——token 只走环境变量，永不落盘。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NtfyConfig {
+    /// ntfy 服务地址，如 `https://ntfy.sh`（自建填自己的域名）。
+    pub url: String,
+    /// 订阅主题（相当于口令，建议用随机串）。
+    pub topic: String,
+    /// 读取 Bearer token 的环境变量名（ntfy 主题设了访问令牌时填写）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_env: Option<String>,
+    /// 推送优先级 1–5（5 = 强制提醒），默认 5。
+    #[serde(default = "default_ntfy_priority")]
+    pub priority: u8,
+    /// 提前多少分钟推送，默认 10。
+    #[serde(default = "default_ntfy_lead")]
+    pub lead_minutes: u64,
+    /// ntfy `Tags` 头（emoji 短码，逗号分隔），可选。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<String>,
+}
+
+fn default_ntfy_priority() -> u8 {
+    5
+}
+
+fn default_ntfy_lead() -> u64 {
+    10
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,6 +183,7 @@ impl Default for Config {
             Profile {
                 db: DEFAULT_DB.to_string(),
                 cloud: None,
+                ntfy: None,
             },
         );
         Self {
@@ -187,6 +221,7 @@ mod tests {
             Profile {
                 db: "profiles/work.db".to_string(),
                 cloud: None,
+                ntfy: None,
             },
         );
         cfg.upsert_profile(
@@ -197,6 +232,7 @@ mod tests {
                     url: "libsql://example.turso.io".to_string(),
                     token_env: Some("HORAE_TURSO_TOKEN".to_string()),
                 }),
+                ntfy: None,
             },
         );
         cfg.set_default("work").unwrap();
@@ -234,6 +270,7 @@ mod tests {
                 Profile {
                     db: "profiles/p.db".to_string(),
                     cloud: None,
+                    ntfy: None,
                 },
             );
             let path = config.db_path(config.profile("p").unwrap());
@@ -252,9 +289,12 @@ mod tests {
 
     #[test]
     fn db_path_relative_resolves_under_config_dir() {
-        let cfg = Config::default();
-        let p = cfg.db_path(cfg.profile("default").unwrap());
-        assert!(p.is_absolute());
-        assert!(p.to_string_lossy().ends_with("horae/horae.db"));
+        // 隔离 HORAE_CONFIG_DIR，避免并行测试污染导致路径断言不稳定。
+        crate::testutil::with_no_config_dir(|| {
+            let cfg = Config::default();
+            let p = cfg.db_path(cfg.profile("default").unwrap());
+            assert!(p.is_absolute());
+            assert!(p.to_string_lossy().ends_with("horae/horae.db"));
+        });
     }
 }

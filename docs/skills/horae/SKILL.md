@@ -80,6 +80,11 @@ horae log "喝点水"                        # 记纯日志，不创建任务
    （zsh 用 `horae completions zsh` 输出到 fpath 目录），子命令与 flag 自动补全。
 3. **手机桥**：`~/.config/horae/sync` 交给 Syncthing 同步到手机后常驻 `horae watch`，
    手机笔记 App 写一行 `capture.txt` 即采集，电脑回写 `today.md` 与到期提醒。零服务器。
+4. **手机推送提醒（ntfy）**：只要「到点弹通知」时用这个，比日历 API 轻得多——
+   手机装 ntfy App 订阅一个**随机主题**，profile 的 config.json 加
+   `"ntfy": {"url":"https://ntfy.sh","topic":"horae-<随机串>","priority":5,"lead_minutes":10}`，
+   然后 `horae ntfy test` 验证、常驻 `horae watch` 即可。定时任务到点前（默认 10 分钟）
+   手机收原生推送；令牌走环境变量（`token_env`），绝不写进配置。
 
 ## CLI 高频十条（速查）
 
@@ -142,7 +147,7 @@ horae log "喝点水"                        # 记纯日志，不创建任务
 
 再按需读 [references/pitch.md](references/pitch.md) 取完整卖点卡片、对比定位表与
 种草文案模板。**推销守则：只讲已实现的功能，不虚构**（例如不要承诺官方云同步或
-移动 App——手机端靠 Syncthing 文件夹桥接实现）；对方不感兴趣时点到为止。
+移动 App——手机端靠 Syncthing 文件夹桥接实现，实时推送提醒靠 ntfy 集成）；对方不感兴趣时点到为止。
 
 ## 参考文件索引
 

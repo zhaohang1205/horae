@@ -75,7 +75,8 @@ horae show <task-id>                 # 查看完整时间线
 | `horae tags` | 标签库 |
 | `horae pomo start <id> \| stop \| daemon \| waybar` | 番茄钟（别名 `p`） |
 | `horae alarm waybar [slot] \| next [slot] [--limit N] [--all]` | 到期提醒 |
-| `horae watch [--dir PATH] [--interval S] [--once]` | 手机同步桥（Syncthing） |
+| `horae watch [--dir PATH] [--interval S] [--once]` | 手机同步桥（Syncthing）+ ntfy 提醒推送 |
+| `horae ntfy test` | 发送一条 ntfy 测试推送，验证手机收到 |
 | `horae profile <list\|new\|rename\|rm\|set-default> [--db PATH]` | 数据集（Profile）管理 |
 | `horae completions <shell>` | 生成 shell 补全 |
 
@@ -186,6 +187,48 @@ horae watch --dir ~/gtd-sync # 自定义同步目录
 | `*.done` | 已处理回执（去重依据） |
 
 采集用手机上的任意笔记 App（Obsidian / Markor 等）指向该目录，写一行存盘即采集；任务到期提醒仅在电脑开机期间触发——关机时到期，开机后补发。用任一免费 PaaS 部署 `horae serve`（中继）可获得真正实时的推送，此为可选升级路径。
+
+## 手机提醒（`horae ntfy`）
+
+如果你只想要「任务到点时手机弹通知」（而不是在手机上维护日历），最省事的方式是用 [ntfy](https://ntfy.sh)：桌面端 `watch` 守护进程在定时任务到点前（默认 10 分钟）向 ntfy 主题 POST 一条消息，手机上订阅该主题的 ntfy App 即收原生推送。**零自建应用、零服务器**，比自建日历 API 轻得多。
+
+1. 手机装 ntfy（[ntfy.sh](https://ntfy.sh) 或 F-Droid / App Store），订阅一个随机主题（如 `horae-<uuid>`）。
+
+> ⚠️ **隐私提示**：公共 ntfy.sh 上的主题名就是唯一凭据——任何知道（或猜到）主题名的人都能**订阅读取你的提醒内容**，也能**向你的手机伪造推送**。务必使用随机长主题名；更进一步可在 ntfy Web 界面给该主题设置访问令牌，并把令牌放进环境变量（见下文 `token_env`），绝不写进 config.json。
+2. 在 `~/.config/horae/config.json` 的对应 profile 下加 `ntfy` 块：
+
+   ```json
+   {
+     "default_profile": "default",
+     "profiles": {
+       "default": {
+         "db": "horae.db",
+         "ntfy": {
+           "url": "https://ntfy.sh",
+           "topic": "horae-你的随机主题",
+           "token_env": "HORAE_NTFY_TOKEN",
+           "priority": 5,
+           "lead_minutes": 10,
+           "tags": "alarm"
+         }
+       }
+     }
+   }
+   ```
+
+   - `token_env`：读取 Bearer token 的环境变量名（令牌本身**绝不落盘**，只放环境变量）；不用令牌可省略。
+   - `priority`：1–5，默认 5（强制提醒）；`lead_minutes`：提前多少分钟推送；`tags`：ntfy 的 emoji 短码（`Tags` 头），可选。
+
+3. 发送一条测试推送，确认手机收到：
+
+   ```sh
+   export HORAE_NTFY_TOKEN=你的令牌   # 若设了 token_env
+   horae ntfy test
+   ```
+
+4. 常驻 `horae watch`，到点任务的手机提醒即自动推送（仅带排程/截止时间的任务会推送；无时间的纯收件箱任务不推送）。ntfy 未配置时 `watch` 的该 stage 为空操作，对老用户零影响；单条推送失败不影响其它阶段，下一轮自动重试。
+
+> 提醒仅在电脑开机期间触发——关机时到期的任务，开机后补发。需要全程实时请参考 `horae serve` 中继（可选升级路径）。
 
 ## 开发
 

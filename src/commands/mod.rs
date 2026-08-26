@@ -10,6 +10,7 @@ mod focus;
 mod list;
 mod log;
 pub mod notify;
+mod ntfy;
 pub mod pomo;
 pub mod profile;
 mod review;
@@ -114,11 +115,13 @@ fn run_inner(cmd: Command, conn: &Connection, profile: Option<&str>) -> Result<(
                 dir: dir.unwrap_or_else(watch::default_sync_dir),
                 interval_secs: interval.unwrap_or(watch::DEFAULT_INTERVAL_SECS),
                 once,
+                profile: profile.map(|s| s.to_string()),
             },
         ),
         Command::Export { file } => backup::run_export(conn, file.as_deref()),
         Command::Import { file, replace } => backup::run_import(conn, &file, replace),
         Command::Stats => stats::run(conn),
+        Command::Ntfy { action } => ntfy::run(&action, profile),
         Command::Focus { start } => focus::run(conn, start),
         Command::Log { message } => log::run(conn, &message),
         Command::Completions { .. } => {

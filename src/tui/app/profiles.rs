@@ -30,6 +30,7 @@ impl<'a> App<'a> {
             crate::config::Profile {
                 db: format!("profiles/{name}.db"),
                 cloud: None,
+                ntfy: None,
             },
         );
         if config.save().is_err() {

@@ -6,6 +6,7 @@ mod error;
 mod i18n;
 mod model;
 mod notification;
+mod ntfy;
 mod parser;
 mod repo;
 mod schedule;

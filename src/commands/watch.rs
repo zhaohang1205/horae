@@ -8,6 +8,7 @@ use anyhow::Result;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
+use crate::config::{Config, NtfyConfig};
 use crate::model::task::{Status, Task};
 use crate::repo::tags;
 use crate::repo::tasks;
@@ -35,6 +36,8 @@ pub struct WatchArgs {
     pub dir: PathBuf,
     pub interval_secs: u64,
     pub once: bool,
+    /// 当前 profile 名（透传，用于读取该 profile 的 ntfy 配置）。
+    pub profile: Option<String>,
 }
 
 /// 单轮对账的结果，便于测试断言与日志。
@@ -44,6 +47,7 @@ pub struct ProcessSummary {
     pub actions: usize,
     pub reminders: usize,
     pub today_written: bool,
+    pub ntfy_pushed: usize,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -65,10 +69,10 @@ pub fn run(conn: &Connection, args: WatchArgs) -> Result<()> {
     fs::create_dir_all(&args.dir)?;
     fs::create_dir_all(args.dir.join(DIR_REMINDERS))?;
     if args.once {
-        let s = process_once(conn, &args.dir)?;
+        let s = process_once(conn, &args.dir, args.profile.as_deref())?;
         println!(
-            "processed: {} captures, {} actions, {} reminders",
-            s.captures, s.actions, s.reminders
+            "processed: {} captures, {} actions, {} reminders, {} ntfy",
+            s.captures, s.actions, s.reminders, s.ntfy_pushed
         );
         return Ok(());
     }
@@ -78,7 +82,7 @@ pub fn run(conn: &Connection, args: WatchArgs) -> Result<()> {
         args.interval_secs
     );
     loop {
-        if let Err(e) = process_once(conn, &args.dir) {
+        if let Err(e) = process_once(conn, &args.dir, args.profile.as_deref()) {
             eprintln!("watch error: {e:#}");
         }
         std::thread::sleep(Duration::from_secs(args.interval_secs));
@@ -89,11 +93,16 @@ pub fn run(conn: &Connection, args: WatchArgs) -> Result<()> {
 /// 1. 采集 `capture.txt` 的新行（quick-add 语法）进收件箱；
 /// 2. 执行 `actions.txt` 的新操作行；
 /// 3. 到点/逾期的任务写 `reminders/*.md`；
-/// 4. 重写 `today.md` 活动任务快照。
+/// 4. 重写 `today.md` 活动任务快照；
+/// 5. 到点任务向 ntfy 推送手机提醒（未配置则空操作）。
 ///
 /// 各阶段独立容错：单个文件/阶段失败不阻断其余阶段（守护进程下一轮重试
 /// 失败的阶段），最后把首个错误上报给调用方。
-pub fn process_once(conn: &Connection, dir: &Path) -> Result<ProcessSummary> {
+pub fn process_once(
+    conn: &Connection,
+    dir: &Path,
+    profile: Option<&str>,
+) -> Result<ProcessSummary> {
     fs::create_dir_all(dir)?;
     fs::create_dir_all(dir.join(DIR_REMINDERS))?;
 
@@ -118,9 +127,27 @@ pub fn process_once(conn: &Connection, dir: &Path) -> Result<ProcessSummary> {
     stage!(reminders, write_reminders(conn, dir));
     stage!(today_written, write_today(conn, dir));
 
+    // 读取当前 profile 的 ntfy 配置；缺失/未配置时该 stage 为空操作。
+    let ntfy_cfg: Option<NtfyConfig> = match Config::load() {
+        Ok(cfg) => cfg
+            .resolve_profile(profile)
+            .ok()
+            .and_then(|(_, p)| p.ntfy.clone()),
+        Err(_) => None,
+    };
+    stage!(ntfy_pushed, ntfy_stage(conn, dir, &ntfy_cfg));
+
     match first_err {
         Some(e) => Err(e),
         None => Ok(summary),
+    }
+}
+
+/// ntfy 推送 stage：未配置直接返回 0；否则调用 [`crate::ntfy::push_due`]。
+fn ntfy_stage(conn: &Connection, dir: &Path, cfg: &Option<NtfyConfig>) -> Result<usize> {
+    match cfg {
+        Some(c) => crate::ntfy::push_due(conn, dir, c, &crate::ntfy::UreqTransport),
+        None => Ok(0),
     }
 }
 
@@ -482,6 +509,7 @@ fn prune_done(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Profile;
     use crate::testutil::test_conn;
 
     fn sync_dir(root: &Path) -> PathBuf {
@@ -504,7 +532,7 @@ mod tests {
         )
         .unwrap();
 
-        let s = process_once(&conn, &dir).unwrap();
+        let s = process_once(&conn, &dir, None).unwrap();
         assert_eq!(s.captures, 2);
         assert!(!dir.join("capture.txt").exists(), "capture.txt 已被消费");
 
@@ -530,11 +558,11 @@ mod tests {
         let (root, conn) = test_conn();
         let dir = sync_dir(root.path());
         fs::write(dir.join("capture.txt"), "买牛奶\n").unwrap();
-        process_once(&conn, &dir).unwrap();
+        process_once(&conn, &dir, None).unwrap();
 
         // 模拟手机在处理期间重写同一内容（崩溃恢复/竞态）→ 去重跳过
         fs::write(dir.join("capture.txt"), "买牛奶\n").unwrap();
-        let s = process_once(&conn, &dir).unwrap();
+        let s = process_once(&conn, &dir, None).unwrap();
         assert_eq!(s.captures, 0, "重复行跳过");
         assert_eq!(all_tasks(&conn).len(), 1);
     }
@@ -544,7 +572,7 @@ mod tests {
         let (root, conn) = test_conn();
         let dir = sync_dir(root.path());
         fs::write(dir.join("capture.processing"), "恢复我\n").unwrap();
-        let s = process_once(&conn, &dir).unwrap();
+        let s = process_once(&conn, &dir, None).unwrap();
         assert_eq!(s.captures, 1);
         assert!(all_tasks(&conn).iter().any(|t| t.title == "恢复我"));
         assert!(!dir.join("capture.processing").exists(), "暂存已清理");
@@ -565,7 +593,7 @@ mod tests {
         .unwrap();
 
         fs::write(dir.join("actions.txt"), format!("done {}\n", &t.id[..8])).unwrap();
-        let s = process_once(&conn, &dir).unwrap();
+        let s = process_once(&conn, &dir, None).unwrap();
         assert_eq!(s.actions, 1);
         assert_eq!(tasks::get(&conn, &t.id).unwrap().status, Status::Done);
 
@@ -578,7 +606,7 @@ mod tests {
         )
         .unwrap();
         fs::write(dir.join("actions.txt"), "set 另一个 status next\n").unwrap();
-        process_once(&conn, &dir).unwrap();
+        process_once(&conn, &dir, None).unwrap();
         assert_eq!(tasks::get(&conn, &t2.id).unwrap().status, Status::Next);
 
         fs::write(
@@ -586,7 +614,7 @@ mod tests {
             format!("set {} due tomorrow\n", &t2.id[..8]),
         )
         .unwrap();
-        process_once(&conn, &dir).unwrap();
+        process_once(&conn, &dir, None).unwrap();
         assert!(
             tasks::get(&conn, &t2.id).unwrap().due_at.is_some(),
             "due 已设置"
@@ -602,7 +630,7 @@ mod tests {
         let (root, conn) = test_conn();
         let dir = sync_dir(root.path());
         fs::write(dir.join("actions.txt"), "done 不存在的任务\n").unwrap();
-        let s = process_once(&conn, &dir).unwrap();
+        let s = process_once(&conn, &dir, None).unwrap();
         assert_eq!(s.actions, 1, "失败行也算被消费（回执记录）");
         let done = fs::read_to_string(dir.join("actions.done")).unwrap();
         assert!(done.contains("[fail] done 不存在的任务"), "回执: {done}");
@@ -628,7 +656,7 @@ mod tests {
         mk("以后再说", Status::Someday);
         mk("已完成", Status::Done);
 
-        let s = process_once(&conn, &dir).unwrap();
+        let s = process_once(&conn, &dir, None).unwrap();
         assert!(s.today_written, "today.md 首次写入");
         let md = fs::read_to_string(dir.join(FILE_TODAY)).unwrap();
         assert!(md.contains("活跃任务"), "{md}");
@@ -637,7 +665,7 @@ mod tests {
         assert!(!md.contains("已完成"), "done 不进活动视图: {md}");
 
         // 内容未变 → 不重复写
-        let s2 = process_once(&conn, &dir).unwrap();
+        let s2 = process_once(&conn, &dir, None).unwrap();
         assert!(!s2.today_written, "无变化不重写");
     }
 
@@ -657,7 +685,7 @@ mod tests {
         )
         .unwrap();
 
-        let s = process_once(&conn, &dir).unwrap();
+        let s = process_once(&conn, &dir, None).unwrap();
         assert_eq!(s.reminders, 1);
         let files: Vec<_> = fs::read_dir(dir.join(DIR_REMINDERS))
             .unwrap()
@@ -667,7 +695,7 @@ mod tests {
         let content = fs::read_to_string(files[0].path()).unwrap();
         assert!(content.contains("到期任务"), "{content}");
 
-        let s2 = process_once(&conn, &dir).unwrap();
+        let s2 = process_once(&conn, &dir, None).unwrap();
         assert_eq!(s2.reminders, 0, "同一 occurrence 不重复提醒");
         assert_eq!(
             fs::read_dir(dir.join(DIR_REMINDERS)).unwrap().count(),
@@ -705,7 +733,7 @@ mod tests {
         bytes.extend_from_slice("second ok line\n".as_bytes());
         fs::write(dir.join("capture.txt"), bytes).unwrap();
 
-        let s = process_once(&conn, &dir).unwrap();
+        let s = process_once(&conn, &dir, None).unwrap();
         assert_eq!(s.captures, 3, "三行都被消费（含畸形行）");
         assert!(all_tasks(&conn).iter().any(|t| t.title == "buy milk"));
         let done = fs::read_to_string(dir.join("capture.done")).unwrap();
@@ -724,7 +752,7 @@ mod tests {
         fs::create_dir_all(dir.join(FILE_TODAY)).unwrap();
         fs::write(dir.join("capture.txt"), "隔离故障\n").unwrap();
 
-        let _ = process_once(&conn, &dir).unwrap_err();
+        let _ = process_once(&conn, &dir, None).unwrap_err();
         assert_eq!(
             all_tasks(&conn).len(),
             1,
@@ -737,8 +765,53 @@ mod tests {
 
         // 故障解除后下一轮自愈
         fs::remove_dir(dir.join(FILE_TODAY)).unwrap();
-        let s = process_once(&conn, &dir).unwrap();
+        let s = process_once(&conn, &dir, None).unwrap();
         assert!(s.today_written, "恢复后 today.md 正常写出");
+    }
+
+    #[test]
+    fn ntfy_stage_failure_does_not_block_other_stages() {
+        crate::testutil::with_test_config_dir(|| {
+            // 写入一个指向不可达地址的 ntfy 配置，验证该 stage 失败时不拖垮守护进程。
+            let mut cfg = Config::default();
+            cfg.upsert_profile(
+                "default",
+                Profile {
+                    db: "horae.db".into(),
+                    cloud: None,
+                    ntfy: Some(NtfyConfig {
+                        url: "https://127.0.0.1:1".into(),
+                        topic: "x".into(),
+                        token_env: None,
+                        priority: 5,
+                        lead_minutes: 10,
+                        tags: None,
+                    }),
+                },
+            );
+            cfg.save().unwrap();
+
+            let (root, conn) = test_conn();
+            let dir = sync_dir(root.path());
+            tasks::create_capture(
+                &conn,
+                &tasks::CaptureInput {
+                    title: "ntfy-fail".into(),
+                    status: Status::Next,
+                    due_at: Some(time::now_ms() - 1000),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            fs::write(dir.join("capture.txt"), "隔离故障\n").unwrap();
+
+            let s = process_once(&conn, &dir, None).unwrap();
+            assert!(
+                all_tasks(&conn).iter().any(|t| t.title == "隔离故障"),
+                "ntfy 网络失败不阻断 capture 摄取"
+            );
+            assert_eq!(s.ntfy_pushed, 0, "不可达 ntfy → 推送 0，且不报 Err");
+        });
     }
 
     #[cfg(unix)]
@@ -764,12 +837,12 @@ mod tests {
         let rem = dir.join(DIR_REMINDERS);
         fs::create_dir_all(&rem).unwrap();
         fs::set_permissions(&rem, fs::Permissions::from_mode(0o555)).unwrap();
-        let s = process_once(&conn, &dir).unwrap();
+        let s = process_once(&conn, &dir, None).unwrap();
         assert_eq!(s.reminders, 0, "只读目录下提醒被跳过而非崩溃");
 
         // 权限恢复 → 下一轮自动补写
         fs::set_permissions(&rem, fs::Permissions::from_mode(0o755)).unwrap();
-        let s2 = process_once(&conn, &dir).unwrap();
+        let s2 = process_once(&conn, &dir, None).unwrap();
         assert_eq!(s2.reminders, 1, "失败提醒下一轮重试成功");
     }
 }

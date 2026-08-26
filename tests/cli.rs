@@ -335,3 +335,26 @@ fn pomo_start_accepts_id_prefix() {
     // 清理后台 daemon，避免影响后续测试与进程残留
     env.cmd().args(["pomo", "stop"]).assert().success();
 }
+
+// ---------------------------------------------------------------- ntfy
+
+#[test]
+fn ntfy_test_errors_when_unconfigured() {
+    let env = env();
+    // 全新配置目录、未写入 ntfy 块 → 应给出清晰的配置缺失提示而非崩溃
+    env.cmd()
+        .args(["ntfy", "test"])
+        .assert()
+        .failure()
+        .stderr(contains("未配置 ntfy"));
+}
+
+#[test]
+fn ntfy_rejects_unknown_action() {
+    let env = env();
+    env.cmd()
+        .args(["ntfy", "bogus"])
+        .assert()
+        .failure()
+        .stderr(contains("unknown ntfy action"));
+}
