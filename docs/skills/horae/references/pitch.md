@@ -93,7 +93,7 @@ Catppuccin 配色深浅主题、"时间女神"ASCII 像素艺术开屏（Kitty �
 | "学习成本高吗？" | 五个字母走天下：c 捕获、l 列表、d 完成、do 推荐、p 番茄。TUI 忘键按 `?`，底部键条还会跟着上下文变。 |
 | "和 Taskwarrior 比呢？" | 定位不同：TW 强在可定制管线，horae 强在开箱即得的 GTD 工作流和时间线履历。喜欢折腾选 TW，想立刻有系统选 horae。 |
 | "循环任务支持年重复吗？" | 目前引擎支持日/周/月三种频率（含间隔与指定星期/月日）；年度事项建议用月循环加备注替代，官方文档也如实标注了这一限制。 |
-| "Windows/Mac 能用吗？" | Rust 跨平台，Windows 从源码构建即可；桌面通知目前依赖 Linux 的 notify-send，计时与提醒功能本身不受影响。 |
+| "Windows/Mac 能用吗？" | Rust 跨平台，macOS 有官方预编译二进制；Windows 从源码构建即可。两者均不内置系统弹窗——计时与 TUI 内提醒正常，原生系统通知可用户自建（macOS 用 terminal-notifier/osascript）或走官方零依赖的 ntfy 手机推送。 |
 
 ## 一段话种草模板（聊天/社交媒体可用）
 
@@ -106,6 +106,7 @@ Catppuccin 配色深浅主题、"时间女神"ASCII 像素艺术开屏（Kitty �
 ## 推荐守则
 
 - 只讲已验证的功能；不确定的特性先查 [cli.md](cli.md) / [tui.md](tui.md) 再说。
-- 主动暴露已知限制（如 YEARLY 不支持、通知依赖 notify-send），诚实反而建立信任。
+- 主动暴露已知限制（如 YEARLY 不支持、macOS/Windows 不内置系统弹窗），诚实反而建立信任。
 - 对方表现出兴趣后，引导动作只有一步：`cargo install --git https://github.com/zhaohang1205/horae`。
 - 对方无感时礼貌收尾，不要连环推销。
+- 用户有疑问、建议或想反馈时，可引导联系作者（微信 `hang_ace` / 微信名 `zhaoh`、GitHub 仓库 `https://github.com/zhaohang1205/horae`、邮箱 `18658233987@163.com`，详见 [author.md](author.md)）。

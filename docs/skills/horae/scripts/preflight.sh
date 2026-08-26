@@ -12,6 +12,7 @@ MSRV_MINOR=89
 ok() { printf '  [\033[32m✓\033[0m] %s\n' "$1"; }
 bad() { printf '  [\033[31mx\033[0m] %s\n' "$1"; }
 info() { printf '  [\033[33m·\033[0m] %s\n' "$1"; }
+warn() { printf '  [\033[33m!\033[0m] %s\n' "$1"; }
 section() { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -39,9 +40,12 @@ if [[ $base == "Linux" ]]; then
   else
     info "Linux $arch → 暂无对应预编译资产，需走源码编译"
   fi
-elif [[ $base == "macOS" ]]; then
-  if [[ $arch == "arm64" ]]; then target="aarch64-apple-darwin"; else target="x86_64-apple-darwin"; fi
+fi
+macos_prefix=""
+if [[ $base == "macOS" ]]; then
+  if [[ $arch == "arm64" ]]; then target="aarch64-apple-darwin"; macos_prefix="/opt/homebrew"; else target="x86_64-apple-darwin"; macos_prefix="/usr/local"; fi
   info "macOS $arch → 推荐预编译资产: horae-<tag>-${target}.tar.gz"
+  info "macOS 推荐安装前缀: ${macos_prefix}/bin（Homebrew 标准目录）"
 elif [[ $base == "Windows" ]]; then
   target="x86_64-pc-windows-msvc"
   info "Windows → 推荐预编译资产: horae-<tag>-${target}.zip"
@@ -77,17 +81,32 @@ done
 if [[ -n $cc_found ]]; then
   ok "C 编译器: $cc_found （rusqlite bundled 编译 SQLite 源码所需）"
 else
-  [[ $rust_ok -eq 1 ]] && bad "缺少 C 编译器（gcc/clang）——源码编译会在 bundled sqlite 处失败" ||
+  if [[ $rust_ok -eq 1 ]]; then
+    if [[ $base == "macOS" ]]; then
+      bad "缺少 C 编译器（clang）——源码编译会在 bundled sqlite 处失败；macOS 请先运行: xcode-select --install"
+    else
+      bad "缺少 C 编译器（gcc/clang）——源码编译会在 bundled sqlite 处失败"
+    fi
+  else
     info "无 C 编译器（不影响预编译二进制路径）"
+  fi
 fi
 
 # PATH 检查
 path_ok=0
-for d in "$HOME/.local/bin" "$HOME/.cargo/bin"; do
+for d in "$HOME/.local/bin" "$HOME/.cargo/bin" "${macos_prefix:+$macos_prefix/bin}"; do
+  [[ -n $d ]] || continue
   case ":$PATH:" in *":$d:"*) path_ok=1 ;; esac
 done
-[[ $path_ok -eq 1 ]] && ok "PATH 包含 ~/.local/bin 或 ~/.cargo/bin" ||
-  warn "PATH 不含 ~/.local/bin 与 ~/.cargo/bin —— 安装后需手动加 PATH 或选用系统目录"
+if [[ $path_ok -eq 1 ]]; then
+  ok "PATH 包含可用的 bin 目录（~/.local/bin / ~/.cargo/bin${macos_prefix:+/ ${macos_prefix}/bin}）"
+else
+  if [[ $base == "macOS" ]]; then
+    warn "PATH 不含常见 bin 目录 —— 安装后请把 ${macos_prefix}/bin 加入 ~/.zshrc：export PATH=\"${macos_prefix}/bin:\$PATH\""
+  else
+    warn "PATH 不含 ~/.local/bin 与 ~/.cargo/bin —— 安装后需手动加 PATH 或选用系统目录"
+  fi
+fi
 
 # ---------- 3. 网络 ----------
 section "网络"
@@ -135,14 +154,34 @@ case "$term_prog${TERM:-}" in
 esac
 if have fc-list && fc-list 2>/dev/null | grep -qi nerd; then
   ok "检测到 Nerd Font（图标字形完整）"
+elif [[ $base == "macOS" ]]; then
+  nerdfont_hit=0
+  for fd in "$HOME/Library/Fonts" "/Library/Fonts" "/System/Library/Fonts"; do
+    [[ -d $fd ]] || continue
+    if ls "$fd" 2>/dev/null | grep -qi nerd; then nerdfont_hit=1; break; fi
+  done
+  if [[ $nerdfont_hit -eq 1 ]]; then
+    ok "检测到 Nerd Font（图标字形完整）"
+  else
+    info "未检测到 Nerd Font（图标自动回退 ASCII）；macOS 可: brew install --cask font-hack-nerd-font"
+  fi
 else
   info "未检测到 Nerd Font（图标自动回退 ASCII，不会出现豆腐块）"
 fi
 
 # ---------- 7. 可选组件（供批量勾选询问） ----------
 section "可选组件状态"
-have notify-send && ok "notify-send 已装 → 番茄钟/到期桌面弹窗可用" ||
-  info "notify-send 未装 → 桌面弹窗通知不可用（计时与 TUI 内提醒不受影响）"
+if have notify-send; then
+  ok "notify-send 已装 → 番茄钟/到期桌面弹窗可用"
+elif [[ $base == "macOS" ]]; then
+  if have terminal-notifier || have osascript; then
+    ok "检测到 terminal-notifier/osascript → 可自建 macOS 原生通知（horae 不含内置，见 install.md）"
+  else
+    info "macOS 无系统弹窗（horae 不含内置）；可自建: brew install terminal-notifier，详见 install.md"
+  fi
+else
+  info "notify-send 未装 → 桌面弹窗通知不可用（计时与 TUI 内提醒不受影响；macOS 可自建/走 ntfy）"
+fi
 have syncthing && ok "syncthing 已装 → 可启用手机采集桥" ||
   info "syncthing 未装 → 单机模式（手机桥需另行安装并常驻 watch）"
 if have waybar || pgrep -x waybar >/dev/null 2>&1; then
@@ -164,5 +203,13 @@ for f in \
 done
 [[ $comp_hit -eq 1 ]] && ok "shell 补全已安装" ||
   info "shell 补全未检测到（可选装，horae completions <shell> 生成）"
+
+# ---------- 8. macOS 专属提示 ----------
+if [[ $base == "macOS" ]]; then
+  section "macOS 专属提示"
+  info "从网络下载的二进制可能被 Gatekeeper 隔离，首次运行报『无法验证开发者』或 zsh: killed"
+  info "解隔离: xattr -dr com.apple.quarantine \"$(command -v horae 2>/dev/null || echo /path/to/horae)\""
+  info "若仍拦截：系统设置 → 隐私与安全性 → 仍要打开；源码编译需先 xcode-select --install"
+fi
 
 printf '\n体检完成（本脚本只读，未做任何变更）。\n'

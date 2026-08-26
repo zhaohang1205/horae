@@ -79,7 +79,7 @@ install -m755 target/release/horae ~/.local/bin/   # 或 cargo install --path .
 | --- | --- | --- | --- |
 | **Nerd Font**（任选一款设为终端字体） | 界面图标为丰富字形 | 自动回退纯 ASCII 字符，不会出现"豆腐块"；功能无损 | [nerdfonts.com](https://www.nerdfonts.com/) 下载或发行版包（Arch: `pacman -S ttf-nerd-fonts-symbols`），设为终端字体即可；也可用 `HORAE_ICONS=nerd\|ascii` 强制指定 |
 | **Kitty 协议终端**（Kitty/Ghostty/WezTerm） | 开屏"时间女神"像素艺术完整渲染 | ASCII 文字版开屏，功能无损 | 换装终端即可，无需重装 horae |
-| **libnotify / notify-send** | 番茄钟结束、任务到期的桌面弹窗 | 计时、TUI 内提醒完全正常，只是没有系统级弹窗；**Windows/macOS 本就不支持系统弹窗** | Arch: `sudo pacman -S libnotify`；Debian/Ubuntu: `sudo apt install libnotify-bin`；Fedora: `sudo dnf install libnotify` |
+| **libnotify / notify-send** | 番茄钟结束、任务到期的桌面弹窗 | 计时、TUI 内提醒完全正常，只是没有系统级弹窗；**Windows/macOS 本就不内置系统弹窗**（macOS 用户可自建或用 ntfy，见下） | Linux: Arch `sudo pacman -S libnotify`；Debian/Ubuntu `sudo apt install libnotify-bin`；Fedora `sudo dnf install libnotify`。macOS/Windows 见「macOS 专属安装与排错」 |
 | **Syncthing**（手机桥） | 手机笔记 App 写一行即采集任务、回看今日快照、收到期提醒；零服务器 | 纯单机使用，其余功能全部正常 | 见 workflows.md「手机采集桥」一节；需常驻 `horae watch` |
 | **waybar 模块** | 状态栏常驻 🍅 倒计时与最近到期提醒 | 手动跑 `horae stats` 查看 | waybar 配置里加 custom module 指向 `horae pomo waybar` / `horae alarm waybar` |
 | **shell 补全** | Tab 补全子命令与 flag | 手打全名，不影响其他 | `horae completions bash > ~/.local/share/bash-completions/completions/horae`；zsh 输出到 fpath 目录后 `compinit` |
@@ -93,8 +93,84 @@ install -m755 target/release/horae ~/.local/bin/   # 或 cargo install --path .
 | 平台 | 数据目录 | 备注 |
 | --- | --- | --- |
 | Linux | `~/.config/horae/` | 体验最完整（桌面通知、waybar、Kitty 协议均支持） |
-| macOS | `~/Library/Application Support/horae/` | 系统级弹窗可能不触发，计时/TUI 提醒正常 |
+| macOS | `~/Library/Application Support/horae/` | 系统级弹窗不内置（可自建/走 ntfy），计时/TUI 提醒正常 |
 | Windows | `%APPDATA%\horae\` | 源码构建；桌面通知不触发；WezTerm 可获完整开屏 |
+
+## macOS 专属安装与排错
+
+macOS 是官方正式支持的平台（Apple Silicon `aarch64-apple-darwin`、Intel `x86_64-apple-darwin`
+均有预编译二进制），但有几处与 Linux 不同的坑，按下面处理即可顺利装上。
+
+### 1. 安装前缀与 PATH（zsh）
+
+macOS 默认 shell 是 zsh，`~/.bashrc` 不会被登录 shell 自动读取；Homebrew 的标准 bin 目录
+（Apple Silicon 为 `/opt/homebrew/bin`，Intel 为 `/usr/local/bin`）应写进 `~/.zshrc`：
+
+```sh
+# Apple Silicon
+echo 'export PATH="/opt/homebrew/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+# Intel
+echo 'export PATH="/usr/local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+```
+
+路径 A 解压后建议装到上述目录（而非 `~/.local/bin`，除非你已把它加入 PATH）：
+
+```sh
+TAG=v0.1.1   # 以实际最新 release 为准
+T=aarch64-apple-darwin   # Apple Silicon；Intel 用 x86_64-apple-darwin
+cd "$(mktemp -d)"
+curl -LO "https://github.com/zhaohang1205/horae/releases/download/${TAG}/horae-${TAG}-${T}.tar.gz"
+curl -LO "https://github.com/zhaohang1205/horae/releases/download/${TAG}/horae-${TAG}-${T}.tar.gz.sha256"
+shasum -a 256 -c "horae-${TAG}-${T}.tar.gz.sha256"   # macOS 用 shasum 而非 sha256sum
+tar xzf "horae-${TAG}-${T}.tar.gz"
+install -m755 horae /opt/homebrew/bin/   # 或 /usr/local/bin/
+horae --version
+```
+
+> 校验：Linux 用 `sha256sum -c`，macOS 自带 `shasum -a 256 -c`（无 sha256sum）。
+
+### 2. Gatekeeper 隔离（头号失败原因）
+
+从网络下载的二进制会被 Gatekeeper 打上隔离属性，首次运行可能报
+「无法打开，因为无法验证开发者」或直接 `zsh: killed`。解隔离：
+
+```sh
+xattr -dr com.apple.quarantine /opt/homebrew/bin/horae   # 按实际安装路径调整
+```
+
+若仍被拦截：打开 **系统设置 → 隐私与安全性**，找到对应拦截记录点「仍要打开」。
+（用 `curl` 直接下载与用浏览器下载一样会触发隔离，解隔离步骤不可省。）
+
+### 3. 源码编译前置（仅路径 B/C 需要）
+
+`cargo install --git` / `git clone` 编译 bundled SQLite 需要 C 编译器：
+
+```sh
+xcode-select --install   # 安装 Command Line Tools（含 clang）
+```
+
+Rust 工具链同样需 ≥ 1.89，缺失时先装 [rustup](https://rustup.rs/)。
+
+### 4. macOS 原生通知（仅说明可行性，不夸大）
+
+**horae 本身不含 macOS 系统弹窗**——番茄钟结束、任务到期只在 TUI 内与计时逻辑里提醒，
+不会自动弹出 macOS 通知中心横幅。若你想要原生系统通知，属于**用户侧自建桥接**：
+
+- 安装 `terminal-notifier`：`brew install terminal-notifier`（或用系统自带
+  `osascript -e 'display notification "..."'`）。
+- 把 horae 的提醒/事件接到上述工具（如用 shell 包装命令、或轮询 `pomo.json` /
+  `horae alarm next`）即可在 macOS 通知中心弹出原生横幅。
+- 这是社区/用户自建方案，horae 仓库不内置、不保证长期接口稳定。
+
+**官方零依赖推荐仍是 ntfy 手机原生推送**（见 SKILL.md「手机推送提醒」与
+workflows.md）：profile 的 `config.json` 配 ntfy 后常驻 `horae watch`，
+定时任务到点前手机收原生推送，无需在本机折腾弹窗。
+
+### 5. 其他选项
+
+- Nerd Font：macOS 若未装字体，图标自动回退 ASCII（无豆腐块）；想要图标字形可
+  `brew install --cask font-hack-nerd-font` 并设为终端字体。
+- Kitty 协议终端：Ghostty / Kitty / WezTerm 在 macOS 同样完整渲染开屏像素艺术。
 
 ## 升级
 
@@ -118,3 +194,6 @@ install -m755 target/release/horae ~/.local/bin/   # 或 cargo install --path .
 | `cargo install --git` 卡在网络 | 克隆 github 失败：配 git 代理（`git config --global http.proxy ...`）或改走路径 C 用镜像 |
 | `sha256sum -c` 校验失败 | 下载损坏或被篡改：删除重下；反复失败则暂停安装并核对来源 |
 | GitHub API 限流（preflight 显示无法确认资产） | 稍后重试，或直接浏览器打开 releases 页面人工确认 |
+| macOS `zsh: killed` / 「无法验证开发者」 | Gatekeeper 隔离：先 `xattr -dr com.apple.quarantine <二进制路径>`，仍拦截则系统设置→隐私与安全性→仍要打开 |
+| macOS 装完敲 `horae` 无命令 | zsh 下 PATH 写在 `~/.bashrc` 无效：改写 `~/.zshrc` 并 `source ~/.zshrc`（见「macOS 专属安装与排错」） |
+| macOS 源码编译报 C 错误 | 缺 clang：`xcode-select --install` 装 Command Line Tools 后重试 |

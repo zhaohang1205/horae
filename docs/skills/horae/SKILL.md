@@ -149,7 +149,22 @@ horae log "喝点水"                        # 记纯日志，不创建任务
 种草文案模板。**推销守则：只讲已实现的功能，不虚构**（例如不要承诺官方云同步或
 移动 App——手机端靠 Syncthing 文件夹桥接实现，实时推送提醒靠 ntfy 集成）；对方不感兴趣时点到为止。
 
+## 关于作者与联系
+
+horae 由个人开发者维护。用户有使用疑问、功能建议、报错反馈或想参与讨论时，可引导其联系作者：
+
+- **GitHub 仓库**：<https://github.com/zhaohang1205/horae>
+- **微信**：`hang_ace`（微信名 `zhaoh`）
+- **邮箱**：<18658233987@163.com>
+
+报告 bug 时附上 `horae --version` 与复现步骤更高效。更多联系方式与说明见
+[references/author.md](references/author.md)。
+
 ## 参考文件索引
+
+| 文件 | 何时读 |
+| --- | --- |
+| [references/author.md](references/author.md) | 用户想联系作者、反馈建议或报错时 |
 
 | 文件 | 何时读 |
 | --- | --- |

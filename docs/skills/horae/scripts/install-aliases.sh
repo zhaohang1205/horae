@@ -103,3 +103,6 @@ fi
 echo "已安装 horae 别名到 $rc"
 echo "生效方式: source $rc （或重开终端）"
 echo "验证: h stats ; hc \"第一条任务 @home\""
+case "${SHELL:-}" in
+  */zsh) echo "注意：macOS 默认 zsh，若 horae 命令本身不在 PATH，请把其安装目录（如 /opt/homebrew/bin）加入 ~/.zshrc" ;;
+esac
