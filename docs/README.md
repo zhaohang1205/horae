@@ -13,6 +13,7 @@ A GTD terminal task manager in Rust (SQLite data layer + CLI + ratatui TUI). Cor
 - 领域词汇（中文）：[CONTEXT.md](CONTEXT.md)
 - 专注推荐算法（中文）：[focus-algorithm.md](focus-algorithm.md)
 - Profile 多库设计（中文）：[design-profiles-and-cloud.md](design-profiles-and-cloud.md)
+- AI 技能包（教学 + 卖点 + 别名安装，中文）：[skills/horae/](skills/horae/SKILL.md)
 - 更新日志（中文/English）：[CHANGELOG.md](CHANGELOG.md)
 
 ## 许可证 / License
