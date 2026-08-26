@@ -109,6 +109,18 @@ pub mod splash;
 /// 内置默认开屏图；允许用户用 `~/.config/horae/splash.png` 覆盖。
 pub fn run(conn: &Connection, profile: Option<&str>) -> Result<()> {
     let mods = crate::repo::modules::ModuleVisibility::load(conn);
+    // 先把真正耗时的初始化（加载数据、构建 App）做完——这一刻才是「启动完成」的时点。
+    // 在此冻结启动用时，开屏读到的才是包含全部初始化成本的准确值，而非开屏前的 0ms。
+    let mut app = App::new(conn)?;
+    app.profile_name = profile
+        .map(|s| s.to_string())
+        .or_else(|| {
+            crate::config::Config::load()
+                .ok()
+                .map(|c| c.default_profile)
+        })
+        .unwrap_or_default();
+    let _ = crate::time::boot_elapsed_ms();
     if mods.splash {
         let _ = splash::show_splash(conn);
     }
@@ -122,7 +134,7 @@ pub fn run(conn: &Connection, profile: Option<&str>) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run_app(&mut terminal, conn, profile);
+    let result = run_app(&mut terminal, &mut app, profile);
 
     disable_raw_mode()?;
     execute!(
@@ -136,18 +148,9 @@ pub fn run(conn: &Connection, profile: Option<&str>) -> Result<()> {
 
 fn run_app(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    conn: &Connection,
-    profile: Option<&str>,
+    app: &mut App,
+    _profile: Option<&str>,
 ) -> Result<()> {
-    let mut app = App::new(conn)?;
-    app.profile_name = profile
-        .map(|s| s.to_string())
-        .or_else(|| {
-            crate::config::Config::load()
-                .ok()
-                .map(|c| c.default_profile)
-        })
-        .unwrap_or_default();
     loop {
         if app.needs_clear {
             terminal.clear()?;
