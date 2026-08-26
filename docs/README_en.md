@@ -150,7 +150,7 @@ HH:MM                             same-day time (past → tomorrow)
 
 `~time` in a quick-add line sets the **schedule start** (`scheduled_start_at`, status becomes Scheduled; start only, no end); `--due` sets a soft deadline (`due_at`).
 
-Recurrence RRULE (`*` shorthand in a quick-add line): `FREQ=DAILY|WEEKLY|MONTHLY`, `INTERVAL=2`, `BYDAY=SA,SU`, `BYMONTHDAY=1,-1` (-1 = last day of month), `COUNT=10` / `UNTIL=YYYY-MM-DD`. Shorthands: `*d`/`*w`/`*m`/`*y` (daily/weekly/monthly/yearly), `*2w[1,3]` (every two weeks on Mon & Wed; 1-7 = Mon-Sun, 0 = Sun), `*m[1,-1]` (the 1st and last day of each month), `*m[1,15]` (the 1st and 15th), priority `!a`/`!b`/`!c`.
+Recurrence RRULE (`*` shorthand in a quick-add line): `FREQ=DAILY|WEEKLY|MONTHLY`, `INTERVAL=2`, `BYDAY=SA,SU`, `BYMONTHDAY=1,-1` (-1 = last day of month), `COUNT=10` / `UNTIL=YYYY-MM-DD`. Shorthands: `*d`/`*w`/`*m` (daily/weekly/monthly), `*2w[1,3]` (every two weeks on Mon & Wed; 1-7 = Mon-Sun, 0 = Sun), `*m[1,-1]` (the 1st and last day of each month), `*m[1,15]` (the 1st and 15th), priority `!a`/`!b`/`!c`. Note: `FREQ=YEARLY` (`*y`) is not supported by the expansion engine and is rejected by both TUI and CLI; use a monthly recurrence instead.
 
 ## Backup
 

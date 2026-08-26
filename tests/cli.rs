@@ -313,3 +313,25 @@ fn log_appends_then_lists_recent_entries() {
         .success()
         .stdout(contains("喝了三杯水"));
 }
+
+// ---------------------------------------------------------------- pomodoro
+
+#[test]
+fn pomo_start_accepts_id_prefix() {
+    let env = env();
+    let id = capture(&env, &["写周报", "--tag", "work"]);
+    let prefix = &id[..8];
+
+    // 与其他命令一致的 git 式解析：前缀即可启动番茄
+    env.cmd().args(["pomo", "start", prefix]).assert().success();
+
+    // daemon 状态已写入：waybar 负载携带 work 相位与完整任务 id
+    let out = env.cmd().args(["pomo", "waybar"]).output().unwrap();
+    assert!(out.status.success());
+    let payload: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(payload["class"], "work");
+    assert_eq!(payload["id"], id.as_str());
+
+    // 清理后台 daemon，避免影响后续测试与进程残留
+    env.cmd().args(["pomo", "stop"]).assert().success();
+}

@@ -34,6 +34,9 @@ pub fn schedule(
         Some(s) => time::parse_time(s)?,
         None => anyhow::bail!("schedule requires --start <when>"),
     };
+    if let Some(rr) = rrule {
+        crate::commands::capture::ensure_rrule_supported(rr)?;
+    }
     let end_ms = match end {
         Some(e) => Some(time::parse_time(e)?),
         None => None,
@@ -160,6 +163,34 @@ mod tests {
         assert!(task.scheduled_end_at.is_some(), "end 应落库");
         assert_eq!(task.rrule.as_deref(), Some("FREQ=DAILY"));
         assert_eq!(task.status, Status::Scheduled);
+    }
+
+    #[test]
+    fn schedule_rejects_yearly_rrule_without_touching_task() {
+        let (_dir, conn) = test_conn();
+        let t = mk_task(&conn, "年度体检");
+
+        // FREQ=YEARLY 引擎无法展开，必须报错而非静默存入
+        let err = crate::commands::run(
+            Command::Schedule {
+                id: t.id.clone(),
+                start: Some("+1d".into()),
+                end: None,
+                rrule: Some("FREQ=YEARLY".into()),
+            },
+            &conn,
+            None,
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("FREQ=YEARLY"), "{msg}");
+        assert!(msg.contains("FREQ=DAILY|WEEKLY|MONTHLY"), "{msg}");
+
+        // 任务保持原样：未排程、无 rrule
+        let task = tasks::get(&conn, &t.id).unwrap();
+        assert_eq!(task.status, Status::Inbox);
+        assert_eq!(task.rrule, None);
+        assert!(task.scheduled_start_at.is_none());
     }
 
     #[test]

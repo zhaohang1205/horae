@@ -11,7 +11,7 @@
 - 吸收：`time.rs` 的 `rrule_occurrences` + 私有辅助（`step`/`add_months`/`days_in_month`/`month_day_matches`/`parse_until`）、`commands/mod.rs` 的 `effective_due*`、`tasks.rs::transition` 的 reschedule 纯部分、TUI `day_lists_from`/`row_due`/`row_from_tags` 的锚点选择+366+窗口匹配+展示阶梯。
 - `time.rs` 退化为纯时间原语（`parse_time`/`now_ms`/`local_day_bounds`/`format_local`/`relative_*`）。
 - 顺带修：**BYDAY 之前用 UTC 星期匹配**（BYMONTHDAY 已是本地历日），已对齐为本地历日（真实 bug）。
-- `rrule_valid` 拒绝 `*y`/`4y`/`yearly`/`FREQ=YEARLY`（解析层拒绝，引擎支持 DAILY|WEEKLY|MONTHLY）。
+- `rrule_valid` 拒绝 `*y`/`4y`/`yearly`/`FREQ=YEARLY`（引擎支持 DAILY|WEEKLY|MONTHLY；TUI 输入层与 CLI capture/schedule 入口均调用该校验，写库前拦截）。
 - DB 写入留在调用方（`tasks.rs::transition` 调 `next_window` 后自己写库）。
 
 ### 2. JSON 状态文件合并 — `36695f0`

@@ -5,6 +5,17 @@ use crate::repo::tasks;
 use crate::time;
 use anyhow::Result;
 
+/// 校验 RRULE 可被展开引擎支持；非法值报错并说明支持的三种频率。
+pub fn ensure_rrule_supported(rrule: &str) -> Result<()> {
+    if !crate::parser::rrule_valid(rrule) {
+        anyhow::bail!(
+            "invalid rrule `{rrule}`: engine only supports FREQ=DAILY|WEEKLY|MONTHLY \
+             (YEARLY is not implemented)"
+        );
+    }
+    Ok(())
+}
+
 /// CLI-derived arguments for `capture`. Keeps `run`'s signature small and
 /// separates command parsing from the repo-layer `tasks::CaptureInput`.
 pub struct CaptureArgs {
@@ -20,6 +31,12 @@ pub struct CaptureArgs {
 
 pub fn run(conn: &Connection, args: CaptureArgs) -> Result<()> {
     let quick_add = crate::parser::parse_quick_add(&args.title);
+
+    // 与 TUI 输入层同源防呆：非法 RRULE（含引擎不支持的 YEARLY）在写库前报错，
+    // 避免循环任务静默退化成一次性任务（watch 手机桥复用本函数，一并覆盖）。
+    if let Some(rr) = &quick_add.rrule {
+        ensure_rrule_supported(rr)?;
+    }
 
     let mut tag_names: Vec<String> = args.tags.clone();
     tag_names.extend(quick_add.tags);
@@ -159,5 +176,90 @@ mod tests {
             "scheduled_start_at = 明天 09:00"
         );
         assert_eq!(t.scheduled_end_at, None, "只设起点, 不设终点");
+    }
+
+    fn empty_list(conn: &Connection) -> Vec<task::Task> {
+        tasks::list(
+            conn,
+            &tasks::ListFilter {
+                status: None,
+                tags: vec![],
+                query: None,
+                review_stale: false,
+            },
+        )
+        .unwrap()
+    }
+
+    // ---------- rrule 校验（与 TUI 输入层同源防呆） ----------
+
+    #[test]
+    fn capture_rejects_yearly_rrule_without_creating_task() {
+        let (_dir, conn) = test_conn();
+        let err = run(
+            &conn,
+            CaptureArgs {
+                title: "年度体检 *y".into(),
+                tags: vec![],
+                p1: false,
+                p2: false,
+                p3: false,
+                due: None,
+                status: None,
+                json: false,
+            },
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("FREQ=YEARLY"), "{msg}");
+        assert!(msg.contains("FREQ=DAILY|WEEKLY|MONTHLY"), "{msg}");
+        assert!(
+            empty_list(&conn).is_empty(),
+            "非法 rrule 不得落库（否则静默退化成一次性任务）"
+        );
+    }
+
+    #[test]
+    fn capture_rejects_unrecognized_rrule_word() {
+        let (_dir, conn) = test_conn();
+        // `*` 开头但无法识别的词：fallback 原样保留（"sometimes"），必须被拦截
+        let err = run(
+            &conn,
+            CaptureArgs {
+                title: "晨跑 *sometimes".into(),
+                tags: vec![],
+                p1: false,
+                p2: false,
+                p3: false,
+                due: None,
+                status: None,
+                json: false,
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("sometimes"), "{}", err);
+        assert!(empty_list(&conn).is_empty());
+    }
+
+    #[test]
+    fn capture_with_time_rejects_bad_rrule_before_schedule() {
+        // ~time 分支走 tasks::schedule，同样必须先被校验拦下
+        let (_dir, conn) = test_conn();
+        let err = run(
+            &conn,
+            CaptureArgs {
+                title: "年度体检 *y ~tomorrow 09:00".into(),
+                tags: vec![],
+                p1: false,
+                p2: false,
+                p3: false,
+                due: None,
+                status: None,
+                json: false,
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("FREQ=YEARLY"), "{}", err);
+        assert!(empty_list(&conn).is_empty());
     }
 }

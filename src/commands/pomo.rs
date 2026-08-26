@@ -3,7 +3,7 @@ use crate::repo::{pomodoro, tasks};
 use crate::time;
 use anyhow::Result;
 use rusqlite::Connection;
-use std::process::Command as StdCommand;
+use std::process::{Command as StdCommand, Stdio};
 use std::thread;
 use std::time::Duration;
 
@@ -16,7 +16,8 @@ fn kill_daemon() {
 }
 
 pub fn start(conn: &Connection, task_id: &str) -> Result<()> {
-    let task = tasks::get(conn, task_id)?;
+    let task_id = tasks::resolve_id(conn, task_id)?;
+    let task = tasks::get(conn, &task_id)?;
     kill_daemon();
     let mut state = pomodoro::get_state()?;
     let now = time::now_ms();
@@ -32,7 +33,14 @@ pub fn start(conn: &Connection, task_id: &str) -> Result<()> {
     pomodoro::save_state(&state)?;
 
     let exe_path = std::env::current_exe().unwrap_or_else(|_| "horae".into());
-    StdCommand::new(exe_path).args(["pomo", "daemon"]).spawn()?;
+    // stdio 全部置空：daemon 是常驻后台进程，不能继承父进程的终端/管道 fd，
+    // 否则调用方（脚本、测试断言）要等 daemon 结束才能读到 EOF。
+    StdCommand::new(exe_path)
+        .args(["pomo", "daemon"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
 
     notify(
         "🎯 专注模式开启",

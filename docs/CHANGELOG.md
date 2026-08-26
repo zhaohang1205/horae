@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 番茄“成就结清”横幅不再整天常驻：`PomoState` 新增 `break_ended_at`
   （休息结束时由 daemon 盖章，开启新一轮/显式停止时清空），横幅仅在
   休息结束后的 10 分钟窗口内提示“再接再厉”，当天重启 TUI 不再弹出旧提示。
+- `horae pomo start <id>` 现在与所有其他接受任务引用的命令一致，支持
+  「精确 id > 唯一前缀 > 唯一精确标题」的 git 式解析（此前只认完整 UUID）。
+- CLI 路径补齐 RRULE 校验（与 TUI 输入层同源防呆）：`horae capture "… *y"` 与
+  `horae schedule --rrule FREQ=YEARLY` 在写库前报错并提示支持的三种频率
+  （DAILY/WEEKLY/MONTHLY），不再把引擎无法展开的年循环静默存成一次性任务；
+  `horae watch` 手机桥复用 capture 路径，一并覆盖。无法识别的裸词（如
+  `every day`）同样被拦截。
+- `pomo start` 拉起的后台 daemon 不再继承父进程的终端/管道 stdio——脚本或
+  测试捕获其输出时不会因管道 EOF 迟迟不闭合而挂起。
 
 ### Added
 
