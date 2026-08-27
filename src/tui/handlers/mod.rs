@@ -151,6 +151,12 @@ impl<'a> AppHandlers for App<'a> {
             return Ok(());
         }
 
+        // 番茄钟全屏接管界面时，不能继续让输入模式拦截其快捷键。
+        if self.pomo.phase != crate::model::pomodoro::Phase::Idle && self.mode.is_input() {
+            self.set_mode(Mode::Normal);
+            self.input_clear();
+        }
+
         match self.mode {
             Mode::Normal | Mode::Visual => self.handle_normal(key),
             _ => self.handle_input(key),

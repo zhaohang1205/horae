@@ -2563,6 +2563,32 @@ fn pomo_banner_shows_only_shortly_after_break_end() {
 }
 
 #[test]
+fn active_pomodoro_exits_capture_mode_before_handling_stop_key() {
+    crate::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    seed(&conn);
+    let mut app = app_normal(&conn);
+
+    let mut pomo = crate::model::pomodoro::PomoState::default();
+    pomo.phase = crate::model::pomodoro::Phase::Work;
+    crate::repo::pomodoro::save_state(&pomo).unwrap();
+    app.pomo = pomo;
+    app.mode = Mode::Capturing;
+    app.input = "draft".into();
+
+    app.handle_key(key('S')).unwrap();
+
+    assert_eq!(app.mode, Mode::Normal, "活动番茄钟应退出快速录入模式");
+    assert!(app.input.is_empty(), "退出快速录入时应丢弃未提交草稿");
+    assert_eq!(
+        crate::repo::pomodoro::get_state().unwrap().phase,
+        crate::model::pomodoro::Phase::Idle,
+        "S 应停止番茄钟"
+    );
+}
+
+#[test]
 fn archived_view_restore_single_and_batch() {
     crate::repo::state::set_test_override();
     let mut conn = Connection::open(":memory:").unwrap();
