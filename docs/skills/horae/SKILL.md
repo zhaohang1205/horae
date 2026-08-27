@@ -101,8 +101,11 @@ horae log "喝点水"                        # 记纯日志，不创建任务
 | `horae log [msg]` / `horae stats` / `horae review` | — | 日志 / 看板 / 周回顾 |
 | `horae export` / `import FILE [--replace]` | — | 备份 / 还原 |
 
-时间语法：`now` `+2h` `+30m` `+1d` `+1w` `今天` `明天` `周三` `下周五` `8/20 15:30` `HH:MM`
+时间语法：`now` `+2h` `+30m` `+1d` `+1w` `今天` `明天` `周三` `下周五` `8/20 15:30` `HH:MM`；日期搜索统一用四位 `MMDD`，如 `0829`
 `2026-07-24 14:30`。完整参考 → [references/cli.md](references/cli.md)、[references/syntax.md](references/syntax.md)。
+
+CLI 帮助默认英文；`--lang zh`（或环境变量 `HORAE_LANG=zh`）可切换为中文：
+`horae --lang zh --help`、`HORAE_LANG=zh horae capture --help`。
 
 ## TUI 十键速查
 

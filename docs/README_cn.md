@@ -60,7 +60,7 @@ horae show <task-id>                 # 查看完整时间线
 | --- | --- |
 | `horae` | 启动 TUI |
 | `horae capture <title> [--tag T]... [--due TIME] [--status S] [--p1\|--p2\|--p3] [--json]` | 捕获新任务（别名 `c`） |
-| `horae list [--status S] [--tag T]... [--due-before TIME] [--json]` | 列出任务（别名 `l`） |
+| `horae list [--status S] [--tag T]... [--date MMDD] [--due-before TIME] [--json]` | 列出任务（别名 `l`）；日期搜索统一用四位数字，如 `0829` |
 | `horae show <id> [--json]` | 任务详情 + 时间线（别名 `s`） |
 | `horae next\|wait\|someday\|done\|restore\|purge <id>` | 状态流转 / 恢复 / 永久删除（别名 `d` 对应 `done`） |
 | `horae schedule <id> [--start TIME] [--end TIME] [--rrule R]` | 排期（可加循环） |
@@ -79,6 +79,9 @@ horae show <task-id>                 # 查看完整时间线
 | `horae ntfy test` | 发送一条 ntfy 测试推送，验证手机收到 |
 | `horae profile <list\|new\|rename\|rm\|set-default> [--db PATH]` | 数据集（Profile）管理 |
 | `horae completions <shell>` | 生成 shell 补全 |
+
+> 帮助语言：CLI 的 `--help` 默认英文，加 `--lang zh`（或环境变量 `HORAE_LANG=zh`）
+> 可切换为中文，例如 `horae --lang zh --help`、`HORAE_LANG=zh horae capture --help`。
 
 高频单字母别名：`c`=capture, `l`=list, `s`=show, `d`=done, `p`=pomo, `do`=focus。
 

@@ -60,7 +60,7 @@ Task refs accept a full id, a unique id-prefix, or an exact title.
 | --- | --- |
 | `horae` | Launch the TUI |
 | `horae capture <title> [--tag T]... [--due TIME] [--status S] [--p1\|--p2\|--p3] [--json]` | Capture (alias `c`) |
-| `horae list [--status S] [--tag T]... [--due-before TIME] [--json]` | List tasks (alias `l`) |
+| `horae list [--status S] [--tag T]... [--date MMDD] [--due-before TIME] [--json]` | List tasks (alias `l`); date search uses four digits, e.g. `0829` |
 | `horae show <id> [--json]` | Show with timeline (alias `s`) |
 | `horae next\|wait\|someday\|done\|restore\|purge <id>` | Move / restore / hard-delete (alias `d` for `done`) |
 | `horae schedule <id> [--start TIME] [--end TIME] [--rrule R]` | Schedule (+recurrence) |
@@ -78,6 +78,10 @@ Task refs accept a full id, a unique id-prefix, or an exact title.
 | `horae watch [--dir PATH] [--interval S] [--once]` | Phone bridge (Syncthing) |
 | `horae profile <list\|new\|rename\|rm\|set-default> [--db PATH]` | Profile (data-set) management |
 | `horae completions <shell>` | Generate shell completions |
+
+Help language: CLI `--help` is English by default; pass `--lang zh` (or set the
+`HORAE_LANG=zh` environment variable) to switch to Chinese, e.g. `horae --lang zh --help`
+or `HORAE_LANG=zh horae capture --help`.
 
 Short aliases: `c`=capture, `l`=list, `s`=show, `d`=done, `p`=pomo, `do`=focus.
 

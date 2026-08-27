@@ -7,6 +7,8 @@
   已归档任务只能用 id 寻址。
 - **时间语法** 见 [syntax.md](syntax.md)，所有命令的时间参数共用一套。
 - 全局 flag：`horae --profile <NAME> <子命令>` 对任何子命令生效。
+- 帮助语言：CLI 的 `--help` 默认英文，可通过 `horae --lang zh <子命令> --help`
+  或环境变量 `HORAE_LANG=zh` 切换为中文（与 TUI 的 F6 语言切换一致）。
 - 状态取值：`inbox | next | waiting | scheduled | someday | reference | done`。
 
 ## 高频单字母别名
@@ -40,12 +42,15 @@ horae list                          # 全部未归档任务，按有效截止期
 horae list --status next            # 单状态过滤
 horae list --status scheduled --tag work
 horae list --tag home --tag errands # 多标签 = 同时满足
+horae list --date 0829 --json         # 搜索当前年份 8 月 29 日的任务
 horae list --due-before +1d --json  # 24 小时内到期，JSON 输出
 ```
 
 排序用 `effective_due`（循环任务取下一次发生）。`--json` 行结构含
 `id/title/status/rrule/due_at/scheduled_start_at/checklist/tags` 等字段，
 适合脚本与 AI 解析。
+
+日期搜索统一使用四位 `MMDD` 格式，例如 `0829` 表示当前年份的 8 月 29 日。
 
 ### show（别名 s）
 

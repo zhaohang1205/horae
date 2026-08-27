@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- CLI 帮助国际化：所有 `horae --help` 文本默认英文，新增全局 `--lang <en|zh>`
+  参数与环境变量 `HORAE_LANG`，可一键切换为中文（与 TUI 的 F6 语言切换一致）；
+  英文 clap 派生串保留为事实来源，仅在选择中文时由 `cli_i18n` 运行时覆盖。
 - 手机提醒推送（ntfy）：`watch` 守护进程新增第五 stage，定时任务到点前
   （默认 10 分钟，`lead_minutes` 可调）向 ntfy 主题 POST 一条消息，手机上
   订阅该主题的 ntfy App 即收原生推送——补齐移动端提醒短板，零自建应用、
