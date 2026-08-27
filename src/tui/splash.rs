@@ -245,6 +245,7 @@ fn prompts(lang: Lang) -> (&'static str, &'static str) {
 
 pub(super) fn show_splash(conn: &rusqlite::Connection) -> anyhow::Result<()> {
     use crossterm::{
+        cursor,
         event::{self, Event, KeyCode},
         terminal,
     };
@@ -276,6 +277,8 @@ pub(super) fn show_splash(conn: &rusqlite::Connection) -> anyhow::Result<()> {
     // 先进入 raw mode 再画首帧，这样等待期间能收到 Resize / F6 事件并重绘。
     crossterm::terminal::enable_raw_mode()?;
     let result = (|| -> anyhow::Result<()> {
+        // 开屏绘制会多次移动输出位置，隐藏硬件光标避免用户看到跳动。
+        crossterm::execute!(stdout, cursor::Hide)?;
         let (mut cols, mut rows) = terminal::size()?;
         loop {
             let drew_image = draw_frame_with(
@@ -320,6 +323,8 @@ pub(super) fn show_splash(conn: &rusqlite::Connection) -> anyhow::Result<()> {
             }
         }
     })();
+    // 无论是按键退出还是绘制出错，都恢复终端光标。
+    let _ = crossterm::execute!(stdout, cursor::Show);
     let _ = crossterm::terminal::disable_raw_mode();
     result
 }
