@@ -115,12 +115,19 @@ impl<'a> App<'a> {
         if let Some(ref tf) = self.tag_filter {
             tag_f.push(tf.clone());
         }
-        let all = tasks::list(
+        let date_search = if self.search_query.len() == 4
+            && self.search_query.bytes().all(|b| b.is_ascii_digit())
+        {
+            Some(crate::time::parse_date_search(&self.search_query)?)
+        } else {
+            None
+        };
+        let mut all = tasks::list(
             self.conn,
             &ListFilter {
                 status: None,
                 tags: tag_f,
-                query: if self.search_query.is_empty() {
+                query: if self.search_query.is_empty() || date_search.is_some() {
                     None
                 } else {
                     Some(self.search_query.clone())
@@ -128,6 +135,13 @@ impl<'a> App<'a> {
                 review_stale: false,
             },
         )?;
+        if let Some((start, end)) = date_search {
+            all.retain(|t| {
+                crate::schedule::effective_due(t)
+                    .map(|due| due >= start && due <= end)
+                    .unwrap_or(false)
+            });
+        }
 
         let (today, tomorrow) = self.day_lists_from(&all, &checked_today);
         self.counts.insert(View::Today, today.len());
@@ -306,12 +320,41 @@ impl<'a> App<'a> {
                 )?,
             );
         }
-        let query = if self.search_query.is_empty() {
+        let date_search = if self.search_query.len() == 4
+            && self.search_query.bytes().all(|b| b.is_ascii_digit())
+        {
+            Some(crate::time::parse_date_search(&self.search_query)?)
+        } else {
+            None
+        };
+        let query = if self.search_query.is_empty() || date_search.is_some() {
             None
         } else {
             Some(self.search_query.as_str())
         };
-        let by_status = tasks::count_by_status(self.conn, query)?;
+        let by_status = if let Some((start, end)) = date_search {
+            let mut date_tasks = tasks::list(
+                self.conn,
+                &ListFilter {
+                    status: None,
+                    tags: self.tag_filter.iter().cloned().collect(),
+                    query: None,
+                    review_stale: false,
+                },
+            )?;
+            date_tasks.retain(|t| {
+                crate::schedule::effective_due(t)
+                    .map(|due| due >= start && due <= end)
+                    .unwrap_or(false)
+            });
+            let mut counts = std::collections::HashMap::new();
+            for task in date_tasks {
+                *counts.entry(task.status.to_string()).or_insert(0) += 1;
+            }
+            counts
+        } else {
+            tasks::count_by_status(self.conn, query)?
+        };
         for v in STATUS_VIEWS {
             let s = v.status().expect("status view");
             self.counts

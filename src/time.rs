@@ -38,6 +38,23 @@ pub fn local_day_bounds(offset_days: i64) -> (i64, i64) {
     (start, end)
 }
 
+/// Parse a four-digit calendar date used by task search (`MMDD`) and return
+/// the inclusive local-day bounds in UTC milliseconds.
+pub fn parse_date_search(s: &str) -> Result<(i64, i64)> {
+    if s.len() != 4 || !s.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(anyhow!("date search must use MMDD, for example 0829"));
+    }
+    let month: u32 = s[..2].parse().unwrap();
+    let day: u32 = s[2..].parse().unwrap();
+    let year = Local::now().year();
+    let date =
+        NaiveDate::from_ymd_opt(year, month, day).ok_or_else(|| anyhow!("invalid date: {}", s))?;
+    let start = local_to_utc_ms(date.and_time(NaiveTime::MIN))?;
+    let end =
+        local_to_utc_ms(date.and_time(NaiveTime::from_hms_milli_opt(23, 59, 59, 999).unwrap()))?;
+    Ok((start, end))
+}
+
 /// Format a UTC-ms timestamp for display in the user's local timezone.
 /// `None` renders as "-".
 pub fn format_local(ms: Option<i64>) -> String {
@@ -462,6 +479,28 @@ mod tests {
         let m_d = NaiveDate::from_ymd_opt(now.year(), 8, 20).unwrap();
         assert_eq!(parse_time("8/20 15:30").unwrap(), local_ms(m_d, t));
         assert_eq!(parse_time("8-20 15:30").unwrap(), local_ms(m_d, t));
+    }
+
+    #[test]
+    fn parse_date_search_returns_current_year_day_bounds() {
+        let today = Local::now().date_naive();
+        let input = format!("{:02}{:02}", today.month(), today.day());
+        let (start, end) = parse_date_search(&input).unwrap();
+        assert_eq!(start, local_ms(today, midnight()));
+        assert_eq!(
+            end,
+            local_ms(
+                today,
+                NaiveTime::from_hms_milli_opt(23, 59, 59, 999).unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn parse_date_search_rejects_invalid_dates() {
+        assert!(parse_date_search("0230").is_err());
+        assert!(parse_date_search("829").is_err());
+        assert!(parse_date_search("1332").is_err());
     }
 
     #[test]

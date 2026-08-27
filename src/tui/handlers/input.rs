@@ -71,9 +71,22 @@ impl<'a> App<'a> {
     }
 
     pub(super) fn confirm_search(&mut self, input: &str) -> Result<()> {
-        self.search_query = input.trim().to_string();
+        let query = input.trim();
+        let date_search = if query.len() == 4 && query.bytes().all(|b| b.is_ascii_digit()) {
+            Some(time::parse_date_search(query)?)
+        } else {
+            None
+        };
+        self.search_query = query.to_string();
         if self.search_query.is_empty() {
             self.status_message = crate::tr!(self.lang, "已清除搜索", "Search cleared").into();
+        } else if date_search.is_some() {
+            self.status_message = crate::tr!(
+                self.lang,
+                "按日期搜索: {}",
+                "Date search: {}",
+                self.search_query
+            );
         } else {
             self.status_message =
                 crate::tr!(self.lang, "搜索: {}", "Search: {}", self.search_query);

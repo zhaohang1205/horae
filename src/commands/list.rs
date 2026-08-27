@@ -11,6 +11,7 @@ pub fn run(
     status: Option<&str>,
     tags_filter: &[String],
     due_before: Option<&str>,
+    date: Option<&str>,
     json: bool,
 ) -> Result<()> {
     let f = tasks::ListFilter {
@@ -23,6 +24,16 @@ pub fn run(
         review_stale: false,
     };
     let mut tasks_vec = tasks::list(conn, &f)?;
+
+    if let Some(ds) = date {
+        let (start, end) = time::parse_date_search(ds)?;
+        tasks_vec.retain(|t| {
+            effective_due(t)
+                .map(|due| due >= start && due <= end)
+                .unwrap_or(false)
+        });
+        tasks_vec.sort_by_key(|t| effective_due(t).unwrap_or(i64::MAX));
+    }
 
     if let Some(db) = due_before {
         let before = time::parse_time(db)?;

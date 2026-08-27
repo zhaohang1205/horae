@@ -53,8 +53,8 @@ impl<'a> App<'a> {
             Mode::Search => {
                 crate::tr!(
                     self.lang,
-                    " 搜索任务 (标题 / 备注) ",
-                    " Search Tasks (Title / Notes) "
+                    " 搜索任务 (标题 / 备注，日期用4位 MMDD，如0829) ",
+                    " Search Tasks (Title / Notes, date: 4-digit MMDD, e.g. 0829) "
                 )
             }
             Mode::Capturing => {
@@ -410,8 +410,8 @@ impl<'a> App<'a> {
         Line::from(Span::styled(
             crate::tr!(
                 self.lang,
-                " [语法] @标签 (如 @work)  |  ~时间 (如 ~tomorrow, ~+3d, ~18:00)  |  *循环 (如 *2w[1,3], *m[1,15])  |  !优先级 (如 !a)",
-                " [syntax] @tag (@work)  |  ~time (~tomorrow, ~+3d, ~18:00)  |  *rrule (*2w[1,3], *m[1,15])  |  !priority (!a)"
+                " [语法] @标签 (如 @work)  |  ~时间 (如 ~tomorrow, ~+3d, ~18:00)  |  *循环 (如 *2w[1,3], *m[1,15])  |  !优先级 (如 !a)  |  日期搜索: MMDD (如 0829)",
+                " [syntax] @tag (@work)  |  ~time (~tomorrow, ~+3d, ~18:00)  |  *rrule (*2w[1,3], *m[1,15])  |  !priority (!a)  |  date search: MMDD (e.g. 0829)"
             ),
             Style::default().fg(self.theme.text_dim),
         ))

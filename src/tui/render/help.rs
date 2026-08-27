@@ -85,8 +85,8 @@ impl<'a> App<'a> {
             Line::from(Span::styled(
                 crate::tr!(
                     self.lang,
-                    "时间语法 (~ 排程起点)",
-                    "Time syntax (~ schedule start)"
+                    "时间语法 (~ 排程起点；日期搜索用 MMDD，如 0829)",
+                    "Time syntax (~ schedule start; date search uses MMDD, e.g. 0829)"
                 ),
                 Style::default()
                     .fg(self.theme.accent)
