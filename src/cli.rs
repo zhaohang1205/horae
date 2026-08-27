@@ -9,12 +9,17 @@ use std::path::PathBuf;
     about = "GTD terminal task manager",
     long_about = "A GTD terminal task manager in Rust: SQLite data layer + CLI + ratatui TUI in one binary.\n\
     Every task state change is stamped with UTC-ms and appended to an append-only task_events timeline.",
-    after_help = "Examples:\n  horae                       launch the TUI\n  horae capture \"buy milk\" --tag home --p2\n  horae list --status next\n  horae show <id>\n  horae completions bash\n\nTime syntax: now, +2h, +30m, +1d, today, tomorrow, 2026-07-24 14:30\nTask refs: full id, unique id-prefix, or exact title."
+    after_help = "Examples:\n  horae                       launch the TUI\n  horae capture \"buy milk\" --tag home --p2\n  horae list --status next\n  horae show <id>\n  horae completions bash\n\nTime syntax: now, +2h, +30m, +1d, today, tomorrow, 2026-07-24 14:30\nDate search: four digits MMDD, for example 0829\nTask refs: full id, unique id-prefix, or exact title."
 )]
 pub struct Cli {
     /// Profile (data set) to use; defaults to the configured default profile.
     #[arg(long, value_name = "NAME", global = true)]
     pub profile: Option<String>,
+
+    /// Output language for help text: `en` (default) or `zh` (中文).
+    /// Also configurable via the `HORAE_LANG` environment variable.
+    #[arg(long, value_name = "LANG", global = true)]
+    pub lang: Option<String>,
 
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -74,7 +79,7 @@ pub enum Command {
     #[command(
         long_about = "List tasks with optional filters. Sorting uses the effective due: \
         for recurring tasks that is the next occurrence on or after now.",
-        after_help = "Examples:\n  horae list\n  horae list --status next\n  horae list --status scheduled --tag work\n  horae list --due-before +1d --json",
+        after_help = "Examples:\n  horae list\n  horae list --status next\n  horae list --status scheduled --tag work\n  horae list --date 0829 --json\n  horae list --due-before +1d --json",
         visible_alias = "l"
     )]
     List {
@@ -84,6 +89,12 @@ pub enum Command {
         tag: Vec<String>,
         #[arg(long, value_name = "TIME", help = "Only tasks due before this time")]
         due_before: Option<String>,
+        #[arg(
+            long,
+            value_name = "MMDD",
+            help = "Only tasks due on this date, e.g. 0829"
+        )]
+        date: Option<String>,
         #[arg(long, help = "Print rows as JSON")]
         json: bool,
     },
@@ -355,17 +366,22 @@ mod tests {
 
     #[test]
     fn list_parses_filters() {
-        let cli = parse(&["list", "--status", "next", "--tag", "work", "--json"]).unwrap();
+        let cli = parse(&[
+            "list", "--status", "next", "--tag", "work", "--date", "0829", "--json",
+        ])
+        .unwrap();
         match cli.command.unwrap() {
             Command::List {
                 status,
                 tag,
                 due_before,
+                date,
                 json,
             } => {
                 assert_eq!(status.as_deref(), Some("next"));
                 assert_eq!(tag, vec!["work".to_string()]);
                 assert!(due_before.is_none());
+                assert_eq!(date.as_deref(), Some("0829"));
                 assert!(json);
             }
             _ => panic!("应为 List"),

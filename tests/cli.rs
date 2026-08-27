@@ -5,6 +5,7 @@
 //! 每个测试用独立的 TempDir 作为配置目录，子进程环境变量互不干扰，可并行。
 
 use assert_cmd::Command;
+use chrono::{Datelike, Local};
 use predicates::str::contains;
 use serde_json::Value;
 use tempfile::TempDir;
@@ -113,6 +114,31 @@ fn capture_transition_done_full_lifecycle() {
 
     // done 后不再出现在 next 列表
     assert!(list_json(&env, &["--status", "next"]).is_empty());
+}
+
+#[test]
+fn list_filters_tasks_by_mmdd_date() {
+    let env = env();
+    let today = Local::now().date_naive();
+    let target = format!(
+        "{:04}-{:02}-{:02} 15:00",
+        today.year(),
+        today.month(),
+        today.day()
+    );
+    capture(&env, &["打球", "--due", &target]);
+    capture(&env, &["其他事情"]);
+
+    let date = format!("{:02}{:02}", today.month(), today.day());
+    let rows = list_json(&env, &["--date", &date]);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["title"], "打球");
+
+    env.cmd()
+        .args(["list", "--date", "0230"])
+        .assert()
+        .failure()
+        .stderr(contains("invalid date"));
 }
 
 #[test]
@@ -357,4 +383,35 @@ fn ntfy_rejects_unknown_action() {
         .assert()
         .failure()
         .stderr(contains("unknown ntfy action"));
+}
+
+#[test]
+fn help_defaults_to_english() {
+    let env = env();
+    env.cmd()
+        .args(["--help"])
+        .assert()
+        .success()
+        .stdout(contains("GTD terminal task manager"));
+}
+
+#[test]
+fn help_switches_to_chinese_via_env() {
+    let env = env();
+    env.cmd()
+        .env("HORAE_LANG", "zh")
+        .args(["--help"])
+        .assert()
+        .success()
+        .stdout(contains("GTD 终端任务管理器"));
+}
+
+#[test]
+fn help_switches_to_chinese_via_flag() {
+    let env = env();
+    env.cmd()
+        .args(["--lang", "zh", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("GTD 终端任务管理器"));
 }

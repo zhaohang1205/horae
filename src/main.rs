@@ -1,4 +1,5 @@
 mod cli;
+mod cli_i18n;
 mod commands;
 mod config;
 mod db;
@@ -16,11 +17,15 @@ mod time;
 mod tui;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches};
 
 fn main() -> Result<()> {
     time::mark_boot();
-    let cli = cli::Cli::parse();
+    let lang = cli_i18n::detect_lang();
+    let mut cmd = cli::Cli::command();
+    cli_i18n::localize(&mut cmd, lang);
+    let matches = cmd.get_matches();
+    let cli = cli::Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
     if let Some(cli::Command::Completions { shell }) = cli.command {
         cli::Cli::print_completions(shell);
         return Ok(());
