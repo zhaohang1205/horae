@@ -104,8 +104,8 @@ impl<'a> App<'a> {
             ),
             Mode::ConfiguringPomo => crate::tr!(
                 self.lang,
-                " 自定义番茄钟时长 (格式: 工作分钟;短休分钟;长休分钟, 如 25;5;15) ",
-                " Custom pomodoro lengths (format: work;short;long, e.g. 25;5;15) "
+                " 自定义番茄钟时长 (格式: 工作;短休;长休[;长休周期], 如 25;5;15;4) ",
+                " Custom pomodoro lengths (format: work;short;long[;interval], e.g. 25;5;15;4) "
             ),
             Mode::CreatingProfile => crate::tr!(
                 self.lang,
