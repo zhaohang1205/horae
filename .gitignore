@@ -1,2 +1,6 @@
 /target
 Cargo.lock.bak
+
+# Phase 2: Tauri GUI (crates/horae-gui)
+/crates/horae-gui/node_modules
+/crates/horae-gui/dist

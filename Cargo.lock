@@ -770,17 +770,44 @@ dependencies = [
  "chrono",
  "clap",
  "clap_complete",
- "crossterm",
  "dirs",
+ "horae-core",
+ "horae-tui",
  "predicates",
- "ratatui",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "horae-core"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dirs",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
- "unicode-width",
  "ureq",
+ "uuid",
+]
+
+[[package]]
+name = "horae-tui"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "crossterm",
+ "horae-core",
+ "ratatui",
+ "rusqlite",
+ "tempfile",
+ "unicode-width",
  "uuid",
 ]
 

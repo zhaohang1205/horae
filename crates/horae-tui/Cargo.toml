@@ -1,0 +1,22 @@
+[package]
+name = "horae-tui"
+version = "0.1.1"
+edition = "2021"
+rust-version = "1.89"
+license = "GPL-3.0"
+description = "TUI frontend for horae (GTD task manager)"
+repository = "https://github.com/zhaohang1205/horae"
+
+[dependencies]
+horae-core = { path = "../horae-core" }
+ratatui = { version = "0.30", default-features = false, features = ["crossterm", "layout-cache", "underline-color"] }
+crossterm = "0.29"
+unicode-width = "0.2"
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+uuid = { version = "1", features = ["v4"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+[dev-dependencies]
+horae-core = { path = "../horae-core", features = ["test-util"] }
+tempfile = "3.27"
