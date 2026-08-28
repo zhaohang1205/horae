@@ -11,10 +11,6 @@ struct NotifyTuiState {
     notified: Vec<String>,
 }
 
-fn tui_state_store() -> JsonStateStore<NotifyTuiState> {
-    JsonStateStore::new("notify_tui.json")
-}
-
 /// 过期窗口：due_ms 早于 now 超过 2 小时的 key 可以丢弃。
 /// Bug2 修复：按时间精确过期，替代原来超过 1024 条暴力 clear() 的策略。
 const PRUNE_MS: i64 = 2 * 3600 * 1000;
@@ -32,7 +28,7 @@ fn make_key(kind: &str, id: &str, due: i64) -> String {
     format!("{}:{}:{}", kind, id, due)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub enum NotificationEvent {
     InOneHour { title: String },
     InTenMins { title: String },
@@ -41,8 +37,10 @@ pub enum NotificationEvent {
 
 pub struct NotificationEngine {
     last_tick_ms: i64,
-    /// 已通知过的 key 集合（内存缓存，与 notify_tui.json 同步）。
+    /// 已通知过的 key 集合（内存缓存，与 state_file 同步）。
     notified: std::collections::HashSet<String>,
+    /// 持久化状态文件名（TUI 用 `notify_tui.json`，GUI 用 `notify_gui.json`）。
+    state_file: &'static str,
 }
 
 impl Default for NotificationEngine {
@@ -52,12 +50,23 @@ impl Default for NotificationEngine {
 }
 
 impl NotificationEngine {
+    /// 默认构造：使用 TUI 的 `notify_tui.json` 状态文件。
     pub fn new() -> Self {
-        // Bug3 修复：从持久化文件恢复状态，避免重启 TUI 后重复通知。
-        let saved = tui_state_store().load().unwrap_or_default();
+        Self::with_store("notify_tui.json")
+    }
+
+    /// GUI 专用构造：使用独立的 `notify_gui.json`，避免与 TUI 的提醒去重状态互相覆盖。
+    pub fn new_gui() -> Self {
+        Self::with_store("notify_gui.json")
+    }
+
+    fn with_store(state_file: &'static str) -> Self {
+        // Bug3 修复：从持久化文件恢复状态，避免重启后重复通知。
+        let saved: NotifyTuiState = JsonStateStore::new(state_file).load().unwrap_or_default();
         Self {
             last_tick_ms: 0,
             notified: saved.notified.into_iter().collect(),
+            state_file,
         }
     }
 
@@ -138,12 +147,12 @@ impl NotificationEngine {
             }
         }
 
-        // Bug3 修复：有变化时才落盘，保证重启 TUI 不重复通知。
+        // Bug3 修复：有变化时才落盘，保证重启后不重复通知。
         if dirty {
             let state = NotifyTuiState {
                 notified: self.notified.iter().cloned().collect(),
             };
-            let _ = tui_state_store().save(&state);
+            let _ = JsonStateStore::new(self.state_file).save(&state);
         }
 
         events

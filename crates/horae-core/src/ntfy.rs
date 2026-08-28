@@ -83,6 +83,13 @@ impl FakeTransport {
 }
 
 #[cfg(test)]
+impl Default for FakeTransport {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
 impl NtfyTransport for FakeTransport {
     fn send(&self, req: &NtfyRequest) -> Result<()> {
         self.sent.borrow_mut().push(req.clone());

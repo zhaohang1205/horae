@@ -2607,8 +2607,10 @@ fn active_pomodoro_exits_capture_mode_before_handling_stop_key() {
     seed(&conn);
     let mut app = app_normal(&conn);
 
-    let mut pomo = horae_core::model::pomodoro::PomoState::default();
-    pomo.phase = horae_core::model::pomodoro::Phase::Work;
+    let pomo = horae_core::model::pomodoro::PomoState {
+        phase: horae_core::model::pomodoro::Phase::Work,
+        ..Default::default()
+    };
     horae_core::repo::pomodoro::save_state(&pomo).unwrap();
     app.pomo = pomo;
     app.mode = Mode::Capturing;
