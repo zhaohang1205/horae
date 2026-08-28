@@ -1949,6 +1949,32 @@ fn input_cursor_edits_insert_delete_and_move() {
 }
 
 #[test]
+fn paste_inserts_into_capture_and_normalizes_newlines() {
+    crate::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    // 普通模式粘贴：自动进入快速录入并填入文本。
+    app.handle_paste("买牛奶 @home ~明天".to_string());
+    assert_eq!(app.mode, Mode::Capturing);
+    assert_eq!(app.input, "买牛奶 @home ~明天");
+    assert_eq!(app.input_cursor, app.input.len());
+
+    // 多行粘贴：换行/制表符归一为空格（快速录入为单行）。
+    app.input_clear();
+    app.handle_paste("第一行\r\n第二行\t末尾".to_string());
+    assert_eq!(app.input, "第一行 第二行 末尾");
+
+    // 已在输入模式下粘贴：光标处插入。
+    app.input_clear();
+    app.handle_paste("ab".to_string());
+    app.handle_key(kc(KeyCode::Home)).unwrap();
+    app.handle_paste("XY".to_string());
+    assert_eq!(app.input, "XYab");
+}
+
+#[test]
 fn input_cursor_edits_mid_string_for_full_edit() {
     crate::repo::state::set_test_override();
     let mut conn = Connection::open(":memory:").unwrap();

@@ -26,6 +26,22 @@ impl<'a> App<'a> {
         self.refresh_completion();
     }
 
+    /// 在光标处插入一段文本（用于剪贴板粘贴）。快速录入为单行，
+    /// 换行符/制表符归一为空格，避免破坏渲染。
+    pub(crate) fn input_insert_str(&mut self, s: &str) {
+        let normalized: String = s
+            .chars()
+            .filter(|&c| c != '\r')
+            .map(|c| if c == '\n' || c == '\t' { ' ' } else { c })
+            .collect();
+        if normalized.is_empty() {
+            return;
+        }
+        self.input.insert_str(self.input_cursor, &normalized);
+        self.input_cursor += normalized.len();
+        self.refresh_completion();
+    }
+
     /// 退格：删除光标前一个字符。
     pub(crate) fn input_backspace(&mut self) {
         if self.input_cursor == 0 {

@@ -19,6 +19,7 @@ fn short_id(id: &str) -> String {
 }
 pub(crate) trait AppHandlers {
     fn handle_key(&mut self, key: KeyEvent) -> Result<()>;
+    fn handle_paste(&mut self, text: String);
     fn handle_normal(&mut self, key: KeyEvent) -> Result<()>;
     fn handle_input(&mut self, key: KeyEvent) -> Result<()>;
     fn confirm_input(&mut self, mode: Mode, input: &str) -> Result<()>;
@@ -278,6 +279,22 @@ impl<'a> AppHandlers for App<'a> {
             _ => {}
         }
         Ok(())
+    }
+
+    /// 处理剪贴板粘贴（`Event::Paste`）：把文本插入到快速录入/各输入弹层。
+    /// 处于普通列表模式时，先打开快速录入再粘贴，直接满足「复制到快速录入」。
+    /// 三个确认提示模式（归档/删除/删 profile）只等待 y/n，不接受文本，忽略。
+    fn handle_paste(&mut self, text: String) {
+        match self.mode {
+            Mode::Normal => {
+                self.set_mode(Mode::Capturing);
+                self.input_clear();
+                self.input_insert_str(&text);
+            }
+            Mode::ConfirmArchive | Mode::ConfirmPurge | Mode::ConfirmProfileDelete => {}
+            _ if self.mode.is_input() => self.input_insert_str(&text),
+            _ => {}
+        }
     }
 
     fn confirm_input(&mut self, mode: Mode, input: &str) -> Result<()> {

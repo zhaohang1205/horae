@@ -129,7 +129,8 @@ pub fn run(conn: &Connection, profile: Option<&str>) -> Result<()> {
     execute!(
         stdout,
         EnterAlternateScreen,
-        crossterm::event::EnableMouseCapture
+        crossterm::event::EnableMouseCapture,
+        crossterm::event::EnableBracketedPaste
     )?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
@@ -140,7 +141,8 @@ pub fn run(conn: &Connection, profile: Option<&str>) -> Result<()> {
     execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
-        crossterm::event::DisableMouseCapture
+        crossterm::event::DisableMouseCapture,
+        crossterm::event::DisableBracketedPaste
     )?;
     terminal.show_cursor()?;
     result
@@ -166,6 +168,9 @@ fn run_app(
                         continue;
                     }
                     app.handle_key(key)?;
+                }
+                Event::Paste(text) => {
+                    app.handle_paste(text);
                 }
                 Event::Mouse(m) => {
                     let left_width = terminal.size()?.width * 22 / 100;
