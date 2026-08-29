@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **中英文全角/半角标点统一解析支持**：全面打通 `@/＠`、`~/～/〜`、`*/＊/×`、`!/！`、`［ ］`、`【 】`、`：` 等全角标点，中文输入法下无需频繁切换即可无缝使用 Quick-Add 语法与实时 Tab 补全。
+- **剪贴板一键瞬时捕获（Clipboard Ingest）**：
+  - 新增 `horae c --clip` / `horae capture --clip` 命令，快速从系统剪贴板读取内容落库。
+  - 智能拆分规则：短单行文本（$\le 30$ 字）直接作为标题；长文本/多行段落自动提取第一行前 30 个字（附加 `…`）作为标题，全文完整沉淀到 Notes 备注中。
+  - 支持 Wayland（`wl-paste`）、X11（`xclip`/`xsel`）与全平台（`arboard`）原生适配。
+- **CLI 终端输出表格排版优化**：引入 `comfy-table` 配合 CJK 字符宽度自适应对齐，彻底解决 `horae list` 与 `horae profile list` 等中英文混排、短横线、Emoji 等导致列错位的问题。
+- **Tauri 2 + Svelte 5 GUI 桌面端**：实现多端合一的现代化图形界面与番茄钟专注交互。
 - CLI 帮助国际化：所有 `horae --help` 文本默认英文，新增全局 `--lang <en|zh>`
   参数与环境变量 `HORAE_LANG`，可一键切换为中文（与 TUI 的 F6 语言切换一致）；
   英文 clap 派生串保留为事实来源，仅在选择中文时由 `cli_i18n` 运行时覆盖。

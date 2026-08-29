@@ -59,7 +59,7 @@ Task refs accept a full id, a unique id-prefix, or an exact title.
 | Command | Description |
 | --- | --- |
 | `horae` | Launch the TUI |
-| `horae capture <title> [--tag T]... [--due TIME] [--status S] [--p1\|--p2\|--p3] [--json]` | Capture (alias `c`) |
+| `horae capture [title] [--clip] [--notes N] [--tag T]... [--due TIME] [--status S] [--p1\|--p2\|--p3] [--json]` | Capture (alias `c`, supports `--clip` ingest) |
 | `horae list [--status S] [--tag T]... [--date MMDD] [--due-before TIME] [--json]` | List tasks (alias `l`); date search uses four digits, e.g. `0829` |
 | `horae show <id> [--json]` | Show with timeline (alias `s`) |
 | `horae next\|wait\|someday\|done\|restore\|purge <id>` | Move / restore / hard-delete (alias `d` for `done`) |

@@ -59,7 +59,7 @@ horae show <task-id>                 # 查看完整时间线
 | 命令 / Command | 说明 |
 | --- | --- |
 | `horae` | 启动 TUI |
-| `horae capture <title> [--tag T]... [--due TIME] [--status S] [--p1\|--p2\|--p3] [--json]` | 捕获新任务（别名 `c`） |
+| `horae capture [title] [--clip] [--notes N] [--tag T]... [--due TIME] [--status S] [--p1\|--p2\|--p3] [--json]` | 捕获新任务（别名 `c`，支持 `--clip` 瞬时入库） |
 | `horae list [--status S] [--tag T]... [--date MMDD] [--due-before TIME] [--json]` | 列出任务（别名 `l`）；日期搜索统一用四位数字，如 `0829` |
 | `horae show <id> [--json]` | 任务详情 + 时间线（别名 `s`） |
 | `horae next\|wait\|someday\|done\|restore\|purge <id>` | 状态流转 / 恢复 / 永久删除（别名 `d` 对应 `done`） |
