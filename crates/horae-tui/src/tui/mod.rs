@@ -21,7 +21,7 @@ use horae_core::model::task::{self, Task};
 use horae_core::repo::tags;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use rusqlite::Connection;
-use std::io::{self, Stdout};
+use std::io::{self, Stdout, Write};
 use std::time::Duration;
 
 /// 状态的中文含义，用于引导栏的“状态地图”。按当前语言返回。
@@ -130,7 +130,8 @@ pub fn run(conn: &Connection, profile: Option<&str>) -> Result<()> {
         stdout,
         EnterAlternateScreen,
         crossterm::event::EnableMouseCapture,
-        crossterm::event::EnableBracketedPaste
+        crossterm::event::EnableBracketedPaste,
+        crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
     )?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
@@ -144,6 +145,8 @@ pub fn run(conn: &Connection, profile: Option<&str>) -> Result<()> {
         crossterm::event::DisableMouseCapture,
         crossterm::event::DisableBracketedPaste
     )?;
+    let _ = splash::delete_kitty_image(terminal.backend_mut());
+    let _ = terminal.backend_mut().flush();
     terminal.show_cursor()?;
     result
 }

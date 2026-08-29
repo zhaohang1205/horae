@@ -78,7 +78,13 @@ fn is_kitty_terminal() -> bool {
     if std::env::var_os("HORAE_FORCE_KITTY_SPLASH").is_some() {
         return true;
     }
-    if std::env::var_os("KITTY_WINDOW_ID").is_some() {
+    if std::env::var_os("KITTY_WINDOW_ID").is_some() || std::env::var_os("KITTY_PID").is_some() {
+        return true;
+    }
+    if std::env::var_os("GHOSTTY_RESOURCES_DIR").is_some()
+        || std::env::var_os("WEZTERM_PANE").is_some()
+        || std::env::var_os("WEZTERM_EXECUTABLE").is_some()
+    {
         return true;
     }
     let lower = |v: String| v.to_ascii_lowercase();
@@ -88,6 +94,40 @@ fn is_kitty_terminal() -> bool {
     }
     let term = std::env::var("TERM").map(lower).unwrap_or_default();
     term.contains("kitty") || term.contains("ghostty") || term.contains("wezterm")
+}
+
+/// 当前是否处于 tmux / screen 等终端复用器环境中。
+fn is_inside_tmux() -> bool {
+    std::env::var_os("TMUX").is_some()
+        || std::env::var("TERM")
+            .map(|t| t.starts_with("tmux") || t.starts_with("screen"))
+            .unwrap_or(false)
+}
+
+/// 将转义指令封装为 tmux 的 DCS passthrough 格式（要求 `allow-passthrough on`）。
+/// 内部所有 `\x1b` 替换为 `\x1b\x1b`，首尾加 `\x1bPtmux;` 与 `\x1b\`。
+fn wrap_tmux_dcs(seq: &str) -> String {
+    let mut out = String::with_capacity(seq.len() + 16);
+    out.push_str("\x1bPtmux;");
+    for c in seq.chars() {
+        if c == '\x1b' {
+            out.push_str("\x1b\x1b");
+        } else {
+            out.push(c);
+        }
+    }
+    out.push_str("\x1b\\");
+    out
+}
+
+/// 发送转义控制指令，若在 tmux 下则自动加上 DCS passthrough 封装。
+fn write_escaped_cmd<W: std::io::Write>(out: &mut W, seq: &str) -> std::io::Result<()> {
+    if is_inside_tmux() {
+        let wrapped = wrap_tmux_dcs(seq);
+        write!(out, "{wrapped}")
+    } else {
+        write!(out, "{seq}")
+    }
 }
 
 /// 内联标准 base64 编码（含填充），避免引入额外依赖。
@@ -116,6 +156,7 @@ fn base64_encode(input: &[u8]) -> String {
 
 /// 用 Kitty 图形协议传输 PNG（base64 分块）。`a=T,f=100,c=,r=` 必须在**首块**声明、
 /// 末块以 `m=0` 收尾，否则 Ghostty 等实现不会触发显示。
+/// 当运行在 tmux 下时，自动使用 DCS passthrough 封装（需在 tmux 中配置 `set -g allow-passthrough on`）。
 fn write_kitty_image<W: std::io::Write>(
     out: &mut W,
     bytes: &[u8],
@@ -148,12 +189,9 @@ fn write_kitty_image<W: std::io::Write>(
         if last {
             splash_debug(format!("kitty last control={:?}", control));
         }
-        write!(
-            out,
-            "{}{}\x1b\\",
-            control,
-            std::str::from_utf8(chunk).unwrap()
-        )?;
+        let chunk_str = std::str::from_utf8(chunk).unwrap();
+        let cmd = format!("{}{}\x1b\\", control, chunk_str);
+        write_escaped_cmd(out, &cmd)?;
     }
     Ok(())
 }
@@ -320,18 +358,26 @@ pub(super) fn show_splash(conn: &rusqlite::Connection) -> anyhow::Result<()> {
             // Kitty 图片不受 Clear 影响，重绘前必须显式删除以避免重影。
             if drew_image {
                 let _ = delete_kitty_image(&mut stdout);
+                let _ = stdout.flush();
             }
         }
     })();
-    // 无论是按键退出还是绘制出错，都恢复终端光标。
-    let _ = crossterm::execute!(stdout, cursor::Show);
+    // 无论是按键退出还是绘制出错，都必须彻底删除图片并清理屏幕与光标。
+    let _ = delete_kitty_image(&mut stdout);
+    let _ = crossterm::execute!(
+        stdout,
+        crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+        cursor::MoveTo(0, 0),
+        cursor::Show
+    );
+    let _ = stdout.flush();
     let _ = crossterm::terminal::disable_raw_mode();
     result
 }
 
-/// 删除之前通过 Kitty 协议显示的图片（按 id）。
-fn delete_kitty_image<W: std::io::Write>(out: &mut W) -> std::io::Result<()> {
-    write!(out, "\x1b_Ga=d,d=i,i=1,q=2\x1b\\")
+/// 删除之前通过 Kitty 协议显示的所有图片并释放内存缓存。
+pub(crate) fn delete_kitty_image<W: std::io::Write>(out: &mut W) -> std::io::Result<()> {
+    write_escaped_cmd(out, "\x1b_Ga=d,d=A,q=2\x1b\\")
 }
 
 /// 纵向布局常量（单位：终端行）。
@@ -535,13 +581,31 @@ mod splash_tests {
         assert_eq!(base64_encode(b"M"), "TQ==");
     }
 
+    static TEST_ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn wrap_tmux_dcs_wraps_and_doubles_escapes() {
+        let raw = "\x1b_Ga=d,d=A,q=2\x1b\\";
+        let wrapped = wrap_tmux_dcs(raw);
+        assert_eq!(
+            wrapped,
+            "\x1bPtmux;\x1b\x1b_Ga=d,d=A,q=2\x1b\x1b\\\x1b\\"
+        );
+    }
+
     #[test]
     fn kitty_controls_roundtrip() {
+        let _guard = TEST_ENV_MUTEX.lock().unwrap();
+        let had_tmux = std::env::var_os("TMUX").is_some();
+        let prev_term = std::env::var("TERM").ok();
+        std::env::remove_var("TMUX");
+        std::env::set_var("TERM", "xterm-256color");
+
         // 删除控制序列应精确匹配。
         let mut buf = std::io::Cursor::new(Vec::new());
         delete_kitty_image(&mut buf).unwrap();
         let s = String::from_utf8(buf.into_inner()).unwrap();
-        assert_eq!(s, "\x1b_Ga=d,d=i,i=1,q=2\x1b\\");
+        assert_eq!(s, "\x1b_Ga=d,d=A,q=2\x1b\\");
 
         // 显示传输：多块数据触发分块，首块带 a=T,f=100 与 c=/r=，末块 m=0 收尾。
         let data = vec![0u8; 9000]; // chunk_size=4096，必分多块
@@ -557,15 +621,38 @@ mod splash_tests {
         assert!(last.contains("m=0,"), "末块应为 m=0 收尾: {last}");
         assert!(!last.contains("a=T"), "末块不应再带 a=T");
         assert!(s.matches("\x1b_G").count() >= 2, "大数据应被分块传输");
+
+        // 在 tmux 下输出应自动封装为 DCS passthrough
+        std::env::set_var("TMUX", "1");
+        let mut tmux_buf = std::io::Cursor::new(Vec::new());
+        delete_kitty_image(&mut tmux_buf).unwrap();
+        let ts = String::from_utf8(tmux_buf.into_inner()).unwrap();
+        assert_eq!(ts, "\x1bPtmux;\x1b\x1b_Ga=d,d=A,q=2\x1b\x1b\\\x1b\\");
+
+        if had_tmux {
+            std::env::set_var("TMUX", "1");
+        } else {
+            std::env::remove_var("TMUX");
+        }
+        match prev_term {
+            Some(v) => std::env::set_var("TERM", v),
+            None => std::env::remove_var("TERM"),
+        }
     }
 
     #[test]
     fn is_kitty_terminal_detects() {
+        let _guard = TEST_ENV_MUTEX.lock().unwrap();
         let prev_term = std::env::var("TERM").ok();
         let prev_tp = std::env::var("TERM_PROGRAM").ok();
         let had_kw = std::env::var_os("KITTY_WINDOW_ID").is_some();
+        let had_ghostty = std::env::var_os("GHOSTTY_RESOURCES_DIR").is_some();
 
         std::env::remove_var("KITTY_WINDOW_ID");
+        std::env::remove_var("KITTY_PID");
+        std::env::remove_var("GHOSTTY_RESOURCES_DIR");
+        std::env::remove_var("WEZTERM_PANE");
+        std::env::remove_var("WEZTERM_EXECUTABLE");
         std::env::set_var("TERM_PROGRAM", "dumb");
 
         std::env::set_var("TERM", "xterm-kitty");
@@ -573,6 +660,10 @@ mod splash_tests {
 
         std::env::set_var("TERM", "xterm-256color");
         assert!(!is_kitty_terminal(), "普通终端不应被识别");
+
+        std::env::set_var("GHOSTTY_RESOURCES_DIR", "/path/to/resources");
+        assert!(is_kitty_terminal(), "设置 GHOSTTY_RESOURCES_DIR 应被识别");
+        std::env::remove_var("GHOSTTY_RESOURCES_DIR");
 
         match prev_term {
             Some(v) => std::env::set_var("TERM", v),
@@ -586,6 +677,9 @@ mod splash_tests {
             std::env::set_var("KITTY_WINDOW_ID", "1");
         } else {
             std::env::remove_var("KITTY_WINDOW_ID");
+        }
+        if had_ghostty {
+            std::env::set_var("GHOSTTY_RESOURCES_DIR", "1");
         }
     }
 
