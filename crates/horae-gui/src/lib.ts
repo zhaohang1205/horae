@@ -37,6 +37,10 @@ export const updateNotes = (id: string, notes: string) =>
 
 export const toggleChecklistItem = (id: string, itemId: string) =>
   invoke<string | null>("toggle_checklist_item", { id, itemId });
+export const addChecklistItem = (id: string, title: string) =>
+  invoke<string | null>("add_checklist_item", { id, title });
+export const deleteChecklistItem = (id: string, itemId: string) =>
+  invoke<string | null>("delete_checklist_item", { id, itemId });
 
 export const listTags = () => invoke<Tag[]>("list_tags");
 export const createTag = (name: string) =>
@@ -50,9 +54,13 @@ export const removeTagFromTask = (taskId: string, tagName: string) =>
 export const getTaskTags = (taskId: string) =>
   invoke<Tag[]>("get_task_tags", { taskId });
 
-export const pomoState = () => invoke<unknown>("pomo_state");
+export const pomoState = () => invoke<PomoState>("pomo_state");
 export const startPomo = (id: string) =>
-  invoke<void>("start_pomo", { id });
+  invoke<PomoState>("start_pomo", { id });
+export const pomoComplete = () =>
+  invoke<PomoState>("pomo_complete");
+export const pomoStop = () =>
+  invoke<PomoState>("pomo_stop");
 
 export const getSetting = (key: string) =>
   invoke<string | null>("get_setting", { key });

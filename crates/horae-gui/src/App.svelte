@@ -1,107 +1,65 @@
 <script lang="ts">
-  import { listTasks, capture, transition } from "./lib";
-  import type { Task } from "./types";
+  import { onMount } from "svelte";
+  import { store } from "./store.svelte";
+  import { startNotificationLoop } from "./notifications";
+  import TopBar from "./components/TopBar.svelte";
+  import Sidebar from "./components/Sidebar.svelte";
+  import TaskList from "./components/TaskList.svelte";
+  import TaskDetail from "./components/TaskDetail.svelte";
+  import PomoWidget from "./components/PomoWidget.svelte";
+  import ReviewModal from "./components/ReviewModal.svelte";
 
-  let tasks = $state<Task[]>([]);
-  let input = $state("");
-  let error = $state("");
-
-  async function refresh() {
-    try {
-      tasks = await listTasks("today");
-      error = "";
-    } catch (e) {
-      error = String(e);
-    }
-  }
-
-  async function doCapture() {
-    const v = input.trim();
-    if (!v) return;
-    try {
-      await capture(v);
-      input = "";
-      await refresh();
-    } catch (e) {
-      error = String(e);
-    }
-  }
-
-  async function toggle(task: Task) {
-    try {
-      const next = task.status === "done" ? "next" : "done";
-      await transition(task.id, next);
-      await refresh();
-    } catch (e) {
-      error = String(e);
-    }
-  }
-
-  $effect(() => {
-    refresh();
+  onMount(async () => {
+    await Promise.all([
+      store.refresh(),
+      store.loadTags(),
+      store.loadProfiles(),
+      store.loadPomo(),
+    ]);
+    const timer = startNotificationLoop();
+    return () => clearInterval(timer);
   });
+
+  function onKeydown(e: KeyboardEvent) {
+    // Ctrl/Cmd+N 聚焦快速捕获框（鼠标用户也能一键落入录入）
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
+      e.preventDefault();
+      const el = document.getElementById("quick-add") as HTMLInputElement | null;
+      el?.focus();
+    }
+    if (e.key === "Escape" && store.selectedId) store.closeDetail();
+  }
 </script>
 
-<main>
-  <h1>horae</h1>
-  <div class="capture">
-    <input
-      placeholder="快速捕获，例如：买牛奶 ~18:00 @home"
-      bind:value={input}
-      onkeydown={(e) => {
-        if (e.key === "Enter") doCapture();
-      }}
-    />
-    <button onclick={doCapture}>添加</button>
+<svelte:window onkeydown={onKeydown} />
+
+<div class="app">
+  <TopBar />
+  <div class="body">
+    <Sidebar />
+    <TaskList />
   </div>
-  {#if error}
-    <p class="error">{error}</p>
+  <PomoWidget />
+  {#if store.detailData}
+    <TaskDetail />
   {/if}
-  <ul>
-    {#each tasks as t (t.id)}
-      <li>
-        <input
-          type="checkbox"
-          checked={t.status === "done"}
-          onchange={() => toggle(t)}
-        />
-        <span class:done={t.status === "done"}>{t.title}</span>
-      </li>
-    {/each}
-  </ul>
-</main>
+  {#if store.reviewOpen}
+    <ReviewModal />
+  {/if}
+</div>
 
 <style>
-  main {
-    font-family: system-ui, sans-serif;
-    padding: 1rem;
-    max-width: 720px;
-    margin: 0 auto;
+  .app {
+    position: relative;
+    z-index: 1;
+    height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
   }
-  .capture {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-  }
-  .capture input {
-    flex: 1;
-    padding: 0.5rem;
-  }
-  ul {
-    list-style: none;
-    padding: 0;
-  }
-  li {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.25rem 0;
-  }
-  .done {
-    text-decoration: line-through;
-    color: #888;
-  }
-  .error {
-    color: #f38ba8;
+  .body {
+    display: grid;
+    grid-template-columns: 248px 1fr;
+    min-height: 0;
+    overflow: hidden;
   }
 </style>

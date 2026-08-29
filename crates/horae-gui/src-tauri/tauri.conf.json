@@ -9,22 +9,22 @@
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
-  "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "horae",
-        "width": 1000,
-        "height": 700
+    "app": {
+      "windows": [
+        {
+          "label": "main",
+          "title": "horae",
+          "width": 1000,
+          "height": 700
+        }
+      ],
+      "security": {
+        "csp": null
       }
-    ],
-    "security": {
-      "csp": null
+    },
+    "bundle": {
+      "active": true,
+      "targets": "all",
+      "icon": ["icons/icon.png"]
     }
-  },
-  "bundle": {
-    "active": true,
-    "targets": "all",
-    "icon": ["icons/icon.png"]
-  }
 }

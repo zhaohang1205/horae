@@ -63,6 +63,29 @@ export interface TaskEvent {
   meta: string | null;
 }
 
+export type PomoPhase = "idle" | "work" | "shortbreak" | "longbreak";
+
+export interface PomoState {
+  phase: PomoPhase;
+  task_id: string | null;
+  task_title: string | null;
+  start_ts: number | null;
+  end_ts: number | null;
+  cycle: number;
+  total_count: number;
+  today_count: number;
+  streak: number;
+  last_completed_task_title: string | null;
+  config: {
+    work_mins: number;
+    short_break_mins: number;
+    long_break_mins: number;
+    long_break_interval: number;
+  };
+  last_date: string | null;
+  break_ended_at: number | null;
+}
+
 export interface TaskDetail {
   task: Task;
   events: TaskEvent[];

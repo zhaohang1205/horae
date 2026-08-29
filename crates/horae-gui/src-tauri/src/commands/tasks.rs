@@ -165,6 +165,22 @@ pub mod fns {
     ) -> Result<Option<String>, String> {
         repo::tasks::toggle_checklist_item(conn, id, item_id).map_err(|e| e.to_string())
     }
+
+    pub fn add_checklist_item(
+        conn: &rusqlite::Connection,
+        id: &str,
+        title: &str,
+    ) -> Result<Option<String>, String> {
+        repo::tasks::add_checklist_item(conn, id, title).map_err(|e| e.to_string())
+    }
+
+    pub fn delete_checklist_item(
+        conn: &rusqlite::Connection,
+        id: &str,
+        item_id: &str,
+    ) -> Result<Option<String>, String> {
+        repo::tasks::delete_checklist_item(conn, id, item_id).map_err(|e| e.to_string())
+    }
 }
 
 macro_rules! lock {
@@ -271,4 +287,24 @@ pub async fn toggle_checklist_item(
 ) -> Result<Option<String>, String> {
     let conn = lock!(state);
     fns::toggle_checklist_item(&conn, &id, &item_id)
+}
+
+#[tauri::command]
+pub async fn add_checklist_item(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    title: String,
+) -> Result<Option<String>, String> {
+    let conn = lock!(state);
+    fns::add_checklist_item(&conn, &id, &title)
+}
+
+#[tauri::command]
+pub async fn delete_checklist_item(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    item_id: String,
+) -> Result<Option<String>, String> {
+    let conn = lock!(state);
+    fns::delete_checklist_item(&conn, &id, &item_id)
 }

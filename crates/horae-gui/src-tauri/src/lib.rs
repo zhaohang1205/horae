@@ -28,6 +28,7 @@ pub fn run() {
     apply_linux_webview_workarounds();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let conn = horae_core::db::conn::open(None)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
@@ -47,6 +48,8 @@ pub fn run() {
             commands::tasks::rename,
             commands::tasks::update_notes,
             commands::tasks::toggle_checklist_item,
+            commands::tasks::add_checklist_item,
+            commands::tasks::delete_checklist_item,
             commands::tags::list_tags,
             commands::tags::create_tag,
             commands::tags::delete_tag,
@@ -55,6 +58,8 @@ pub fn run() {
             commands::tags::get_task_tags,
             commands::pomo::pomo_state,
             commands::pomo::start_pomo,
+            commands::pomo::pomo_complete,
+            commands::pomo::pomo_stop,
             commands::settings::get_setting,
             commands::settings::set_setting,
             commands::notifications::tick_notifications,

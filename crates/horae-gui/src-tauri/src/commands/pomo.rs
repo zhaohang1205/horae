@@ -1,4 +1,5 @@
 use horae_core::model::pomodoro::PomoState;
+use horae_core::pomo;
 use horae_core::repo;
 
 use crate::state::AppState;
@@ -11,9 +12,20 @@ pub mod fns {
         repo::pomodoro::get_state().map_err(|e| e.to_string())
     }
 
-    /// 标记任务为可进入番茄钟（校验状态），守护进程启动留待 Phase 3。
-    pub fn start_pomo(conn: &rusqlite::Connection, id: &str) -> Result<(), String> {
-        repo::tasks::ensure_ready_for_pomodoro(conn, id).map_err(|e| e.to_string())
+    /// 进入 Work 相位并写状态（不拉 daemon，通知交前端）。返回最新状态供前端起计时。
+    pub fn start_pomo(conn: &rusqlite::Connection, id: &str) -> Result<PomoState, String> {
+        pomo::begin_session(conn, id).map_err(|e| e.to_string())
+    }
+
+    /// 推进相位机（Work→休息 / 休息→Idle），持久化并返回新状态。
+    pub fn complete_pomo(conn: &rusqlite::Connection) -> Result<PomoState, String> {
+        pomo::complete(conn).map_err(|e| e.to_string())
+    }
+
+    /// 终止番茄钟：置 Idle 并清零 cycle/streak（不拉 daemon，通知交前端）。
+    pub fn stop_pomo() -> Result<PomoState, String> {
+        pomo::stop().map_err(|e| e.to_string())?;
+        repo::pomodoro::get_state().map_err(|e| e.to_string())
     }
 }
 
@@ -23,7 +35,21 @@ pub async fn pomo_state() -> Result<PomoState, String> {
 }
 
 #[tauri::command]
-pub async fn start_pomo(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+pub async fn start_pomo(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<PomoState, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     fns::start_pomo(&conn, &id)
+}
+
+#[tauri::command]
+pub async fn pomo_complete(state: tauri::State<'_, AppState>) -> Result<PomoState, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    fns::complete_pomo(&conn)
+}
+
+#[tauri::command]
+pub async fn pomo_stop() -> Result<PomoState, String> {
+    fns::stop_pomo()
 }

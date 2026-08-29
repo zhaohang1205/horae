@@ -1,4 +1,4 @@
-use crate::model::{event, pomodoro::Phase};
+use crate::model::{event, pomodoro::Phase, pomodoro::PomoState};
 use crate::repo::{pomodoro, tasks};
 use crate::time;
 use anyhow::Result;
@@ -67,6 +67,36 @@ pub fn stop() -> Result<()> {
     pomodoro::save_state(&state)?;
     notify("⏹️ 专注已终止", "番茄钟与专注模式已停止");
     Ok(())
+}
+
+/// GUI 专用：进入 Work 相位并写状态，**不**拉起后台 daemon、**不**弹 `notify-send`
+/// （桌面通知交给 GUI 前端经 `tauri-plugin-notification` 处理）。相位到期由前端计时器
+/// 调用 [`complete`] 推进。
+pub fn begin_session(conn: &Connection, task_id: &str) -> Result<PomoState> {
+    let task_id = tasks::resolve_id(conn, task_id)?;
+    let task = tasks::get(conn, &task_id)?;
+    let mut state = pomodoro::get_state()?;
+    state.phase = Phase::Work;
+    state.task_id = Some(task.id.clone());
+    state.task_title = Some(task.title.clone());
+    state.start_ts = Some(time::now_ms());
+    let duration_ms = (state.config.work_mins as i64) * 60 * 1000;
+    state.end_ts = Some(time::now_ms() + duration_ms);
+    // 新一轮已开启，“休息完成，再接再厉”横幅不再有意义
+    state.break_ended_at = None;
+    pomodoro::save_state(&state)?;
+    Ok(state)
+}
+
+/// GUI 专用：推进当前相位机（Work→休息 / 休息→Idle）并持久化，返回新状态。
+/// 前端计时器在 `end_ts` 到期时调用。
+pub fn complete(conn: &Connection) -> Result<PomoState> {
+    let mut state = pomodoro::get_state()?;
+    let now = time::now_ms();
+    if advance_phase(conn, &mut state, now) {
+        pomodoro::save_state(&state)?;
+    }
+    Ok(state)
 }
 
 pub fn waybar() -> Result<()> {

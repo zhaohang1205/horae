@@ -1,0 +1,127 @@
+/* ===== chronographer's desk — 设计令牌与全局基底 ===== */
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap");
+@import url("https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css");
+
+:root {
+  --ink-900: #15120d;
+  --ink-800: #1d190f;
+  --ink-700: #262017;
+  --ink-600: #312a1d;
+  --paper: #efe7d6;
+  --paper-dim: #a89c86;
+  --paper-faint: #6f6757;
+  --rule: #3a3225;
+  --rule-soft: #2c2619;
+  --amber: #e8b04b;
+  --amber-soft: #c99640;
+  --sage: #9bb08a;
+  --rose: #d98a7b;
+  --focus-glow: rgba(232, 176, 75, 0.35);
+
+  --font-display: "Fraunces", "LXGW WenKai", serif;
+  --font-body: "Hanken Grotesk", "LXGW WenKai", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-cjk: "LXGW WenKai", "Hanken Grotesk", serif;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--ink-900);
+  color: var(--paper);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* 桌面气氛：径向微晕 + 极淡噪点 grain + 纸纹 */
+.app {
+  background:
+    radial-gradient(120% 90% at 78% -10%, rgba(232, 176, 75, 0.06), transparent 60%),
+    radial-gradient(140% 120% at 10% 110%, rgba(155, 176, 138, 0.05), transparent 55%),
+    var(--ink-900);
+  position: relative;
+}
+.app::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  z-index: 0;
+}
+
+button {
+  font-family: var(--font-body);
+  cursor: pointer;
+  color: var(--paper);
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.7rem;
+  transition: all 0.18s var(--ease-spring);
+}
+button:hover {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+button:active {
+  transform: translateY(1px);
+}
+
+input,
+textarea,
+select {
+  font-family: var(--font-body);
+  color: var(--paper);
+  background: var(--ink-800);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.6rem;
+  outline: none;
+  transition: border-color 0.18s, box-shadow 0.18s;
+}
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--amber-soft);
+  box-shadow: 0 0 0 3px var(--focus-glow);
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--rule);
+  border-radius: 9px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--amber-soft);
+}
+
+.wordmark {
+  font-family: var(--font-display);
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+.muted {
+  color: var(--paper-dim);
+}
+.faint {
+  color: var(--paper-faint);
+}
+.amber {
+  color: var(--amber);
+}
