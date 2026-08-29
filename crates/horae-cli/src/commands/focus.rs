@@ -139,6 +139,7 @@ mod tests {
                 p3: true,
                 due: None,
                 status: None,
+                notes: None,
                 json: false,
             },
         )
@@ -155,6 +156,7 @@ mod tests {
                 p3: false,
                 due: None,
                 status: Some("next".into()),
+                notes: None,
                 json: false,
             },
         )

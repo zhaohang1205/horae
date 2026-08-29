@@ -200,6 +200,7 @@ fn zh_arg_help(path: &str, arg: &str) -> Option<&'static str> {
         ("capture", "p3") => "优先级 3（低）",
         ("capture", "due") => "截止时间（now、+2h、today、2026-07-24 14:30）",
         ("capture", "status") => "初始状态（inbox、next、waiting、scheduled、someday、reference）",
+        ("capture", "notes") => "任务备注/详细描述（剪贴板长文本会自动沉淀在此）",
         ("capture", "json") => "以 JSON 格式输出新建的任务",
         ("list", "status") => "按状态过滤",
         ("list", "tag") => "按标签过滤（可重复）",

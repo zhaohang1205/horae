@@ -74,6 +74,13 @@ pub enum Command {
             help = "Initial status (inbox, next, waiting, scheduled, someday, reference)"
         )]
         status: Option<String>,
+        #[arg(
+            short = 'n',
+            long = "notes",
+            value_name = "NOTES",
+            help = "Notes / description for the task"
+        )]
+        notes: Option<String>,
         #[arg(long, help = "Print the created task as JSON")]
         json: bool,
     },
@@ -350,13 +357,14 @@ mod tests {
                 p3,
                 due,
                 status,
+                notes,
                 json,
             } => {
                 assert_eq!(title.join(" "), "buy milk");
                 assert!(!clip);
                 assert_eq!(tag, vec!["home".to_string()]);
                 assert!(!p1 && p2 && !p3);
-                assert!(due.is_none() && status.is_none() && !json);
+                assert!(due.is_none() && status.is_none() && notes.is_none() && !json);
             }
             _ => panic!("应为 Capture"),
         }

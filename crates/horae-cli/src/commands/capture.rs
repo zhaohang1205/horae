@@ -27,6 +27,7 @@ pub struct CaptureArgs {
     pub p3: bool,
     pub due: Option<String>,
     pub status: Option<String>,
+    pub notes: Option<String>,
     pub json: bool,
 }
 
@@ -80,17 +81,35 @@ fn get_clipboard_text() -> Result<String> {
 }
 
 pub fn run(conn: &Connection, mut args: CaptureArgs) -> Result<()> {
+    let mut notes_text = args.notes.clone();
+
     if args.clip {
         let clip_text = get_clipboard_text()?;
-        let normalized = clip_text.trim().replace(['\r', '\n'], " ");
-        if normalized.is_empty() {
+        let trimmed_clip = clip_text.trim();
+        if trimmed_clip.is_empty() {
             anyhow::bail!("clipboard is empty");
         }
+
         if args.title.trim().is_empty() {
-            args.title = normalized;
+            // 用户没有显式提供标题：从剪贴板第一行提取前 30 个字作为标题，如果内容有多行或超长，全文沉淀到 notes
+            let first_line = trimmed_clip.lines().next().unwrap_or("").trim();
+            let char_count = first_line.chars().count();
+            let has_more_lines = trimmed_clip.lines().count() > 1;
+
+            if char_count > 30 || has_more_lines {
+                let truncated: String = first_line.chars().take(30).collect();
+                args.title = format!("{}…", truncated.trim_end());
+                if notes_text.is_none() {
+                    notes_text = Some(trimmed_clip.to_string());
+                }
+            } else {
+                args.title = first_line.to_string();
+            }
         } else {
-            args.title.push(' ');
-            args.title.push_str(&normalized);
+            // 用户显式提供了标题（如 horae c "买书" --clip）：用户输入作为标题，剪贴板全文存入 notes
+            if notes_text.is_none() {
+                notes_text = Some(trimmed_clip.to_string());
+            }
         }
     }
 
@@ -136,6 +155,7 @@ pub fn run(conn: &Connection, mut args: CaptureArgs) -> Result<()> {
     // ~time 存在 → 排程起点（创建后 schedule 设 scheduled_start_at, 状态 Scheduled, 无终点）。
     let input = tasks::CaptureInput {
         title: quick_add.title,
+        notes: notes_text.unwrap_or_default(),
         status: if parsed_status == task::Status::Inbox && scheduled_start.is_some() {
             task::Status::Scheduled
         } else {
@@ -187,6 +207,7 @@ mod tests {
                 p3: false,
                 due: None,
                 status: None,
+                notes: None,
                 json: false,
             },
         )
@@ -221,6 +242,7 @@ mod tests {
                 p3: false,
                 due: None,
                 status: None,
+                notes: None,
                 json: false,
             },
         )
@@ -277,6 +299,7 @@ mod tests {
                 p3: false,
                 due: None,
                 status: None,
+                notes: None,
                 json: false,
             },
         )
@@ -305,6 +328,7 @@ mod tests {
                 p3: false,
                 due: None,
                 status: None,
+                notes: None,
                 json: false,
             },
         )
@@ -328,6 +352,7 @@ mod tests {
                 p3: false,
                 due: None,
                 status: None,
+                notes: None,
                 json: false,
             },
         )
@@ -350,6 +375,7 @@ mod tests {
                 p3: false,
                 due: None,
                 status: None,
+                notes: None,
                 json: false,
             },
         )

@@ -38,6 +38,7 @@ fn run_inner(cmd: Command, conn: &Connection, profile: Option<&str>) -> Result<(
             p3,
             due,
             status,
+            notes,
             json,
         } => capture::run(
             conn,
@@ -50,6 +51,7 @@ fn run_inner(cmd: Command, conn: &Connection, profile: Option<&str>) -> Result<(
                 p3,
                 due,
                 status,
+                notes,
                 json,
             },
         ),

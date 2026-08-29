@@ -17,6 +17,7 @@ use super::{checked_in_today, get, resolve_id};
 /// Input for creating a task (capture).
 pub struct CaptureInput {
     pub title: String,
+    pub notes: String,
     pub status: task::Status,
     pub due_at: Option<i64>,
     pub tag_names: Vec<String>,
@@ -29,6 +30,7 @@ impl Default for CaptureInput {
     fn default() -> Self {
         Self {
             title: String::new(),
+            notes: String::new(),
             status: task::Status::Inbox,
             due_at: None,
             tag_names: Vec::new(),
@@ -53,10 +55,11 @@ pub fn create_capture(conn: &Connection, input: &CaptureInput) -> Result<Task> {
         tx.execute(
             "INSERT INTO tasks \
              (id,title,notes,status,rrule,created_at,clarified_at,due_at,updated_at,delegated_to,checklist) \
-             VALUES (?1,?2,'',?3,?4,?5,?6,?7,?8,?9,?10)",
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
             rusqlite::params![
                 id,
                 input.title,
+                input.notes,
                 status.to_string(),
                 input.rrule,
                 now,
