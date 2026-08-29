@@ -20,6 +20,7 @@ pub fn ensure_rrule_supported(rrule: &str) -> Result<()> {
 /// separates command parsing from the repo-layer `tasks::CaptureInput`.
 pub struct CaptureArgs {
     pub title: String,
+    pub clip: bool,
     pub tags: Vec<String>,
     pub p1: bool,
     pub p2: bool,
@@ -29,7 +30,29 @@ pub struct CaptureArgs {
     pub json: bool,
 }
 
-pub fn run(conn: &Connection, args: CaptureArgs) -> Result<()> {
+pub fn run(conn: &Connection, mut args: CaptureArgs) -> Result<()> {
+    if args.clip {
+        let mut clipboard = arboard::Clipboard::new()
+            .map_err(|e| anyhow::anyhow!("failed to access clipboard: {e}"))?;
+        let clip_text = clipboard
+            .get_text()
+            .map_err(|e| anyhow::anyhow!("failed to read clipboard text: {e}"))?;
+        let normalized = clip_text.trim().replace(['\r', '\n'], " ");
+        if normalized.is_empty() {
+            anyhow::bail!("clipboard is empty");
+        }
+        if args.title.trim().is_empty() {
+            args.title = normalized;
+        } else {
+            args.title.push(' ');
+            args.title.push_str(&normalized);
+        }
+    }
+
+    if args.title.trim().is_empty() {
+        anyhow::bail!("task title cannot be empty (provide a title or use --clip)");
+    }
+
     let quick_add = horae_core::parser::parse_quick_add(&args.title);
 
     // 与 TUI 输入层同源防呆：非法 RRULE（含引擎不支持的 YEARLY）在写库前报错，
@@ -112,6 +135,7 @@ mod tests {
             &conn,
             CaptureArgs {
                 title: "晨跑 *d".into(),
+                clip: false,
                 tags: vec![],
                 p1: false,
                 p2: false,
@@ -145,6 +169,7 @@ mod tests {
             &conn,
             CaptureArgs {
                 title: "买牛奶 ~tomorrow 09:00".into(),
+                clip: false,
                 tags: vec![],
                 p1: false,
                 p2: false,
@@ -200,6 +225,7 @@ mod tests {
             &conn,
             CaptureArgs {
                 title: "年度体检 *y".into(),
+                clip: false,
                 tags: vec![],
                 p1: false,
                 p2: false,
@@ -227,6 +253,7 @@ mod tests {
             &conn,
             CaptureArgs {
                 title: "晨跑 *sometimes".into(),
+                clip: false,
                 tags: vec![],
                 p1: false,
                 p2: false,
@@ -249,6 +276,7 @@ mod tests {
             &conn,
             CaptureArgs {
                 title: "年度体检 *y ~tomorrow 09:00".into(),
+                clip: false,
                 tags: vec![],
                 p1: false,
                 p2: false,
@@ -261,5 +289,26 @@ mod tests {
         .unwrap_err();
         assert!(err.to_string().contains("FREQ=YEARLY"), "{}", err);
         assert!(empty_list(&conn).is_empty());
+    }
+
+    #[test]
+    fn capture_rejects_empty_title_without_clip() {
+        let (_dir, conn) = test_conn();
+        let err = run(
+            &conn,
+            CaptureArgs {
+                title: "".into(),
+                clip: false,
+                tags: vec![],
+                p1: false,
+                p2: false,
+                p3: false,
+                due: None,
+                status: None,
+                json: false,
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("cannot be empty"), "{}", err);
     }
 }

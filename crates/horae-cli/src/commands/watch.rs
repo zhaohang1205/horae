@@ -227,6 +227,7 @@ fn do_capture(conn: &Connection, line: &str) -> Result<()> {
         conn,
         crate::commands::capture::CaptureArgs {
             title: line.to_string(),
+            clip: false,
             tags: Vec::new(),
             p1: false,
             p2: false,

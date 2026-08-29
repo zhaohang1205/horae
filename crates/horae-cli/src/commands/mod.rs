@@ -31,6 +31,7 @@ fn run_inner(cmd: Command, conn: &Connection, profile: Option<&str>) -> Result<(
     match cmd {
         Command::Capture {
             title,
+            clip,
             tag,
             p1,
             p2,
@@ -42,6 +43,7 @@ fn run_inner(cmd: Command, conn: &Connection, profile: Option<&str>) -> Result<(
             conn,
             capture::CaptureArgs {
                 title: title.join(" "),
+                clip,
                 tags: tag,
                 p1,
                 p2,

@@ -132,6 +132,7 @@ mod tests {
             &conn,
             CaptureArgs {
                 title: "low priority".into(),
+                clip: false,
                 tags: vec!["p3".into()],
                 p1: false,
                 p2: false,
@@ -147,6 +148,7 @@ mod tests {
             &conn,
             CaptureArgs {
                 title: "high priority".into(),
+                clip: false,
                 tags: vec!["p1".into()],
                 p1: true,
                 p2: false,

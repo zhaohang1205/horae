@@ -193,6 +193,7 @@ fn zh_arg_help(path: &str, arg: &str) -> Option<&'static str> {
             "帮助文本的输出语言：`en`（默认）或 `zh`（中文）。也可通过环境变量 `HORAE_LANG` 设置。"
         }
         ("capture", "title") => "任务标题（可省略引号）",
+        ("capture", "clip") => "从系统剪贴板读取内容作为任务标题/语法",
         ("capture", "tag") => "要添加的标签（可重复）",
         ("capture", "p1") => "优先级 1（高）",
         ("capture", "p2") => "优先级 2（中）",

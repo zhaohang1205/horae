@@ -50,8 +50,10 @@ pub enum Command {
         visible_alias = "c",
         group = clap::ArgGroup::new("priority").args(["p1", "p2", "p3"]))]
     Capture {
-        #[arg(num_args = 1.., help = "Task title (quotes optional)")]
+        #[arg(num_args = 0.., help = "Task title (quotes optional)")]
         title: Vec<String>,
+        #[arg(long = "clip", help = "Capture content from system clipboard")]
+        clip: bool,
         #[arg(long = "tag", value_name = "TAG", help = "Tag to apply (repeatable)")]
         tag: Vec<String>,
         #[arg(long, help = "Priority 1 (high)")]
@@ -341,6 +343,7 @@ mod tests {
         match cli.command.unwrap() {
             Command::Capture {
                 title,
+                clip,
                 tag,
                 p1,
                 p2,
@@ -350,6 +353,7 @@ mod tests {
                 json,
             } => {
                 assert_eq!(title.join(" "), "buy milk");
+                assert!(!clip);
                 assert_eq!(tag, vec!["home".to_string()]);
                 assert!(!p1 && p2 && !p3);
                 assert!(due.is_none() && status.is_none() && !json);
@@ -362,6 +366,18 @@ mod tests {
     fn capture_rejects_conflicting_priorities() {
         // ArgGroup(priority) 互斥
         assert!(parse(&["capture", "x", "--p1", "--p2"]).is_err());
+    }
+
+    #[test]
+    fn capture_parses_clip_flag() {
+        let cli = parse(&["capture", "--clip"]).unwrap();
+        match cli.command.unwrap() {
+            Command::Capture { clip, title, .. } => {
+                assert!(clip);
+                assert!(title.is_empty());
+            }
+            _ => panic!("应为 Capture"),
+        }
     }
 
     #[test]
