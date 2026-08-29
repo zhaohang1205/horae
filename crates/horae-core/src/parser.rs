@@ -45,8 +45,8 @@ pub fn priority_letter(tag: &str) -> Option<char> {
 }
 
 /// Walk words in input order using `split_whitespace` semantics.
-/// Each word: `@x`→Tag, `~x`→Time, `*x`→Rrule, `!x`→Priority (each only when
-/// `word.len() > 1`), else Title. `start`/`end` are byte offsets of the word
+/// Each word: `@x`/`＠x`→Tag, `~x`/`～x`/`〜x`→Time, `*x`/`＊x`/`×x`→Rrule, `!x`/`！x`→Priority (each only when
+/// length after prefix > 0), else Title. `start`/`end` are byte offsets of the word
 /// INCLUDING its prefix.
 pub fn tokenize_quick_add(input: &str) -> Vec<QuickAddToken> {
     let mut tokens = Vec::new();
@@ -64,14 +64,18 @@ pub fn tokenize_quick_add(input: &str) -> Vec<QuickAddToken> {
             end = idx + c.len_utf8();
         }
         let word = &input[start..end];
-        let kind = if word.starts_with('@') && word.len() > 1 {
-            QuickAddKind::Tag
-        } else if word.starts_with('~') && word.len() > 1 {
-            QuickAddKind::Time
-        } else if word.starts_with('*') && word.len() > 1 {
-            QuickAddKind::Rrule
-        } else if word.starts_with('!') && word.len() > 1 {
-            QuickAddKind::Priority
+        let kind = if let Some((prefix_len, c)) = first_char_info(word) {
+            if word.len() > prefix_len {
+                match c {
+                    '@' | '＠' => QuickAddKind::Tag,
+                    '~' | '～' | '〜' => QuickAddKind::Time,
+                    '*' | '＊' | '×' => QuickAddKind::Rrule,
+                    '!' | '！' => QuickAddKind::Priority,
+                    _ => QuickAddKind::Title,
+                }
+            } else {
+                QuickAddKind::Title
+            }
         } else {
             QuickAddKind::Title
         };
@@ -88,6 +92,20 @@ pub fn tokenize_quick_add(input: &str) -> Vec<QuickAddToken> {
     tokens
 }
 
+/// Helper: returns (prefix_byte_len, char) of the first char in str.
+pub fn first_char_info(s: &str) -> Option<(usize, char)> {
+    let c = s.chars().next()?;
+    Some((c.len_utf8(), c))
+}
+
+/// Helper: strip the first char (regardless of byte length) from a token text.
+pub fn strip_token_prefix(s: &str) -> &str {
+    match first_char_info(s) {
+        Some((len, _)) => &s[len..],
+        None => s,
+    }
+}
+
 pub fn parse_quick_add(input: &str) -> QuickAdd {
     let tokens = tokenize_quick_add(input);
     let mut title_parts = Vec::new();
@@ -101,10 +119,10 @@ pub fn parse_quick_add(input: &str) -> QuickAdd {
         let tok = &tokens[i];
         match tok.kind {
             QuickAddKind::Title => title_parts.push(tok.text.clone()),
-            QuickAddKind::Tag => tags.push(tok.text[1..].to_string()),
+            QuickAddKind::Tag => tags.push(strip_token_prefix(&tok.text).to_string()),
             QuickAddKind::Time => {
-                let mut combined = tok.text[1..].to_string();
-                // 吸收紧跟的裸 HH:MM，使 `~2026-08-20 15:30` 成为完整绝对时间。
+                let mut combined = strip_token_prefix(&tok.text).to_string();
+                // 吸收紧跟的裸 HH:MM，使 `~2026-08-20 15:30` / `～2026-08-20 15：30` 成为完整绝对时间。
                 if let Some(next) = tokens.get(i + 1) {
                     if next.kind == QuickAddKind::Title && is_hhmm(&next.text) {
                         combined.push(' ');
@@ -114,9 +132,11 @@ pub fn parse_quick_add(input: &str) -> QuickAdd {
                 }
                 time_str = Some(combined);
             }
-            QuickAddKind::Rrule => rrule = Some(parse_rrule_shorthand(&tok.text[1..])),
+            QuickAddKind::Rrule => {
+                rrule = Some(parse_rrule_shorthand(strip_token_prefix(&tok.text)))
+            }
             QuickAddKind::Priority => {
-                let letter = &tok.text[1..];
+                let letter = strip_token_prefix(&tok.text);
                 if let Some(tag) = priority_tag(letter) {
                     priority = Some(tag.to_string());
                 } else {
@@ -137,9 +157,10 @@ pub fn parse_quick_add(input: &str) -> QuickAdd {
     }
 }
 
-/// 是否形如裸的 `HH:MM`（1-2 位小时 + 冒号 + 2 位分钟）。
+/// 是否形如裸的 `HH:MM`（1-2 位小时 + 冒号/中文冒号 + 2 位分钟）。
 fn is_hhmm(s: &str) -> bool {
-    let mut parts = s.split(':');
+    let normalized = s.replace('：', ":");
+    let mut parts = normalized.split(':');
     match (parts.next(), parts.next(), parts.next()) {
         (Some(h), Some(m), None) => {
             !h.is_empty()
@@ -153,10 +174,22 @@ fn is_hhmm(s: &str) -> bool {
     }
 }
 
+/// 归一化循环简写中的全角符号（括号、逗号、加减号等）。
+fn normalize_rrule_symbols(s: &str) -> String {
+    s.replace('［', "[")
+        .replace('］', "]")
+        .replace('【', "[")
+        .replace('】', "]")
+        .replace('，', ",")
+        .replace('－', "-")
+        .replace('＋', "+")
+}
+
 pub fn parse_rrule_shorthand(s: &str) -> String {
-    let lower = s.to_lowercase();
+    let normalized = normalize_rrule_symbols(s);
+    let lower = normalized.to_lowercase();
     if lower.starts_with("freq=") {
-        return s.to_string();
+        return normalized;
     }
 
     match lower.as_str() {
@@ -553,5 +586,32 @@ mod tests {
         assert!(!rrule_valid("xx"));
         assert!(!rrule_valid(""));
         assert!(!rrule_valid("bogus"));
+    }
+
+    #[test]
+    fn fullwidth_chinese_symbols_quick_add() {
+        let q = parse_quick_add("写周报 ＠work ！a ～+3d");
+        assert_eq!(q.title, "写周报");
+        assert_eq!(q.tags, vec!["work"]);
+        assert_eq!(q.priority.as_deref(), Some("p1"));
+        assert_eq!(q.time_str.as_deref(), Some("+3d"));
+
+        let q2 = parse_quick_add("开会 ～2026-08-20 15：30 ＠work");
+        assert_eq!(q2.title, "开会");
+        assert_eq!(q2.time_str.as_deref(), Some("2026-08-20 15：30"));
+        assert_eq!(q2.tags, vec!["work"]);
+
+        let q3 = parse_quick_add("上课 ＊2w［1，3］ 〜明天");
+        assert_eq!(q3.title, "上课");
+        assert_eq!(
+            q3.rrule.as_deref(),
+            Some("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE")
+        );
+        assert_eq!(q3.time_str.as_deref(), Some("明天"));
+
+        let q4 = parse_quick_add("交房租 ＊m【1，15】 ＠home");
+        assert_eq!(q4.title, "交房租");
+        assert_eq!(q4.rrule.as_deref(), Some("FREQ=MONTHLY;BYMONTHDAY=1,15"));
+        assert_eq!(q4.tags, vec!["home"]);
     }
 }

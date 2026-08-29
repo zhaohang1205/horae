@@ -2862,3 +2862,30 @@ fn checklist_all_done_shows_complete_hint() {
         "全勾选应在详情区显示完成提示"
     );
 }
+
+#[test]
+fn fullwidth_symbols_completion_works() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+
+    let mut app = app_normal(&conn);
+    app.handle_key(key('a')).unwrap();
+    assert_eq!(app.mode, Mode::Capturing);
+
+    // 测试 ＠work 补全
+    for c in "买牛奶 ＠wo".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    assert!(app.completion_active());
+    app.handle_key(kc(KeyCode::Tab)).unwrap();
+    assert_eq!(app.input, "买牛奶 @work ");
+
+    // 测试 ～to 补全
+    for c in "～to".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    assert!(app.completion_active());
+    app.handle_key(kc(KeyCode::Tab)).unwrap();
+    assert_eq!(app.input, "买牛奶 @work ~today ");
+}

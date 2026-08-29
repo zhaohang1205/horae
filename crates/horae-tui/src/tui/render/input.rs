@@ -30,8 +30,8 @@ impl<'a> App<'a> {
                 QuickAddKind::Time => Style::default().fg(self.theme.text_success),
                 QuickAddKind::Rrule => Style::default().fg(self.theme.rrule_fg),
                 QuickAddKind::Priority => {
-                    let tag = horae_core::parser::priority_tag(&input[tok.start + 1..tok.end])
-                        .unwrap_or("");
+                    let letter = horae_core::parser::strip_token_prefix(&tok.text);
+                    let tag = horae_core::parser::priority_tag(letter).unwrap_or("");
                     Style::default()
                         .fg(crate::tui::ui::priority_color(tag).unwrap_or(self.theme.hl_fg))
                         .add_modifier(Modifier::BOLD)
@@ -357,7 +357,7 @@ impl<'a> App<'a> {
             .iter()
             .rev()
             .find(|t| t.kind == QuickAddKind::Rrule)
-            .map(|t| t.text[1..].to_string())
+            .map(|t| horae_core::parser::strip_token_prefix(&t.text).to_string())
         {
             let valid = horae_core::parser::rrule_valid(&raw);
             let resolved = parse_rrule_shorthand(&raw);

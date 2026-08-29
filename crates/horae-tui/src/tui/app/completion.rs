@@ -121,11 +121,22 @@ impl<'a> App<'a> {
         if last_word.is_empty() {
             return;
         }
-        let (prefix, token) = if let Some(t) = last_word.strip_prefix('@') {
+        let (prefix, token) = if let Some(t) = last_word
+            .strip_prefix('@')
+            .or_else(|| last_word.strip_prefix('＠'))
+        {
             ('@', t)
-        } else if let Some(t) = last_word.strip_prefix('~') {
+        } else if let Some(t) = last_word
+            .strip_prefix('~')
+            .or_else(|| last_word.strip_prefix('～'))
+            .or_else(|| last_word.strip_prefix('〜'))
+        {
             ('~', t)
-        } else if let Some(t) = last_word.strip_prefix('*') {
+        } else if let Some(t) = last_word
+            .strip_prefix('*')
+            .or_else(|| last_word.strip_prefix('＊'))
+            .or_else(|| last_word.strip_prefix('×'))
+        {
             ('*', t)
         } else if matches!(self.mode, Mode::Tagging | Mode::FilteringTag) {
             // Tagging/FilteringTag 直接输入裸标签名 → 按标签补全。
@@ -161,13 +172,13 @@ impl<'a> App<'a> {
     /// 已输入 token 的正文（前缀字符之后的部分）。
     fn completion_typed(&self) -> Option<&str> {
         let (start, end) = self.completion_range?;
-        let bytes = self.input.as_bytes();
-        // 若词首是非字母前缀（@/~/*），正文从其后开始；裸标签则从词首开始。
-        let body_start = if bytes.get(start).is_some_and(|b| {
-            let c = *b as char;
-            c == '@' || c == '~' || c == '*'
-        }) {
-            start + 1
+        let sub = &self.input[start..end];
+        let body_start = if let Some((len, c)) = horae_core::parser::first_char_info(sub) {
+            if matches!(c, '@' | '＠' | '~' | '～' | '〜' | '*' | '＊' | '×') {
+                start + len
+            } else {
+                start
+            }
         } else {
             start
         };
@@ -198,12 +209,10 @@ impl<'a> App<'a> {
             return;
         };
         let prefix_char = self.completion_prefix;
-        // 词首是否已含前缀字符（@/~/*）：Tagging 裸标签词首是首字母，不插入前缀。
-        let has_prefix = self
-            .input
-            .as_bytes()
-            .get(start)
-            .is_some_and(|b| *b as char == prefix_char);
+        // 词首是否已含前缀字符（中英文均归一替换为半角前缀）：Tagging 裸标签词首是首字母，不插入前缀。
+        let sub = &self.input[start..];
+        let has_prefix = horae_core::parser::first_char_info(sub)
+            .is_some_and(|(_, c)| matches!(c, '@' | '＠' | '~' | '～' | '〜' | '*' | '＊' | '×'));
         let tail = self.input[self.input_cursor..].to_string();
         self.input.truncate(start);
         if has_prefix {

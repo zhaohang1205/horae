@@ -201,7 +201,13 @@ pub fn is_overdue(ms: Option<i64>) -> bool {
 ///   "2026-07-24"                             (date)
 ///   "2026-07-24 14:30" / "2026-07-24T14:30"  (datetime)
 pub fn parse_time(s: &str) -> Result<i64> {
-    let s = s.trim();
+    let s_clean = s
+        .trim()
+        .replace('＋', "+")
+        .replace('：', ":")
+        .replace('。', ".")
+        .replace('／', "/");
+    let s = s_clean.as_str();
     let now = Local::now();
     let midnight = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
 
@@ -353,8 +359,9 @@ fn parse_cn_weekday(s: &str) -> Option<(chrono::Weekday, &str, bool)> {
 fn split_date_time(s: &str) -> Option<(&str, &str)> {
     if let Some(sp) = s.rfind(' ') {
         let time = &s[sp + 1..];
-        if time.len() <= 5 && time.contains(':') && !time.contains('-') {
-            let (h, m) = time.split_once(':')?;
+        let time_clean = time.replace('：', ":");
+        if time_clean.len() <= 5 && time_clean.contains(':') && !time_clean.contains('-') {
+            let (h, m) = time_clean.split_once(':')?;
             if !h.is_empty()
                 && !m.is_empty()
                 && h.chars().all(|c| c.is_ascii_digit())
@@ -406,11 +413,11 @@ fn parse_flex_date(date_part: &str) -> Option<NaiveDate> {
 }
 
 fn parse_optional_time(s: &str, default: NaiveTime) -> Result<NaiveTime> {
-    let s = s.trim();
+    let s = s.trim().replace('：', ":");
     if s.is_empty() {
         return Ok(default);
     }
-    NaiveTime::parse_from_str(s, "%H:%M").map_err(|_| anyhow!("invalid time: '{}'", s))
+    NaiveTime::parse_from_str(&s, "%H:%M").map_err(|_| anyhow!("invalid time: '{}'", s))
 }
 
 #[cfg(test)]
@@ -510,6 +517,26 @@ mod tests {
         assert_eq!(parse_time("+3d 15:30").unwrap(), local_ms(base, t));
         assert!(parse_time("+2h").is_ok());
         assert!(parse_time("+1d").is_ok());
+    }
+
+    #[test]
+    fn parse_fullwidth_chinese_symbols() {
+        let today = Local::now().date_naive();
+        let target = today + Duration::days(1);
+        let t = NaiveTime::from_hms_opt(15, 30, 0).unwrap();
+        assert_eq!(parse_time("明天 15：30").unwrap(), local_ms(target, t));
+        assert_eq!(
+            parse_time("＋3d 15：30").unwrap(),
+            local_ms(today + Duration::days(3), t)
+        );
+        assert_eq!(
+            parse_time("2026／8／20 15：30").unwrap(),
+            local_ms(NaiveDate::from_ymd_opt(2026, 8, 20).unwrap(), t)
+        );
+        assert_eq!(
+            parse_time("2026。8。20 15：30").unwrap(),
+            local_ms(NaiveDate::from_ymd_opt(2026, 8, 20).unwrap(), t)
+        );
     }
 
     #[test]
