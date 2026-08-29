@@ -22,20 +22,27 @@ fn list(config: &Config) -> anyhow::Result<()> {
         println!("(no profiles)");
         return Ok(());
     }
+    let mut table = comfy_table::Table::new();
+    table
+        .load_preset(comfy_table::presets::NOTHING)
+        .set_content_arrangement(comfy_table::ContentArrangement::Dynamic);
+
     for name in names {
         let profile = config.profile(&name).expect("listed name must exist");
         let default = if config.default_profile == name {
-            "  (default)"
+            "(default)"
         } else {
             ""
         };
         let cloud = profile
             .cloud
             .as_ref()
-            .map(|c| format!("  cloud={}", c.url))
+            .map(|c| format!("cloud={}", c.url))
             .unwrap_or_default();
-        println!("{name:12} db={}{}{}", profile.db, cloud, default);
+        let db_str = format!("db={}", profile.db);
+        table.add_row(vec![&name, &db_str, &cloud, default]);
     }
+    println!("{table}");
     Ok(())
 }
 
