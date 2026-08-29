@@ -30,13 +30,58 @@ pub struct CaptureArgs {
     pub json: bool,
 }
 
+fn get_clipboard_text() -> Result<String> {
+    // 1. 在 Linux Wayland/X11 环境下，优先尝试系统原生 CLI 工具（wl-paste / xclip / xsel）
+    // 因为 CLI 进程短生命周期下，纯 X11/Wayland 库直接建立连接偶尔无法接管跨窗口 selection。
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        if let Ok(out) = std::process::Command::new("wl-paste")
+            .arg("--no-newline")
+            .output()
+        {
+            if out.status.success() {
+                let s = String::from_utf8_lossy(&out.stdout).to_string();
+                if !s.trim().is_empty() {
+                    return Ok(s);
+                }
+            }
+        }
+    }
+
+    if let Ok(out) = std::process::Command::new("xclip")
+        .args(["-selection", "clipboard", "-o"])
+        .output()
+    {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout).to_string();
+            if !s.trim().is_empty() {
+                return Ok(s);
+            }
+        }
+    }
+
+    if let Ok(out) = std::process::Command::new("xsel")
+        .args(["--clipboard", "--output"])
+        .output()
+    {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout).to_string();
+            if !s.trim().is_empty() {
+                return Ok(s);
+            }
+        }
+    }
+
+    // 2. 跨平台通用库 (arboard) 作为保底
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|e| anyhow::anyhow!("failed to access clipboard: {e}"))?;
+    clipboard
+        .get_text()
+        .map_err(|e| anyhow::anyhow!("failed to read clipboard text: {e}"))
+}
+
 pub fn run(conn: &Connection, mut args: CaptureArgs) -> Result<()> {
     if args.clip {
-        let mut clipboard = arboard::Clipboard::new()
-            .map_err(|e| anyhow::anyhow!("failed to access clipboard: {e}"))?;
-        let clip_text = clipboard
-            .get_text()
-            .map_err(|e| anyhow::anyhow!("failed to read clipboard text: {e}"))?;
+        let clip_text = get_clipboard_text()?;
         let normalized = clip_text.trim().replace(['\r', '\n'], " ");
         if normalized.is_empty() {
             anyhow::bail!("clipboard is empty");
