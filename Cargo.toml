@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/horae-core", "crates/horae-tui", "crates/horae-cli", "crates/horae-gui/src-tauri"]
+members = ["crates/horae-core", "crates/horae-tui", "crates/horae-cli"]
 default-members = ["crates/horae-cli"]
 
 [workspace.package]

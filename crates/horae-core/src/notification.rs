@@ -39,7 +39,7 @@ pub struct NotificationEngine {
     last_tick_ms: i64,
     /// 已通知过的 key 集合（内存缓存，与 state_file 同步）。
     notified: std::collections::HashSet<String>,
-    /// 持久化状态文件名（TUI 用 `notify_tui.json`，GUI 用 `notify_gui.json`）。
+    /// 持久化状态文件名（`notify_tui.json`）。
     state_file: &'static str,
 }
 
@@ -50,14 +50,9 @@ impl Default for NotificationEngine {
 }
 
 impl NotificationEngine {
-    /// 默认构造：使用 TUI 的 `notify_tui.json` 状态文件。
+    /// 默认构造：使用 `notify_tui.json` 状态文件。
     pub fn new() -> Self {
         Self::with_store("notify_tui.json")
-    }
-
-    /// GUI 专用构造：使用独立的 `notify_gui.json`，避免与 TUI 的提醒去重状态互相覆盖。
-    pub fn new_gui() -> Self {
-        Self::with_store("notify_gui.json")
     }
 
     fn with_store(state_file: &'static str) -> Self {
