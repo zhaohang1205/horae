@@ -62,9 +62,10 @@ horae show <task-id>                 # 查看完整时间线
 | `horae capture [title] [--clip] [--notes N] [--tag T]... [--due TIME] [--status S] [--p1\|--p2\|--p3] [--json]` | 捕获新任务（别名 `c`，支持 `--clip` 瞬时入库） |
 | `horae list [--status S] [--tag T]... [--date MMDD] [--due-before TIME] [--json]` | 列出任务（别名 `l`）；日期搜索统一用四位数字，如 `0829` |
 | `horae show <id> [--json]` | 任务详情 + 时间线（别名 `s`） |
+| `horae modify <id> [text] [--title T] [--due TIME] [--notes N] [--edit-notes] [--tag T]... [--untag T]... [--p1\|--p2\|--p3] [--status S] [--json]` | 修改任务（别名 `m` / `mod` / `edit`，支持一句话 quick-add 语法） |
 | `horae next\|wait\|someday\|done\|restore\|purge <id>` | 状态流转 / 恢复 / 永久删除（别名 `d` 对应 `done`） |
 | `horae schedule <id> [--start TIME] [--end TIME] [--rrule R]` | 排期（可加循环） |
-| `horae archive <id>` / `horae restore <id>` / `horae purge <id>` | 软删除 / 恢复 / 永久删除归档 |
+| `horae archive <id>` / `horae restore <id>` / `horae purge <id>` | 软删除 / 恢复 / 永久删除归档（`archive` 别名 `rm` / `delete`） |
 | `horae tag <id> <name>` / `horae untag <id> <name>` | 增删标签 |
 | `horae focus [--start]` / `horae do [--start]` | 推荐当前最该做的一件事（可顺带起番茄） |
 | `horae log [message]` | 记录时间戳日志（不建任务） |
@@ -83,7 +84,7 @@ horae show <task-id>                 # 查看完整时间线
 > 帮助语言：CLI 的 `--help` 默认英文，加 `--lang zh`（或环境变量 `HORAE_LANG=zh`）
 > 可切换为中文，例如 `horae --lang zh --help`、`HORAE_LANG=zh horae capture --help`。
 
-高频单字母别名：`c`=capture, `l`=list, `s`=show, `d`=done, `p`=pomo, `do`=focus。
+高频单字母别名：`c`=capture, `l`=list, `s`=show, `m`=modify/edit, `d`=done, `rm`=archive, `p`=pomo, `do`=focus。
 
 ## TUI 快捷键
 

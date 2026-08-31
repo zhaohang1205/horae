@@ -93,18 +93,31 @@ pub(crate) fn add_tag_to_task_inner(
 
 pub fn remove_tag_from_task(conn: &Connection, task_id: &str, tag_name: &str) -> Result<()> {
     crate::repo::mutate(conn, |tx, now| {
-        let tag = get_tag_by_name(tx, tag_name)?
-            .ok_or_else(|| Error::TagNotFound(tag_name.to_string()))?;
-        let deleted = tx.execute(
-            "DELETE FROM task_tags WHERE task_id = ?1 AND tag_id = ?2",
-            rusqlite::params![task_id, tag.id],
-        )?;
-        if deleted == 0 {
+        let removed = remove_tag_from_task_inner(tx, task_id, tag_name, now)?;
+        if !removed {
             return Err(Error::TagNotFound(tag_name.to_string()).into());
         }
+        Ok(())
+    })
+}
+
+pub(crate) fn remove_tag_from_task_inner(
+    conn: &Connection,
+    task_id: &str,
+    tag_name: &str,
+    now: i64,
+) -> Result<bool> {
+    let Some(tag) = get_tag_by_name(conn, tag_name)? else {
+        return Ok(false);
+    };
+    let deleted = conn.execute(
+        "DELETE FROM task_tags WHERE task_id = ?1 AND tag_id = ?2",
+        rusqlite::params![task_id, tag.id],
+    )?;
+    if deleted > 0 {
         let meta = format!("{{\"name\":\"{}\"}}", tag_name);
         log_event(
-            tx,
+            conn,
             task_id,
             crate::model::event::EV_TAG_REMOVED,
             None,
@@ -112,8 +125,10 @@ pub fn remove_tag_from_task(conn: &Connection, task_id: &str, tag_name: &str) ->
             Some(&meta),
             now,
         )?;
-        Ok(())
-    })
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
 
 /// Delete a tag from the tags table and remove all its associations in task_tags.

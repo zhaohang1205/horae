@@ -99,6 +99,137 @@ pub fn create_capture(conn: &Connection, input: &CaptureInput) -> Result<Task> {
     get(conn, &id)
 }
 
+/// Input for modifying an existing task.
+#[derive(Debug, Default, Clone)]
+pub struct ModifyInput {
+    pub title: Option<String>,
+    pub notes: Option<String>,
+    pub status: Option<task::Status>,
+    pub due_at: Option<Option<i64>>,
+    pub scheduled_start_at: Option<Option<i64>>,
+    pub scheduled_end_at: Option<Option<i64>>,
+    pub rrule: Option<Option<String>>,
+    pub delegated_to: Option<Option<String>>,
+    pub add_tags: Vec<String>,
+    pub remove_tags: Vec<String>,
+    pub clear_tags: bool,
+}
+
+pub fn modify(conn: &Connection, id: &str, input: &ModifyInput) -> Result<Task> {
+    let mut t = get(conn, id)?;
+    crate::repo::mutate(conn, |tx, now| {
+        if let Some(ref title) = input.title {
+            if !title.is_empty() && title != &t.title {
+                t.title = title.clone();
+            }
+        }
+        if let Some(ref notes) = input.notes {
+            if notes != &t.notes {
+                t.notes = notes.clone();
+            }
+        }
+        if let Some(ref delegated) = input.delegated_to {
+            t.delegated_to = delegated.clone();
+        }
+        if let Some(new_status) = input.status {
+            if new_status != t.status {
+                let from = t.status;
+                if from == task::Status::Inbox && t.clarified_at.is_none() {
+                    t.clarified_at = Some(now);
+                }
+                if new_status == task::Status::Done && t.completed_at.is_none() {
+                    t.completed_at = Some(now);
+                }
+                t.status = new_status;
+                let ev = if new_status == task::Status::Done {
+                    event::EV_COMPLETED
+                } else {
+                    event::EV_STATUS_CHANGED
+                };
+                let from_str = from.to_string();
+                let to_str = new_status.to_string();
+                log_event(tx, id, ev, Some(&from_str), Some(&to_str), None, now)?;
+            }
+        }
+        if let Some(due_opt) = input.due_at {
+            if due_opt != t.due_at {
+                t.due_at = due_opt;
+                log_event(tx, id, event::EV_DUE, None, None, None, now)?;
+            }
+        }
+        let mut sched_changed = false;
+        if let Some(start_opt) = input.scheduled_start_at {
+            if start_opt != t.scheduled_start_at {
+                t.scheduled_start_at = start_opt;
+                sched_changed = true;
+            }
+        }
+        if let Some(end_opt) = input.scheduled_end_at {
+            if end_opt != t.scheduled_end_at {
+                t.scheduled_end_at = end_opt;
+                sched_changed = true;
+            }
+        }
+        if let Some(ref rrule_opt) = input.rrule {
+            if rrule_opt != &t.rrule {
+                t.rrule = rrule_opt.clone();
+                sched_changed = true;
+            }
+        }
+        if sched_changed {
+            let meta = t
+                .rrule
+                .as_deref()
+                .map(|r| format!("{{\"rrule\":\"{}\"}}", r));
+            let status_str = t.status.to_string();
+            log_event(
+                tx,
+                id,
+                event::EV_SCHEDULED,
+                None,
+                Some(&status_str),
+                meta.as_deref(),
+                now,
+            )?;
+        }
+        if input.clear_tags {
+            let current_tags = crate::repo::tags::get_task_tags(tx, id).unwrap_or_default();
+            for tag in current_tags {
+                crate::repo::tags::remove_tag_from_task_inner(tx, id, &tag.name, now)?;
+            }
+        } else {
+            for tag_name in &input.remove_tags {
+                crate::repo::tags::remove_tag_from_task_inner(tx, id, tag_name, now)?;
+            }
+        }
+        for tag_name in &input.add_tags {
+            crate::repo::tags::add_tag_to_task_inner(tx, id, tag_name, now)?;
+        }
+        t.updated_at = now;
+        tx.execute(
+            "UPDATE tasks SET title=?1, notes=?2, status=?3, clarified_at=?4, completed_at=?5, \
+             due_at=?6, scheduled_start_at=?7, scheduled_end_at=?8, rrule=?9, delegated_to=?10, \
+             updated_at=?11 WHERE id=?12",
+            rusqlite::params![
+                t.title,
+                t.notes,
+                t.status.to_string(),
+                t.clarified_at,
+                t.completed_at,
+                t.due_at,
+                t.scheduled_start_at,
+                t.scheduled_end_at,
+                t.rrule,
+                t.delegated_to,
+                t.updated_at,
+                id
+            ],
+        )?;
+        Ok(())
+    })?;
+    get(conn, id)
+}
+
 pub fn rename(conn: &Connection, id: &str, new_title: &str) -> Result<Task> {
     let now = time::now_ms();
     conn.execute(
@@ -791,5 +922,89 @@ mod tests {
         let a = add_checklist_item(&conn, &t.id, "only").unwrap().unwrap();
         assert!(!move_checklist_item(&conn, &t.id, &a, 1).unwrap());
         assert!(!move_checklist_item(&conn, &t.id, &a, -1).unwrap());
+    }
+
+    #[test]
+    fn modify_updates_fields_and_audits_events() {
+        let (_dir, conn) = test_conn();
+        let t = create_capture(
+            &conn,
+            &CaptureInput {
+                title: "initial title".into(),
+                notes: "initial notes".into(),
+                status: task::Status::Inbox,
+                tag_names: vec!["tag1".into(), "tag2".into(), "p1".into()],
+                due_at: Some(1000),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // 1. Modify title, notes, status, due, tags
+        let modified = modify(
+            &conn,
+            &t.id,
+            &ModifyInput {
+                title: Some("updated title".into()),
+                notes: Some("updated notes".into()),
+                status: Some(task::Status::Next),
+                due_at: Some(Some(2000)),
+                scheduled_start_at: Some(Some(3000)),
+                rrule: Some(Some("FREQ=DAILY".into())),
+                add_tags: vec!["tag3".into(), "p2".into()],
+                remove_tags: vec!["tag1".into(), "p1".into()],
+                clear_tags: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(modified.title, "updated title");
+        assert_eq!(modified.notes, "updated notes");
+        assert_eq!(modified.status, task::Status::Next);
+        assert!(modified.clarified_at.is_some());
+        assert_eq!(modified.due_at, Some(2000));
+        assert_eq!(modified.scheduled_start_at, Some(3000));
+        assert_eq!(modified.rrule.as_deref(), Some("FREQ=DAILY"));
+
+        let tags: Vec<String> = crate::repo::tags::get_task_tags(&conn, &t.id)
+            .unwrap()
+            .into_iter()
+            .map(|tg| tg.name)
+            .collect();
+        assert!(tags.contains(&"tag2".to_string()));
+        assert!(tags.contains(&"tag3".to_string()));
+        assert!(tags.contains(&"p2".to_string()));
+        assert!(!tags.contains(&"tag1".to_string()));
+        assert!(!tags.contains(&"p1".to_string()));
+
+        // 2. Clear due and schedule and all tags
+        let cleared = modify(
+            &conn,
+            &t.id,
+            &ModifyInput {
+                due_at: Some(None),
+                scheduled_start_at: Some(None),
+                scheduled_end_at: Some(None),
+                rrule: Some(None),
+                clear_tags: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(cleared.due_at, None);
+        assert_eq!(cleared.scheduled_start_at, None);
+        assert_eq!(cleared.scheduled_end_at, None);
+        assert_eq!(cleared.rrule, None);
+        let tags_after = crate::repo::tags::get_task_tags(&conn, &t.id).unwrap();
+        assert!(tags_after.is_empty());
+
+        let evs = events(&conn, &t.id).unwrap();
+        assert!(evs.iter().any(|e| e.event_type == event::EV_STATUS_CHANGED));
+        assert!(evs.iter().any(|e| e.event_type == event::EV_DUE));
+        assert!(evs.iter().any(|e| e.event_type == event::EV_SCHEDULED));
+        assert!(evs.iter().any(|e| e.event_type == event::EV_TAG_ADDED));
+        assert!(evs.iter().any(|e| e.event_type == event::EV_TAG_REMOVED));
     }
 }

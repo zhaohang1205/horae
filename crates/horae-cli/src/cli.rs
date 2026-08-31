@@ -117,6 +117,85 @@ pub enum Command {
         #[arg(long, help = "Print the task as JSON")]
         json: bool,
     },
+    /// Modify an existing task (title, tags, due, schedule, status, notes)
+    #[command(
+        long_about = "Modify an existing task. Supports one-sentence quick-add syntax \
+        (@tag ~time *rrule !priority) in the title/tokens and explicit flags.",
+        after_help = "Examples:\n  horae modify <id> \"buy organic milk @groceries\"\n  horae modify <id> --due tomorrow\n  horae modify <id> --tag home --untag work\n  horae modify <id> --clear-due\n  horae modify <id> --clear-schedule\n  horae modify <id> --notes \"call at 3pm\"\n  horae modify <id> --edit-notes\n  horae modify <id> --status next",
+        visible_aliases = ["m", "mod", "edit"],
+        group = clap::ArgGroup::new("priority").args(["p1", "p2", "p3", "clear_priority"])
+    )]
+    Modify {
+        #[arg(help = "Task ID, unique prefix, or exact title")]
+        id: String,
+        #[arg(num_args = 0.., help = "New title or quick-add update text")]
+        text: Vec<String>,
+        #[arg(long, help = "Explicitly set title (overrides quick-add title)")]
+        title: Option<String>,
+        #[arg(
+            long = "tag",
+            value_name = "TAG",
+            help = "Add tag to task (repeatable)"
+        )]
+        tag: Vec<String>,
+        #[arg(
+            long = "untag",
+            value_name = "TAG",
+            help = "Remove tag from task (repeatable)"
+        )]
+        untag: Vec<String>,
+        #[arg(long, help = "Clear all tags from task")]
+        clear_tags: bool,
+        #[arg(long, help = "Set priority 1 (high)")]
+        p1: bool,
+        #[arg(long, help = "Set priority 2 (medium)")]
+        p2: bool,
+        #[arg(long, help = "Set priority 3 (low)")]
+        p3: bool,
+        #[arg(long, help = "Clear priority tag (p1/p2/p3)")]
+        clear_priority: bool,
+        #[arg(
+            long,
+            value_name = "TIME",
+            help = "Due time (now, +2h, today, 2026-07-24 14:30, or 'none')"
+        )]
+        due: Option<String>,
+        #[arg(long, help = "Clear due date")]
+        clear_due: bool,
+        #[arg(long, value_name = "TIME", help = "Scheduled start time (or 'none')")]
+        start: Option<String>,
+        #[arg(long, value_name = "TIME", help = "Scheduled end time (or 'none')")]
+        end: Option<String>,
+        #[arg(
+            long,
+            value_name = "RRULE",
+            help = "Recurrence rule (FREQ=DAILY|WEEKLY|MONTHLY, or 'none')"
+        )]
+        rrule: Option<String>,
+        #[arg(long, help = "Clear schedule (start, end, and rrule)")]
+        clear_schedule: bool,
+        #[arg(
+            long,
+            value_name = "STATUS",
+            help = "Change status (inbox, next, waiting, scheduled, someday, reference, done)"
+        )]
+        status: Option<String>,
+        #[arg(
+            short = 'n',
+            long = "notes",
+            value_name = "NOTES",
+            help = "Notes / description for the task"
+        )]
+        notes: Option<String>,
+        #[arg(
+            short = 'e',
+            long = "edit-notes",
+            help = "Open $EDITOR to edit notes interactively"
+        )]
+        edit_notes: bool,
+        #[arg(long, help = "Print the modified task as JSON")]
+        json: bool,
+    },
     /// Mark actionable (next)
     Next { id: String },
     /// Mark waiting-for
@@ -145,6 +224,7 @@ pub enum Command {
     #[command(visible_alias = "d")]
     Done { id: String },
     /// Archive (soft delete) a task
+    #[command(visible_aliases = ["rm", "delete"])]
     Archive { id: String },
     /// Restore a previously archived (soft-deleted) task
     Restore { id: String },
@@ -426,6 +506,58 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Command::List { ref status, .. }) if status == &Some("bogus".into())
+        ));
+    }
+
+    #[test]
+    fn modify_parses_tokens_and_flags_and_aliases() {
+        let cli = parse(&[
+            "modify", "1234", "new", "title", "--tag", "work", "--untag", "home", "--due",
+            "tomorrow", "--p1",
+        ])
+        .unwrap();
+        match cli.command.unwrap() {
+            Command::Modify {
+                id,
+                text,
+                tag,
+                untag,
+                p1,
+                due,
+                ..
+            } => {
+                assert_eq!(id, "1234");
+                assert_eq!(text, vec!["new".to_string(), "title".to_string()]);
+                assert_eq!(tag, vec!["work".to_string()]);
+                assert_eq!(untag, vec!["home".to_string()]);
+                assert!(p1);
+                assert_eq!(due.as_deref(), Some("tomorrow"));
+            }
+            _ => panic!("应为 Modify"),
+        }
+
+        // test aliases: m, mod, edit
+        assert!(matches!(
+            parse(&["m", "abc", "text"]).unwrap().command,
+            Some(Command::Modify { .. })
+        ));
+        assert!(matches!(
+            parse(&["mod", "abc", "text"]).unwrap().command,
+            Some(Command::Modify { .. })
+        ));
+        assert!(matches!(
+            parse(&["edit", "abc", "text"]).unwrap().command,
+            Some(Command::Modify { .. })
+        ));
+
+        // test rm/delete aliases for Archive
+        assert!(matches!(
+            parse(&["rm", "abc"]).unwrap().command,
+            Some(Command::Archive { .. })
+        ));
+        assert!(matches!(
+            parse(&["delete", "abc"]).unwrap().command,
+            Some(Command::Archive { .. })
         ));
     }
 }

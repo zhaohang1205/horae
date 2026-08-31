@@ -9,6 +9,7 @@ mod capture;
 mod focus;
 mod list;
 mod log;
+mod modify;
 pub use horae_core::notify;
 mod ntfy;
 pub use horae_core::pomo;
@@ -70,6 +71,52 @@ fn run_inner(cmd: Command, conn: &Connection, profile: Option<&str>) -> Result<(
             json,
         ),
         Command::Show { id, json } => show::run(conn, &id, json),
+        Command::Modify {
+            id,
+            text,
+            title,
+            tag,
+            untag,
+            clear_tags,
+            p1,
+            p2,
+            p3,
+            clear_priority,
+            due,
+            clear_due,
+            start,
+            end,
+            rrule,
+            clear_schedule,
+            status,
+            notes,
+            edit_notes,
+            json,
+        } => modify::run(
+            conn,
+            modify::ModifyArgs {
+                id,
+                text,
+                title,
+                tags: tag,
+                untags: untag,
+                clear_tags,
+                p1,
+                p2,
+                p3,
+                clear_priority,
+                due,
+                clear_due,
+                start,
+                end,
+                rrule,
+                clear_schedule,
+                status,
+                notes,
+                edit_notes,
+                json,
+            },
+        ),
         Command::Next { id } => status::to_status(conn, &id, "next"),
         Command::Wait { id } => status::to_status(conn, &id, "waiting"),
         Command::Someday { id } => status::to_status(conn, &id, "someday"),

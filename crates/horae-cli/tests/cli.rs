@@ -415,3 +415,77 @@ fn help_switches_to_chinese_via_flag() {
         .success()
         .stdout(contains("GTD 终端任务管理器"));
 }
+
+// ---------------------------------------------------------------- modify
+
+#[test]
+fn modify_quick_add_and_explicit_flags() {
+    let env = env();
+    let id = capture(&env, &["原始任务", "--tag", "old"]);
+
+    // 1. 使用 quick-add 语法更新标题、标签、时间与优先级
+    env.cmd()
+        .args([
+            "modify",
+            &id,
+            "买有机牛奶",
+            "@groceries",
+            "~tomorrow 10:00",
+            "!a",
+        ])
+        .assert()
+        .success()
+        .stdout(contains("modified ["));
+
+    let show = show_json(&env, &id);
+    assert_eq!(show["task"]["title"], "买有机牛奶");
+    assert_eq!(show["task"]["status"], "Scheduled");
+    let tag_names: Vec<String> = show["tags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect();
+    assert!(tag_names.contains(&"groceries".to_string()));
+    assert!(tag_names.contains(&"p1".to_string()));
+    assert!(tag_names.contains(&"old".to_string()));
+
+    // 2. 使用显式参数更新 notes、due，并通过 --untag 移除旧标签
+    env.cmd()
+        .args([
+            "edit", // 测试 alias
+            &id,
+            "--notes",
+            "必须是全脂鲜牛奶",
+            "--due",
+            "+2d 18:00",
+            "--untag",
+            "old",
+            "--status",
+            "next",
+        ])
+        .assert()
+        .success();
+
+    let show2 = show_json(&env, &id);
+    assert_eq!(show2["task"]["notes"], "必须是全脂鲜牛奶");
+    assert_eq!(show2["task"]["status"], "Next");
+    assert!(show2["task"]["due_at"].as_i64().is_some());
+    let tag_names2: Vec<String> = show2["tags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect();
+    assert!(!tag_names2.contains(&"old".to_string()));
+
+    // 3. 清除 due 和全部 tags
+    env.cmd()
+        .args(["m", &id, "--clear-due", "--clear-tags"])
+        .assert()
+        .success();
+
+    let show3 = show_json(&env, &id);
+    assert!(show3["task"]["due_at"].is_null());
+    assert!(show3["tags"].as_array().unwrap().is_empty());
+}

@@ -62,9 +62,10 @@ Task refs accept a full id, a unique id-prefix, or an exact title.
 | `horae capture [title] [--clip] [--notes N] [--tag T]... [--due TIME] [--status S] [--p1\|--p2\|--p3] [--json]` | Capture (alias `c`, supports `--clip` ingest) |
 | `horae list [--status S] [--tag T]... [--date MMDD] [--due-before TIME] [--json]` | List tasks (alias `l`); date search uses four digits, e.g. `0829` |
 | `horae show <id> [--json]` | Show with timeline (alias `s`) |
+| `horae modify <id> [text] [--title T] [--due TIME] [--notes N] [--edit-notes] [--tag T]... [--untag T]... [--p1\|--p2\|--p3] [--status S] [--json]` | Modify task (aliases `m`, `mod`, `edit`; quick-add syntax supported) |
 | `horae next\|wait\|someday\|done\|restore\|purge <id>` | Move / restore / hard-delete (alias `d` for `done`) |
 | `horae schedule <id> [--start TIME] [--end TIME] [--rrule R]` | Schedule (+recurrence) |
-| `horae archive <id>` / `horae restore <id>` / `horae purge <id>` | Soft delete / restore / hard delete |
+| `horae archive <id>` / `horae restore <id>` / `horae purge <id>` | Soft delete / restore / hard delete (aliases `rm`, `delete` for `archive`) |
 | `horae tag <id> <name>` / `horae untag <id> <name>` | Manage tags |
 | `horae focus [--start]` / `horae do [--start]` | Output the single top task now (can also start a pomodoro) |
 | `horae log [message]` | Journal entry (no task) |
@@ -83,7 +84,7 @@ Help language: CLI `--help` is English by default; pass `--lang zh` (or set the
 `HORAE_LANG=zh` environment variable) to switch to Chinese, e.g. `horae --lang zh --help`
 or `HORAE_LANG=zh horae capture --help`.
 
-Short aliases: `c`=capture, `l`=list, `s`=show, `d`=done, `p`=pomo, `do`=focus.
+Short aliases: `c`=capture, `l`=list, `s`=show, `m`=modify/edit, `d`=done, `rm`=archive, `p`=pomo, `do`=focus.
 
 ## TUI Keybindings
 

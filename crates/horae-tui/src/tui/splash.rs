@@ -587,10 +587,7 @@ mod splash_tests {
     fn wrap_tmux_dcs_wraps_and_doubles_escapes() {
         let raw = "\x1b_Ga=d,d=A,q=2\x1b\\";
         let wrapped = wrap_tmux_dcs(raw);
-        assert_eq!(
-            wrapped,
-            "\x1bPtmux;\x1b\x1b_Ga=d,d=A,q=2\x1b\x1b\\\x1b\\"
-        );
+        assert_eq!(wrapped, "\x1bPtmux;\x1b\x1b_Ga=d,d=A,q=2\x1b\x1b\\\x1b\\");
     }
 
     #[test]

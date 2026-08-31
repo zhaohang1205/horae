@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **CLI 任务修改与编辑（`horae modify` / `horae edit`）**：
+  - 新增 `horae modify <id>`（别名 `m`、`mod`、`edit`），支持全面修改已有任务的标题、标签、优先级、截止时间、排程、循环规则、状态和备注。
+  - 支持直接在一句话中使用 Quick-Add 语法（`@tag`、`~time`、`*rrule`、`!priority`）修改，也支持通过显式参数精细调整（`--title`、`--due`、`--start`、`--rrule`、`--tag`、`--untag`、`--notes` 等）。
+  - 支持清理字段（`--clear-due`、`--clear-schedule`、`--clear-tags`、`--clear-priority`，或传 `none` 值）。
+  - 支持 `--edit-notes`（`-e`）调起系统 `$EDITOR`（默认 vim）进行交互式长备注编辑。
+  - `horae archive` 新增 Unix 习惯别名 `horae rm` 与 `horae delete`。
 - **中英文全角/半角标点统一解析支持**：全面打通 `@/＠`、`~/～/〜`、`*/＊/×`、`!/！`、`［ ］`、`【 】`、`：` 等全角标点，中文输入法下无需频繁切换即可无缝使用 Quick-Add 语法与实时 Tab 补全。
 - **剪贴板一键瞬时捕获（Clipboard Ingest）**：
   - 新增 `horae c --clip` / `horae capture --clip` 命令，快速从系统剪贴板读取内容落库。

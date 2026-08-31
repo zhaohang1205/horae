@@ -17,9 +17,9 @@ pub use query::{
 pub use quotes::{count_quotes, count_quotes_in_status, list_quotes, quote_task_ids, QUOTE_TAG};
 pub use transition::{
     add_checklist_item, archive, create_capture, delete_checklist_item, ensure_ready_for_pomodoro,
-    move_checklist_item, purge, rename, rename_checklist_item, schedule, set_due, set_rrule,
-    toggle_checklist_item, toggle_next_checklist_item, transition, unarchive, update_notes,
-    CaptureInput,
+    modify, move_checklist_item, purge, rename, rename_checklist_item, schedule, set_due,
+    set_rrule, toggle_checklist_item, toggle_next_checklist_item, transition, unarchive,
+    update_notes, CaptureInput, ModifyInput,
 };
 
 use crate::model::task::Task;
