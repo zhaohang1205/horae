@@ -2889,3 +2889,85 @@ fn fullwidth_symbols_completion_works() {
     app.handle_key(kc(KeyCode::Tab)).unwrap();
     assert_eq!(app.input, "买牛奶 @work ~today ");
 }
+
+#[test]
+fn workflow_view_content_scrolling_and_bilingual() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+    let mut term = Terminal::new(TestBackend::new(140, 40)).unwrap();
+
+    // 1. 切换到 Workflow 视图
+    app.handle_key(key('W')).unwrap();
+    assert_eq!(app.view, View::Workflow);
+
+    // 2. 中文模式渲染验证
+    term.clear().unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let frame_zh = norm(&snap(&term));
+    assert!(
+        frame_zh.contains("GTD工作流") && frame_zh.contains("决策树与五步闭环"),
+        "中心面板应包含 GTD 决策树标题: {}",
+        frame_zh
+    );
+    assert!(
+        frame_zh.contains("是否可行动") && frame_zh.contains("两分钟原则"),
+        "中心面板应包含决策树判定分支: {}",
+        frame_zh
+    );
+    assert!(
+        frame_zh.contains("DavidAllen") && frame_zh.contains("心如止水"),
+        "右侧面板应包含 David Allen 与心如止水: {}",
+        frame_zh
+    );
+
+    // 3. 滚动测试：中心面板 (Pane::Center)
+    app.pane = Pane::Center;
+    app.handle_key(key('j')).unwrap();
+    assert_eq!(app.workflow_scroll, 1);
+    app.handle_key(kc(KeyCode::PageDown)).unwrap();
+    assert_eq!(app.workflow_scroll, 11);
+    app.handle_key(kc(KeyCode::PageUp)).unwrap();
+    assert_eq!(app.workflow_scroll, 1);
+    app.handle_key(key('G')).unwrap();
+    assert!(app.workflow_scroll >= 10000);
+    app.handle_key(key('g')).unwrap();
+    assert_eq!(app.workflow_scroll, 0);
+
+    // 4. 滚动测试：右侧面板 (Pane::Right)
+    app.pane = Pane::Right;
+    app.handle_key(key('j')).unwrap();
+    assert_eq!(app.workflow_side_scroll, 1);
+    app.handle_key(kc(KeyCode::PageDown)).unwrap();
+    assert_eq!(app.workflow_side_scroll, 11);
+    app.handle_key(kc(KeyCode::PageUp)).unwrap();
+    assert_eq!(app.workflow_side_scroll, 1);
+    app.handle_key(key('G')).unwrap();
+    assert!(app.workflow_side_scroll >= 10000);
+    app.handle_key(key('g')).unwrap();
+    assert_eq!(app.workflow_side_scroll, 0);
+
+    // 5. 英文模式渲染验证
+    app.lang = horae_core::i18n::Lang::En;
+    term.clear().unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let frame_en = norm(&snap(&term));
+    assert!(
+        frame_en.contains("GTDWorkflow") && frame_en.contains("Philosophy"),
+        "英文模式应包含英文标题: {}",
+        frame_en
+    );
+    assert!(
+        frame_en.contains("DavidAllen") && frame_en.contains("MindLikeWater"),
+        "英文模式应包含 David Allen 与 Mind Like Water: {}",
+        frame_en
+    );
+
+    // 6. 切换视图重置滚动偏移
+    app.workflow_scroll = 5;
+    app.workflow_side_scroll = 5;
+    app.set_view(View::Inbox);
+    assert_eq!(app.workflow_scroll, 0);
+    assert_eq!(app.workflow_side_scroll, 0);
+}

@@ -203,6 +203,10 @@ pub(crate) struct App<'a> {
     pub(crate) show_syntax: bool,
     pub(crate) show_shortcut_bar: bool,
     pub(crate) help_scroll: usize,
+    /// GTD 工作流视图（中心决策树）滚动偏移。
+    pub(crate) workflow_scroll: usize,
+    /// GTD 工作流视图（右侧哲学与人物）滚动偏移。
+    pub(crate) workflow_side_scroll: usize,
     pub(crate) should_quit: bool,
     pub(crate) search_query: String,
     pub(crate) tag_filter: Option<String>,
@@ -301,6 +305,8 @@ impl<'a> App<'a> {
             show_syntax: false,
             show_shortcut_bar: true,
             help_scroll: 0,
+            workflow_scroll: 0,
+            workflow_side_scroll: 0,
             should_quit: false,
             search_query: String::new(),
             tag_filter: None,
@@ -532,6 +538,8 @@ impl<'a> App<'a> {
     pub(crate) fn set_view(&mut self, v: View) {
         self.view = v;
         self.selected = 0;
+        self.workflow_scroll = 0;
+        self.workflow_side_scroll = 0;
         self.status_message.clear();
         if let Err(e) = self.refresh() {
             self.status_message = format!("err: {}", e);
@@ -540,6 +548,22 @@ impl<'a> App<'a> {
     }
 
     pub(crate) fn move_sel(&mut self, delta: isize) {
+        if self.view == View::Workflow {
+            if delta <= -10000 {
+                if self.pane == Pane::Right {
+                    self.workflow_side_scroll = 0;
+                } else {
+                    self.workflow_scroll = 0;
+                }
+            } else if self.pane == Pane::Right {
+                let s = self.workflow_side_scroll as isize + delta;
+                self.workflow_side_scroll = s.max(0) as usize;
+            } else {
+                let s = self.workflow_scroll as isize + delta;
+                self.workflow_scroll = s.max(0) as usize;
+            }
+            return;
+        }
         if self.items.is_empty() {
             self.selected = 0;
             self.load_detail();

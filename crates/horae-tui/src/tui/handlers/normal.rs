@@ -210,6 +210,20 @@ impl<'a> App<'a> {
             KeyCode::Char('W') => self.set_view(View::Workflow),
             KeyCode::Char('g') => self.move_sel(-10000),
             KeyCode::Char('G') => self.move_sel(10000),
+            KeyCode::PageDown => {
+                if self.pane == Pane::Left && self.mode != Mode::Visual {
+                    self.next_view(5);
+                } else {
+                    self.move_sel(10);
+                }
+            }
+            KeyCode::PageUp => {
+                if self.pane == Pane::Left && self.mode != Mode::Visual {
+                    self.next_view(-5);
+                } else {
+                    self.move_sel(-10);
+                }
+            }
             _ => return Ok(false),
         }
         Ok(true)
