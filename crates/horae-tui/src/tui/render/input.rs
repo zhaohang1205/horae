@@ -214,7 +214,7 @@ impl<'a> App<'a> {
         );
 
         // 补全候选下拉层：独立渲染在输入框下方，不抬高输入框本身。
-        if !self.completion_candidates.is_empty() {
+        if self.completion_active() {
             self.render_completion_dropdown(f, area);
         }
 
@@ -454,7 +454,10 @@ impl<'a> App<'a> {
                     Style::default().fg(self.theme.text_success),
                 ),
                 Span::raw(" → "),
-                Span::styled(format!("!{}", self.lang.tr(zh, en)), Style::default().fg(color)),
+                Span::styled(
+                    format!("!{}", self.lang.tr(zh, en)),
+                    Style::default().fg(color),
+                ),
             ]));
         }
         text_lines

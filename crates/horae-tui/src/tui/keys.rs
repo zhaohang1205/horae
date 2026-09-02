@@ -61,18 +61,15 @@ pub(crate) const NON_TASK_VIEWS: &[View] = &[View::Tags, View::Archived, View::S
 
 /// `~` 时间补全候选（中文模式：包含常用英文词与中文星期，去除与 today/tomorrow 重复的今天/明天/后天）。
 pub(crate) const TIME_CANDIDATES_ZH: &[&str] = &[
-    "now", "today", "tomorrow", "+1h", "+2h", "+3h", "+1d", "+2d", "+1w", "周一", "周二",
-    "周三", "周四", "周五", "周六", "周日",
+    "now", "today", "tomorrow", "+1h", "+2h", "+3h", "+1d", "+2d", "+1w", "周一", "周二", "周三",
+    "周四", "周五", "周六", "周日",
 ];
 
 /// `~` 时间补全候选（英文模式：纯英文词汇，符合英文用户习惯）。
 pub(crate) const TIME_CANDIDATES_EN: &[&str] = &[
-    "now", "today", "tomorrow", "+1h", "+2h", "+3h", "+1d", "+2d", "+1w",
-    "mon", "tue", "wed", "thu", "fri", "sat", "sun",
+    "now", "today", "tomorrow", "+1h", "+2h", "+3h", "+1d", "+2d", "+1w", "mon", "tue", "wed",
+    "thu", "fri", "sat", "sun",
 ];
-
-/// 别名兼容常量。
-pub(crate) const TIME_CANDIDATES: &[&str] = TIME_CANDIDATES_ZH;
 
 pub(crate) fn time_candidates(lang: Lang) -> &'static [&'static str] {
     match lang {

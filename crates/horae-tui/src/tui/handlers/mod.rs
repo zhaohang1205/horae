@@ -248,8 +248,8 @@ impl<'a> AppHandlers for App<'a> {
                 self.input_clear();
                 self.reload()?;
             }
-            KeyCode::Tab | KeyCode::Right if self.completion_active() => {
-                // 候选激活：Tab/→ 采纳 ghost 补全（补齐 token，留在编辑）。
+            KeyCode::Tab if self.completion_active() => {
+                // 候选激活：Tab 采纳补全（补齐 token，留在编辑）。
                 self.accept_completion();
                 return Ok(());
             }

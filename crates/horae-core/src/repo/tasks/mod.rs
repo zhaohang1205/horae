@@ -19,8 +19,7 @@ pub use transition::{
     add_checklist_item, archive, create_capture, delete_checklist_item, ensure_ready_for_pomodoro,
     modify, move_checklist_item, purge, rename, rename_checklist_item, schedule, set_due,
     set_priority, set_rrule, toggle_checklist_item, toggle_next_checklist_item, transition,
-    unarchive,
-    update_notes, CaptureInput, ModifyInput,
+    unarchive, update_notes, CaptureInput, ModifyInput,
 };
 
 use crate::model::task::Task;
@@ -30,7 +29,8 @@ use crate::model::task::Task;
 pub const SYSTEM_JOURNAL_ID: &str = "__journal__";
 
 /// Columns for the `tasks` table, shared by every row-mapping query.
-pub(crate) const TASK_COLUMNS: &str = "id,title,notes,status,rrule,priority,created_at,clarified_at,\
+pub(crate) const TASK_COLUMNS: &str =
+    "id,title,notes,status,rrule,priority,created_at,clarified_at,\
         due_at,scheduled_start_at,scheduled_end_at,completed_at,archived_at,updated_at,\
         delegated_to,checklist,archive_reason";
 

@@ -65,22 +65,22 @@ impl<'a> App<'a> {
 
     pub(crate) fn input_move_left(&mut self) {
         self.input_cursor = self.cursor_prev();
-        self.refresh_completion();
+        self.clear_completion();
     }
 
     pub(crate) fn input_move_right(&mut self) {
         self.input_cursor = self.cursor_next();
-        self.refresh_completion();
+        self.clear_completion();
     }
 
     pub(crate) fn input_home(&mut self) {
         self.input_cursor = 0;
-        self.refresh_completion();
+        self.clear_completion();
     }
 
     pub(crate) fn input_end(&mut self) {
         self.input_cursor = self.input.len();
-        self.refresh_completion();
+        self.clear_completion();
     }
 
     /// 清空输入并复位光标。
@@ -181,7 +181,10 @@ impl<'a> App<'a> {
         let (start, end) = self.completion_range?;
         let sub = &self.input[start..end];
         let body_start = if let Some((len, c)) = horae_core::parser::first_char_info(sub) {
-            if matches!(c, '@' | '＠' | '~' | '～' | '〜' | '*' | '＊' | '×' | '!' | '！') {
+            if matches!(
+                c,
+                '@' | '＠' | '~' | '～' | '〜' | '*' | '＊' | '×' | '!' | '！'
+            ) {
                 start + len
             } else {
                 start
@@ -218,8 +221,12 @@ impl<'a> App<'a> {
         let prefix_char = self.completion_prefix;
         // 词首是否已含前缀字符（中英文均归一替换为半角前缀）：Tagging 裸标签词首是首字母，不插入前缀。
         let sub = &self.input[start..];
-        let has_prefix = horae_core::parser::first_char_info(sub)
-            .is_some_and(|(_, c)| matches!(c, '@' | '＠' | '~' | '～' | '〜' | '*' | '＊' | '×' | '!' | '！'));
+        let has_prefix = horae_core::parser::first_char_info(sub).is_some_and(|(_, c)| {
+            matches!(
+                c,
+                '@' | '＠' | '~' | '～' | '〜' | '*' | '＊' | '×' | '!' | '！'
+            )
+        });
         let tail = self.input[self.input_cursor..].to_string();
         self.input.truncate(start);
         if has_prefix {
@@ -316,20 +323,24 @@ pub(crate) fn completion_meta(
                 lang.tr("周六与周日", "Sat & Sun").into(),
             ),
             "2w[1,3]" => (
-                lang.tr("每两周 (周一、周三)", "Every 2 weeks (Mon, Wed)").into(),
+                lang.tr("每两周 (周一、周三)", "Every 2 weeks (Mon, Wed)")
+                    .into(),
                 lang.tr("范式: *Nw[1..7]", "Pattern: *Nw[1..7]").into(),
             ),
             "m[1,2,-2,-1]" => (
                 lang.tr("月初及月末各两日", "1st,2nd & last 2 days").into(),
-                lang.tr("范式: *Nm[1..31,-1]", "Pattern: *Nm[1..31,-1]").into(),
+                lang.tr("范式: *Nm[1..31,-1]", "Pattern: *Nm[1..31,-1]")
+                    .into(),
             ),
             "m[1,-1]" => (
                 lang.tr("每月 1 号与月末", "Monthly 1st & last day").into(),
-                lang.tr("范式: *Nm[1..31,-1]", "Pattern: *Nm[1..31,-1]").into(),
+                lang.tr("范式: *Nm[1..31,-1]", "Pattern: *Nm[1..31,-1]")
+                    .into(),
             ),
             "y[jan,jul]" => (
                 lang.tr("每年 1 月与 7 月", "Yearly Jan & Jul").into(),
-                lang.tr("范式: *Ny[1..12/月名]", "Pattern: *Ny[1..12/name]").into(),
+                lang.tr("范式: *Ny[1..12/月名]", "Pattern: *Ny[1..12/name]")
+                    .into(),
             ),
             "1w[mo,we]" => (
                 lang.tr("每周 (周一、周三)", "Weekly (Mon, Wed)").into(),
@@ -343,11 +354,13 @@ pub(crate) fn completion_meta(
         '~' => match token {
             "today" => (
                 lang.tr("今天", "Today").into(),
-                lang.tr("可接时刻: ~today 18:00", "With time: ~today 18:00").into(),
+                lang.tr("可接时刻: ~today 18:00", "With time: ~today 18:00")
+                    .into(),
             ),
             "tomorrow" => (
                 lang.tr("明天", "Tomorrow").into(),
-                lang.tr("可接时刻: ~tomorrow 10:00", "With time: ~tomorrow 10:00").into(),
+                lang.tr("可接时刻: ~tomorrow 10:00", "With time: ~tomorrow 10:00")
+                    .into(),
             ),
             "now" => (
                 lang.tr("当前时刻", "Right now").into(),
@@ -448,15 +461,18 @@ pub(crate) fn completion_meta(
         '!' => match token {
             "high" => (
                 lang.tr("高优先级", "High priority").into(),
-                lang.tr("统治级 (+10000 权重)", "Top priority (+10000 weight)").into(),
+                lang.tr("统治级 (+10000 权重)", "Top priority (+10000 weight)")
+                    .into(),
             ),
             "medium" => (
                 lang.tr("中优先级", "Medium priority").into(),
-                lang.tr("重要 (+5000 权重)", "Medium priority (+5000 weight)").into(),
+                lang.tr("重要 (+5000 权重)", "Medium priority (+5000 weight)")
+                    .into(),
             ),
             "low" => (
                 lang.tr("低优先级", "Low priority").into(),
-                lang.tr("次要 (+1000 权重)", "Low priority (+1000 weight)").into(),
+                lang.tr("次要 (+1000 权重)", "Low priority (+1000 weight)")
+                    .into(),
             ),
             _ => (String::new(), String::new()),
         },

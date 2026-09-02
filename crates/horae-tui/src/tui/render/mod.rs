@@ -444,7 +444,9 @@ impl<'a> AppRender for App<'a> {
             .title(title);
         let lines = self.workflow_lines();
         let content_h = area.height.saturating_sub(2) as usize;
-        let scroll = self.workflow_scroll.min(lines.len().saturating_sub(content_h));
+        let scroll = self
+            .workflow_scroll
+            .min(lines.len().saturating_sub(content_h));
         f.render_widget(
             Paragraph::new(lines)
                 .block(block)
@@ -502,11 +504,7 @@ impl<'a> AppRender for App<'a> {
             ),
             map(tr!(self.lang, "1 / a", "1 / a")),
             Span::styled(
-                tr!(
-                    self.lang,
-                    ")，清空大脑不留杂念。",
-                    "). Free your mind."
-                ),
+                tr!(self.lang, ")，清空大脑不留杂念。", "). Free your mind."),
                 s_dim,
             ),
         ]));
@@ -555,9 +553,7 @@ impl<'a> AppRender for App<'a> {
             dim("       ├─ 别人做 → 👥 "),
             map(tr!(self.lang, "等待中 (3/w)", "Waiting For (3/w)")),
         ]));
-        lines.push(Line::from(vec![
-            dim("       └─ 我来做："),
-        ]));
+        lines.push(Line::from(vec![dim("       └─ 我来做：")]));
         lines.push(Line::from(vec![
             dim("           ├─ 固定时间 → 📅 "),
             map(tr!(
@@ -568,7 +564,11 @@ impl<'a> AppRender for App<'a> {
         ]));
         lines.push(Line::from(vec![
             dim("           └─ 尽快执行 → 🎯 "),
-            map(tr!(self.lang, "下一步行动 (2/Enter)", "Next Actions (2/Enter)")),
+            map(tr!(
+                self.lang,
+                "下一步行动 (2/Enter)",
+                "Next Actions (2/Enter)"
+            )),
         ]));
 
         // 3. 组织
@@ -662,6 +662,7 @@ impl<'a> AppRender for App<'a> {
     }
 
     /// David Allen 介绍与 GTD 核心哲学文本（中英双语，100 字精炼版）。
+    #[allow(clippy::vec_init_then_push)]
     fn workflow_side_lines(&self) -> Vec<Line<'static>> {
         let s_title = Style::default()
             .fg(self.theme.accent)

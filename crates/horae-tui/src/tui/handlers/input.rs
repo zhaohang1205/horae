@@ -7,21 +7,19 @@ use horae_core::repo::{tags, tasks};
 use horae_core::time;
 
 impl<'a> App<'a> {
-    /// Tab：候选激活时向下推进；未激活时尝试补全当前词（正常情况下
-    /// 实时补全已在输入时填充候选，此处兜底）。
+    /// Tab：候选激活时采纳当前候选；未激活时尝试在光标处重新检索候选并采纳。
     pub(super) fn handle_tab_completion(&mut self) {
         if self.completion_active() {
-            let n = self.completion_candidates.len();
-            if n > 0 {
-                self.completion_index = (self.completion_index + 1) % n;
-                self.apply_current_completion();
-            }
+            self.accept_completion();
         } else {
             self.refresh_completion();
+            if self.completion_active() {
+                self.accept_completion();
+            }
         }
     }
 
-    /// 候选激活时上移选择。
+    /// 候选激活时上移选择（仅切换选中的候选索引，不覆写输入内容）。
     pub(super) fn completion_up(&mut self) {
         if !self.completion_active() {
             return;
@@ -29,11 +27,10 @@ impl<'a> App<'a> {
         let n = self.completion_candidates.len();
         if n > 0 {
             self.completion_index = (self.completion_index + n - 1) % n;
-            self.apply_current_completion();
         }
     }
 
-    /// 候选激活时下移选择。
+    /// 候选激活时下移选择（仅切换选中的候选索引，不覆写输入内容）。
     pub(super) fn completion_down(&mut self) {
         if !self.completion_active() {
             return;
@@ -41,7 +38,6 @@ impl<'a> App<'a> {
         let n = self.completion_candidates.len();
         if n > 0 {
             self.completion_index = (self.completion_index + 1) % n;
-            self.apply_current_completion();
         }
     }
 
@@ -183,7 +179,11 @@ impl<'a> App<'a> {
                 ));
             }
             // 优先级为独立字段，不再混入标签。
-            ok &= self.note(tasks::set_priority(self.conn, &id, quick_add.priority.clone()));
+            ok &= self.note(tasks::set_priority(
+                self.conn,
+                &id,
+                quick_add.priority.clone(),
+            ));
             // @quote 路由：组织/编辑时出现金句标签 → 工作态任务流转为参考资料，离开收件箱。
             let is_quote =
                 self.quotes.enabled && new_set.contains(horae_core::repo::tasks::QUOTE_TAG);

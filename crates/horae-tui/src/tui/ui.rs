@@ -47,9 +47,9 @@ pub fn status_color(s: &Status, is_dark: bool) -> Color {
 /// 优先级的配色：high 红 / medium 黄 / low 蓝，与状态色区分开。
 pub fn priority_color(priority: &str) -> Option<Color> {
     match priority {
-        "high" => Some(Color::Rgb(243, 139, 168)), // Red
+        "high" => Some(Color::Rgb(243, 139, 168)),   // Red
         "medium" => Some(Color::Rgb(249, 226, 175)), // Yellow
-        "low" => Some(Color::Rgb(137, 180, 250)), // Blue
+        "low" => Some(Color::Rgb(137, 180, 250)),    // Blue
         _ => None,
     }
 }

@@ -2039,29 +2039,31 @@ fn tab_completion_works_at_cursor() {
     assert_eq!(app.mode, Mode::Capturing, "接受不退出编辑");
     assert!(!app.completion_active(), "接受后关闭候选");
 
-    // 多候选：*w 有 w/weekday/weekend，用 ↑↓ 与 Ctrl+n/p 循环，Esc 取消。
+    // 多候选：*w 有 w/weekday/weekend，用 ↑↓ 与 Ctrl+n/p 循环候选索引，Tab 采纳，Esc 取消。
     app.input.clear();
     app.input_cursor = 0;
     for c in "*w".chars() {
         app.handle_key(key(c)).unwrap();
     }
     assert!(app.completion_active(), "*w 实时激活候选");
-    assert_eq!(app.input, "*w", "首候选 w 以 ghost 显示");
+    assert_eq!(app.input, "*w", "首候选 w 以 ghost 显示，输入保持 *w");
+    assert_eq!(app.completion_index, 0);
     app.handle_key(kc(KeyCode::Down)).unwrap();
-    assert_eq!(app.input, "*weekday", "Down 切到 weekday: {}", app.input);
+    assert_eq!(app.completion_index, 1, "Down 切到 index 1 (weekday)");
+    assert_eq!(app.input, "*w", "输入仍然保持 *w，未被提前覆盖");
     app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL))
         .unwrap();
-    assert_eq!(app.input, "*weekend", "Ctrl+n 切到 weekend: {}", app.input);
+    assert_eq!(app.completion_index, 2, "Ctrl+n 切到 index 2 (weekend)");
     app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL))
         .unwrap();
-    assert_eq!(app.input, "*weekday", "Ctrl+p 切回 weekday: {}", app.input);
+    assert_eq!(app.completion_index, 1, "Ctrl+p 切回 index 1 (weekday)");
     app.handle_key(kc(KeyCode::Up)).unwrap();
-    assert_eq!(app.input, "*w", "Up 回到首候选: {}", app.input);
+    assert_eq!(app.completion_index, 0, "Up 回到首候选 (w)");
     app.handle_key(kc(KeyCode::Down)).unwrap();
-    assert_eq!(app.input, "*weekday", "Down 再切: {}", app.input);
+    assert_eq!(app.completion_index, 1, "Down 再切到 weekday");
     app.handle_key(kc(KeyCode::Esc)).unwrap();
     assert!(!app.completion_active(), "Esc 取消候选");
-    assert_eq!(app.input, "*weekday", "取消保留当前输入");
+    assert_eq!(app.input, "*w", "取消保留用户原始输入 *w");
     assert_eq!(app.mode, Mode::Capturing, "取消不退出编辑");
 
     // 光标在中间时：Tab 补全光标所在词。
@@ -2079,6 +2081,55 @@ fn tab_completion_works_at_cursor() {
     }
     app.handle_key(kc(KeyCode::Tab)).unwrap();
     assert!(app.input.contains("@home"), "光标所在词补全: {}", app.input);
+}
+
+#[test]
+fn cursor_left_editing_after_completion_does_not_interfere() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    app.handle_key(key('a')).unwrap();
+    assert_eq!(app.mode, Mode::Capturing);
+
+    // 1. 用户输入 buy @ho 并按 Tab 补全 -> 变为 "buy @home "
+    for c in "buy @ho".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    app.handle_key(kc(KeyCode::Tab)).unwrap();
+    assert_eq!(app.input, "buy @home ");
+    assert!(!app.completion_active(), "补全后已关闭候选");
+
+    // 2. 向左移动光标想要修改 @home 为 @work
+    // 连续按 5 次 Left：移到 '@' 之后 ('h' 处，索引 5)
+    for _ in 0..5 {
+        app.handle_key(kc(KeyCode::Left)).unwrap();
+        assert!(
+            !app.completion_active(),
+            "光标左移导航过程中不应强行弹出补全干扰"
+        );
+    }
+    // 光标现在在 '@' 后面 ('h' 处，索引 5)
+    assert_eq!(app.input_cursor, 5);
+
+    // 3. 删除 "home" (4次 Delete) 并输入 "work"
+    for _ in 0..4 {
+        app.handle_key(kc(KeyCode::Delete)).unwrap();
+    }
+    assert_eq!(app.input, "buy @ ");
+    for c in "work".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    assert_eq!(app.input, "buy @work ");
+
+    // 4. 用户可以在任何位置自由移动光标
+    app.handle_key(kc(KeyCode::Home)).unwrap();
+    assert_eq!(app.input_cursor, 0);
+    assert!(!app.completion_active());
+    app.handle_key(kc(KeyCode::End)).unwrap();
+    assert_eq!(app.input_cursor, app.input.len());
+    assert!(!app.completion_active());
 }
 
 #[test]
@@ -2637,10 +2688,7 @@ fn exclamation_pops_priority_completion_immediately() {
     // 仅输入 '!' 一个字符（光标在末尾）即应弹出优先级候选，无需再敲字符。
     app.input_insert_char('!');
     assert_eq!(app.input, "!");
-    assert!(
-        app.completion_active(),
-        "输入 '!' 后补全候选应立即可用"
-    );
+    assert!(app.completion_active(), "输入 '!' 后补全候选应立即可用");
     assert_eq!(
         app.completion_candidates,
         vec!["high".to_string(), "medium".to_string(), "low".to_string()],
@@ -3024,7 +3072,11 @@ fn completion_style_toggle_and_rendering() {
     let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
     term.draw(|f| app.render(f)).unwrap();
     let s = norm(&snap(&term));
-    assert!(s.contains("语法速查"), "Reference 模式标题包含语法速查: {}", s);
+    assert!(
+        s.contains("语法速查"),
+        "Reference 模式标题包含语法速查: {}",
+        s
+    );
     assert!(s.contains("范式:"), "Reference 模式包含范式提示: {}", s);
 
     // 通过 F7 弹层切换到 Speed 模式
@@ -3052,7 +3104,11 @@ fn completion_style_toggle_and_rendering() {
     term.clear().unwrap();
     term.draw(|f| app.render(f)).unwrap();
     let s2 = norm(&snap(&term));
-    assert!(s2.contains("极速补全"), "Speed 模式标题包含极速补全: {}", s2);
+    assert!(
+        s2.contains("极速补全"),
+        "Speed 模式标题包含极速补全: {}",
+        s2
+    );
 }
 
 #[test]

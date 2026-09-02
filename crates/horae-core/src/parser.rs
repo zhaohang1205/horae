@@ -664,10 +664,7 @@ mod tests {
 
     #[test]
     fn rrule_yearly_bymonth_sorts_and_dedups() {
-        assert_eq!(
-            parse_rrule_shorthand("y[12,1]"),
-            "FREQ=YEARLY;BYMONTH=1,12"
-        );
+        assert_eq!(parse_rrule_shorthand("y[12,1]"), "FREQ=YEARLY;BYMONTH=1,12");
         assert_eq!(
             parse_rrule_shorthand("y[dec,jul,jan,dec]"),
             "FREQ=YEARLY;BYMONTH=1,7,12"
