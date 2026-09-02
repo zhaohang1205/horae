@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **独立优先级字段（Priority Column）与快捷语法**：
+  - 彻底废弃旧版 `p1/p2/p3` 标签方案，在底层数据表与模型中引入专门的 `tasks.priority` 列（`high`/`medium`/`low`）；
+  - CLI 支持 `--high`、`--medium`、`--low` 与 `--clear-priority`，一句话 Quick-Add 语法支持 `!high`、`!medium`、`!low`（及全角标点 `！`）；
+  - `horae focus` / `horae do` 专注推荐算法深度升级（结合高优统治级加权、截止时间与创建时间精确定位首要任务）。
+- **年循环规则（`FREQ=YEARLY`）与 `BYMONTH` 规范化**：
+  - 全面支持年循环 `*y`、`*Ny`、`*y[jan,jul]`（按月循环 `BYMONTH`）；
+  - 自动对输入的月份代码升序排序与去重归一化，单调递增展开全部年循环排程槽位；`rrule_valid` 全面放开并统一校验。
+- **自动补全即时弹出与双模式切换（语法参考 vs 极速补全）**：
+  - 输入 `@`、`~`、`*`、`!` 前缀时即时弹出智能补全卡片（无需手动按 Tab 触发）；
+  - 支持**语法参考模式（Reference / Cheat-Sheet Guide，默认）**：三列结构化卡片展示 Token、双语语义说明及语法范式；
+  - 支持**极速补全模式（Speed）**：紧凑单列匹配与输入行 Ghost Text 幽灵文本辅助盲打；
+  - 在 `F7` 模块设置弹窗中提供第 11 项设置开关，按空格键实时切换并持久化至 SQLite `settings` 表的 `completion_style` 字段。
+- **多语言习惯自适应候选与英文星期解析**：
+  - 中文模式下剔除与 `today`/`tomorrow` 重复的 `今天`/`明天`/`后天` 候选，保留中英高频词与星期词，同时底层保留全部中文天词解析；
+  - 英文模式下时间候选实现 100% 纯 ASCII 英文（`mon`~`sun`, `today`, `tomorrow`, `+1d` 等），绝无中文字符干扰；
+  - 时间解析引擎全面支持英文星期词（`mon`~`sun`、`monday`~`sunday`、前缀 `next friday` 以及后接具体时间 `~fri 15:30`）。
+- **GTD 核心工作流与心法视图**：完善 GTD 决策树与 David Allen 核心心法引导视图。
 - **CLI 任务修改与编辑（`horae modify` / `horae edit`）**：
   - 新增 `horae modify <id>`（别名 `m`、`mod`、`edit`），支持全面修改已有任务的标题、标签、优先级、截止时间、排程、循环规则、状态和备注。
   - 支持直接在一句话中使用 Quick-Add 语法（`@tag`、`~time`、`*rrule`、`!priority`）修改，也支持通过显式参数精细调整（`--title`、`--due`、`--start`、`--rrule`、`--tag`、`--untag`、`--notes` 等）。
@@ -21,7 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 智能拆分规则：短单行文本（$\le 30$ 字）直接作为标题；长文本/多行段落自动提取第一行前 30 个字（附加 `…`）作为标题，全文完整沉淀到 Notes 备注中。
   - 支持 Wayland（`wl-paste`）、X11（`xclip`/`xsel`）与全平台（`arboard`）原生适配。
 - **CLI 终端输出表格排版优化**：引入 `comfy-table` 配合 CJK 字符宽度自适应对齐，彻底解决 `horae list` 与 `horae profile list` 等中英文混排、短横线、Emoji 等导致列错位的问题。
-- **Tauri 2 + Svelte 5 GUI 桌面端**：实现多端合一的现代化图形界面与番茄钟专注交互。
 - CLI 帮助国际化：所有 `horae --help` 文本默认英文，新增全局 `--lang <en|zh>`
   参数与环境变量 `HORAE_LANG`，可一键切换为中文（与 TUI 的 F6 语言切换一致）；
   英文 clap 派生串保留为事实来源，仅在选择中文时由 `cli_i18n` 运行时覆盖。

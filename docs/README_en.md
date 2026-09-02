@@ -10,9 +10,10 @@ Core idea: **time-datafication** — every state change is stamped with UTC-ms a
 
 ## Features
 
-- Full GTD workflow with weekly review and today/tomorrow views
-- Recurring tasks auto-reschedule on Done (RRULE + the `*2w[1,3]` shorthand)
-- Tag system with auto-created custom tags
+- Full GTD workflow with weekly review, today/tomorrow views, and David Allen GTD philosophy guide
+- Recurring tasks auto-reschedule on Done (complete RRULE daily/weekly/monthly/yearly + shorthands like `*2w[1,3]`, `*m[1,-1]`, `*y[jan,jul]`)
+- Tags & priority: context tags + dedicated `high/medium/low` priority column (`!high`/`!medium`/`!low` shorthands)
+- Instant inline auto-completion with dual modes: Syntax Guide Cheat-Sheet vs Speed Compact mode (F7 toggle)
 - Checklists with per-item tick/delete/reorder/rename and a progress badge in the list
 - Quotes (opt-in): capture good sentences, ideas & knowledge into a dedicated view
 - Pomodoro focus mode with progress ring, streaks and a waybar module
@@ -100,7 +101,7 @@ Short aliases: `c`=capture, `l`=list, `s`=show, `m`=modify/edit, `d`=done, `rm`=
 | `"` | add to / remove from quotes (work-status tasks become reference) |
 | `Space` | toggle-select current row |
 | `Ctrl+a` / `Ctrl+u` | select all / invert |
-| `Enter` / `e` | full edit (title @tags ~time *rrule) |
+| `Enter` / `e` | full edit (title @tags ~time *rrule !priority; instant completion card) |
 | `x` / `w` / `s` | done / waiting / someday |
 | `C` | add checklist item |
 | `=` | tick next item (no auto-reset) |
@@ -113,7 +114,7 @@ Short aliases: `c`=capture, `l`=list, `s`=show, `m`=modify/edit, `d`=done, `rm`=
 | `c` | add tag (Tags view) |
 | `r` / `R` | weekly review (start/next) |
 | `F5` / `F6` | theme / language |
-| `F7` | module visibility (incl. quotes & icon style) |
+| `F7` | module visibility & completion style (11 toggles, persisted) |
 | `M` | settings (profiles: new/rename/delete/set-default) |
 | `F1` or `?` | shortcut help |
 | `q` | quit |
@@ -124,7 +125,7 @@ Quotes is an **opt-in** feature (off by default; `F7` toggles it, persisted in `
 
 ## Icon fallback
 
-Icons default to Nerd Font glyphs. On startup horae auto-detects support (via `fc-list`) and falls back to plain ASCII when no Nerd font is found — no tofu characters. Override with `HORAE_ICONS=nerd|ascii`, or toggle the last entry of the `F7` module-visibility popup (persisted).
+Icons default to Nerd Font glyphs. On startup horae auto-detects support (via `fc-list`) and falls back to plain ASCII when no Nerd font is found — no tofu characters. Override with `HORAE_ICONS=nerd|ascii`, or toggle the corresponding entry of the `F7` module-visibility popup (persisted).
 
 **How it works**
 
@@ -146,8 +147,8 @@ Icons default to Nerd Font glyphs. On startup horae auto-detects support (via `f
 ```
 now  +2h  +30m  +1d  +1w          relative offsets
 +3d 15:30                         offset + clock
-today / tomorrow / day-after [HH:MM]
-wed / next-fri [HH:MM]            weekday (+next week)
+today / tomorrow [HH:MM]          day words
+mon / tue / next-fri [HH:MM]      weekdays (supports next prefix)
 8/20 15:30 · 2026.8.20            slash & dot dates
 HH:MM                             same-day time (past → tomorrow)
 2026-07-24 [HH:MM]                absolute date & time
