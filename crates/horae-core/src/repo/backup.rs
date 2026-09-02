@@ -209,7 +209,7 @@ pub fn import_all(conn: &Connection, data: &BackupData, replace: bool) -> Result
                 stats.tasks_skipped += 1;
                 continue;
             }
-            let cl_str = serde_json::to_string(&t.checklist).unwrap_or_else(|_| "[]".to_string());
+            let cl_str = serde_json::to_string(&t.checklist)?;
             tx.execute(
                 "INSERT INTO tasks \
              (id,title,notes,status,rrule,created_at,clarified_at,due_at,\

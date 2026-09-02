@@ -11,8 +11,9 @@ mod quotes;
 mod transition;
 
 pub use query::{
-    checked_in_today, count_archived, count_by_status, count_completed_since, events, get, list,
-    list_archived, list_stale_inbox, list_stale_waiting, resolve_id, ListFilter,
+    checked_in_today, count_archived, count_by_status, count_completed_since, events, get,
+    has_checked_in_today, list, list_archived, list_overdue_candidates, list_stale_inbox,
+    list_stale_waiting, resolve_id, ListFilter,
 };
 pub use quotes::{count_quotes, count_quotes_in_status, list_quotes, quote_task_ids, QUOTE_TAG};
 pub use transition::{

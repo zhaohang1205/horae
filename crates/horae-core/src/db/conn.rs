@@ -26,8 +26,13 @@ pub fn open(name: Option<&str>) -> anyhow::Result<Connection> {
     // 先设 busy_timeout，让随后的 journal_mode 切换（需要写锁）也能等待而不是
     // 立即报 `database is locked`；WAL 让 CLI/TUI/pomo 多进程并发读不互相阻塞。
     conn.busy_timeout(Duration::from_secs(5))?;
-    conn.execute_batch("PRAGMA journal_mode=WAL;")?;
-    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         PRAGMA synchronous=NORMAL;
+         PRAGMA cache_size=-64000;
+         PRAGMA temp_store=MEMORY;
+         PRAGMA mmap_size=3000000000;",
+    )?;
 
     migrate::run(&mut conn)?;
     Ok(conn)

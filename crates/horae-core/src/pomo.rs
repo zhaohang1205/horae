@@ -282,10 +282,10 @@ pub(crate) fn advance_phase(
 }
 
 pub fn notify(summary: &str, body: &str) {
-    // 桌面图形通知（同步，通常很快）
+    // 桌面图形通知（非阻塞异步启动，避免阻塞计时与渲染）
     let _ = StdCommand::new("notify-send")
         .args(["-u", "normal", "-i", "appointment-soon", summary, body])
-        .status();
+        .spawn();
 
     // 音效提醒：在独立线程中异步播放，防止音频服务卡顿时阻塞 daemon 计时
     let sound_paths = [

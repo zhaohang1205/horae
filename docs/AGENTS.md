@@ -30,7 +30,7 @@ GTD terminal task manager (`horae`) — a Rust Cargo workspace (`crates/horae-co
 ## Non-obvious rules (violating these breaks things)
 
 - **Timestamps**: store UTC ms INTEGER, never formatted strings. All time math goes through `time.rs`; display via `format_local`.
-- **Migrations**: never edit existing `migrations/*.sql`. Add a new file plus a new version block in `migrate.rs` (currently v1 = 0001+0002, v2 = +0003, v3 = +0004, v4 = +0005, v5 = +0006, v6 = +0007, v7 = +0008, v8 = +0009, v9 = +0010, v10 = +0011, v11 = +0012). Migration SQL is idempotent (IF NOT EXISTS / INSERT OR IGNORE); the `DROP COLUMN` in 0011 relies on the `user_version` guard rather than SQL-level idempotency.
+- **Migrations**: never edit existing `migrations/*.sql`. Add a new file plus a new version block in `migrate.rs` (currently v1 = 0001+0002, v2 = +0003, v3 = +0004, v4 = +0005, v5 = +0006, v6 = +0007, v7 = +0008, v8 = +0009, v9 = +0010, v10 = +0011, v11 = +0012, v12 = +0013). Migration SQL is idempotent (IF NOT EXISTS / INSERT OR IGNORE); the `DROP COLUMN` in 0011 relies on the `user_version` guard rather than SQL-level idempotency.
 - **New event types**: add a const in `model/event.rs` AND keep the `task_events` comment in `migrations/0001_init.sql` in sync.
 - **DB paths**: `~/.config/horae/horae.db`, `~/.config/horae/config.json` and `~/.config/horae/pomo.json` all derive from `dirs::config_dir()` — never hardcode.
 - **ID resolution**: commands accept a task id, a unique id-prefix, or a unique exact title among visible (non-archived) tasks — `resolve_id` tries them in that order (git semantics: exact id beats prefix beats title); ambiguous titles error. Archived tasks are addressable by id only.

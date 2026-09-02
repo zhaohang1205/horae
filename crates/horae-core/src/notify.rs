@@ -7,11 +7,11 @@ use crate::time;
 use anyhow::Result;
 use chrono::{Duration, NaiveDate};
 
-/// 桌面通知：直接调用 `notify-send`（与 pomo.rs 一致），避免引入 zbus 依赖栈。
+/// 桌面通知：直接非阻塞启动 `notify-send`（与 pomo.rs 一致），避免阻塞调用线程。
 pub fn desktop(summary: &str, body: &str) {
     let _ = std::process::Command::new("notify-send")
         .args(["-u", "normal", "-i", "appointment-soon", summary, body])
-        .status();
+        .spawn();
 }
 
 /// 收件箱/等待超期的默认阈值天数。
@@ -41,17 +41,10 @@ impl DailyDigest {
 pub fn collect(conn: &Connection, now: i64, days: i64) -> Result<DailyDigest> {
     let cutoff = now - days * 24 * 3600 * 1000;
 
-    // 逾期：非已完成、非归档，且 effective_due 早于 now。
-    let all = tasks::list(
-        conn,
-        &tasks::ListFilter {
-            status: None,
-            tags: vec![],
-            query: None,
-            review_stale: false,
-        },
-    )?;
-    let mut overdue: Vec<(String, String)> = all
+    // 逾期：利用联合索引预筛选 (due_at < now OR scheduled_start_at < now OR rrule IS NOT NULL)
+    // 避免加载全表任务，再由 effective_due 精确确认早于 now。
+    let candidates = tasks::list_overdue_candidates(conn, now)?;
+    let mut overdue: Vec<(String, String)> = candidates
         .into_iter()
         .filter(|t| t.status != Status::Done && effective_due(t).is_some_and(|x| x < now))
         .map(|t| (t.id, t.title))

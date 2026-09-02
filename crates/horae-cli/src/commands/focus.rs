@@ -46,12 +46,11 @@ pub fn run(conn: &Connection, start: bool) -> Result<()> {
             }
         }
 
-        let task_tags = tags_map.get(&task.id);
-        let tag_names: Vec<&str> = task_tags
-            .map(|v| v.iter().map(|t| t.as_str()).collect())
-            .unwrap_or_default();
-
-        if tag_names.contains(&tasks::QUOTE_TAG) {
+        let has_quote = tags_map
+            .get(&task.id)
+            .map(|tags| tags.iter().any(|t| t == tasks::QUOTE_TAG))
+            .unwrap_or(false);
+        if has_quote {
             continue;
         }
 

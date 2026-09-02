@@ -131,13 +131,12 @@ impl<'a> App<'a> {
                 // 习惯打卡一天一次：今日已打过卡则只提示，不重复推进排程。
                 let already_checked_in = to == task::Status::Done
                     && task.rrule.is_some()
-                    && horae_core::repo::tasks::checked_in_today(
+                    && horae_core::repo::tasks::has_checked_in_today(
                         self.conn,
+                        id,
                         horae_core::time::local_day_bounds(0).0,
                     )
-                    .unwrap_or_default()
-                    .iter()
-                    .any(|tid| tid == id);
+                    .unwrap_or(false);
                 if already_checked_in {
                     self.set_toast(
                         tr!(

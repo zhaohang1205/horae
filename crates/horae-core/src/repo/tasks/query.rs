@@ -220,6 +220,38 @@ pub fn checked_in_today(conn: &Connection, since_ms: i64) -> Result<Vec<String>>
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+/// 快速单点检查指定任务今日是否已打卡（LIMIT 1）。
+pub fn has_checked_in_today(conn: &Connection, task_id: &str, since_ms: i64) -> Result<bool> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT 1 FROM task_events \
+         WHERE task_id = ?1 AND event_type = ?2 AND at >= ?3 LIMIT 1",
+    )?;
+    let mut rows = stmt.query(rusqlite::params![
+        task_id,
+        event::EV_HABIT_COMPLETED,
+        since_ms
+    ])?;
+    Ok(rows.next()?.is_some())
+}
+
+/// 查询可能逾期的候选任务：未归档、非已完成，且满足以下任一条件：
+///
+/// 1. `due_at < now`
+/// 2. `scheduled_start_at < now`
+/// 3. 带 `rrule`（循环规则展开可能产生早于 now 的发生点）
+///
+/// 利用 `idx_tasks_overdue` 索引快速过滤绝大部分未到期任务。
+pub fn list_overdue_candidates(conn: &Connection, now: i64) -> Result<Vec<Task>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM tasks \
+         WHERE archived_at IS NULL AND status != 'done' AND id != '__journal__' \
+           AND (due_at < ?1 OR scheduled_start_at < ?1 OR rrule IS NOT NULL)",
+        TASK_COLUMNS
+    ))?;
+    let rows = stmt.query_map([now], row_to_task)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 pub fn events(conn: &Connection, task_id: &str) -> Result<Vec<event::TaskEvent>> {
     let mut stmt = conn.prepare(
         "SELECT id,task_id,event_type,from_status,to_status,at,meta \
@@ -324,5 +356,73 @@ mod tests {
 
         // id 精确匹配优先于标题回退（git 语义）
         assert_eq!(resolve_id(&conn, &a.id).unwrap(), a.id);
+    }
+
+    #[test]
+    fn has_checked_in_today_accurately_detects_single_habit() {
+        let (_dir, conn) = test_conn();
+        let now = crate::time::now_ms();
+        let t1 = mk_task(&conn, "Habit 1");
+        let t2 = mk_task(&conn, "Habit 2");
+
+        assert!(!has_checked_in_today(&conn, &t1.id, now - 1000).unwrap());
+
+        crate::repo::mutate(&conn, |tx, ts| {
+            crate::repo::log_event(tx, &t1.id, event::EV_HABIT_COMPLETED, None, None, None, ts)?;
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(has_checked_in_today(&conn, &t1.id, now - 1000).unwrap());
+        assert!(!has_checked_in_today(&conn, &t2.id, now - 1000).unwrap());
+    }
+
+    #[test]
+    fn list_overdue_candidates_filters_irrelevant_future_tasks() {
+        let (_dir, conn) = test_conn();
+        let now = crate::time::now_ms();
+
+        // 1. 逾期任务（due < now）
+        let past = create_capture(
+            &conn,
+            &CaptureInput {
+                title: "Past Due".into(),
+                status: task::Status::Next,
+                due_at: Some(now - 3600_000),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // 2. 循环任务（rrule is some）
+        let habit = create_capture(
+            &conn,
+            &CaptureInput {
+                title: "Recurring".into(),
+                status: task::Status::Scheduled,
+                due_at: Some(now + 3600_000),
+                rrule: Some("FREQ=DAILY".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // 3. 未来任务（due > now，无 rrule）
+        let _future = create_capture(
+            &conn,
+            &CaptureInput {
+                title: "Future Task".into(),
+                status: task::Status::Next,
+                due_at: Some(now + 3600_000),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let candidates = list_overdue_candidates(&conn, now).unwrap();
+        let ids: Vec<String> = candidates.into_iter().map(|t| t.id).collect();
+        assert!(ids.contains(&past.id));
+        assert!(ids.contains(&habit.id));
+        assert_eq!(ids.len(), 2, "未来普通任务不进入候选集");
     }
 }

@@ -19,15 +19,14 @@ pub fn detect_lang() -> Lang {
             return Lang::En;
         }
     }
-    let args: Vec<String> = std::env::args().collect();
-    for i in 0..args.len() {
-        let a = &args[i];
+    let mut args_iter = std::env::args();
+    while let Some(a) = args_iter.next() {
         if a == "--lang" || a == "-L" {
-            if let Some(v) = args.get(i + 1) {
-                if is_zh(v) {
+            if let Some(v) = args_iter.next() {
+                if is_zh(&v) {
                     return Lang::Zh;
                 }
-                if is_en(v) {
+                if is_en(&v) {
                     return Lang::En;
                 }
             }

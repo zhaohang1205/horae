@@ -215,10 +215,14 @@ impl<'a> App<'a> {
             // 新建捕获：~time → 排程起点（创建后 schedule 设 scheduled_start_at, 状态 Scheduled, 无终点）
             let time_str = quick_add.time_str.clone();
             let rrule = quick_add.rrule;
+            let mut parsed_start = None;
             if let Some(ts) = &time_str {
-                if let Err(e) = time::parse_time(ts) {
-                    self.status_message = tr!(self.lang, "时间无效: {}", "bad time: {}", e);
-                    return Ok(());
+                match time::parse_time(ts) {
+                    Ok(ms) => parsed_start = Some(ms),
+                    Err(e) => {
+                        self.status_message = tr!(self.lang, "时间无效: {}", "bad time: {}", e);
+                        return Ok(());
+                    }
                 }
             }
             if let Some(rr) = &rrule {
@@ -240,7 +244,7 @@ impl<'a> App<'a> {
                     title: quick_add.title,
                     status: if is_quote {
                         task::Status::Reference
-                    } else if time_str.is_some() {
+                    } else if parsed_start.is_some() {
                         task::Status::Scheduled
                     } else {
                         task::Status::Inbox
@@ -248,7 +252,7 @@ impl<'a> App<'a> {
                     due_at: None,
                     tag_names,
                     priority: quick_add.priority.clone(),
-                    rrule: if time_str.is_some() || is_quote {
+                    rrule: if parsed_start.is_some() || is_quote {
                         None
                     } else {
                         rrule.clone()
@@ -274,8 +278,7 @@ impl<'a> App<'a> {
                     true,
                 );
             } else {
-                let scheduled_ok = if let Some(ts) = &time_str {
-                    let start = time::parse_time(ts).unwrap();
+                let scheduled_ok = if let Some(start) = parsed_start {
                     self.note(tasks::schedule(self.conn, &t.id, start, None, rrule))
                 } else {
                     true

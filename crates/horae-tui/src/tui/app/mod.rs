@@ -419,18 +419,9 @@ impl<'a> App<'a> {
         )
         .unwrap_or_default();
 
-        let today_start = chrono::Local::now()
-            .date_naive()
-            .and_hms_opt(0, 0, 0)
-            .unwrap()
-            .and_utc()
-            .timestamp();
-        let today_end = chrono::Local::now()
-            .date_naive()
-            .and_hms_opt(23, 59, 59)
-            .unwrap()
-            .and_utc()
-            .timestamp();
+        let (today_start_ms, today_end_ms) = horae_core::time::local_day_bounds(0);
+        let today_start = today_start_ms / 1000;
+        let today_end = today_end_ms / 1000;
 
         let mut todays = Vec::new();
         for t in &all_tasks {

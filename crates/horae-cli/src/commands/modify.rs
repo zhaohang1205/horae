@@ -28,6 +28,10 @@ pub struct ModifyArgs {
     pub json: bool,
 }
 
+fn is_clear(s: &str) -> bool {
+    s.eq_ignore_ascii_case("none") || s.eq_ignore_ascii_case("clear")
+}
+
 fn edit_notes_interactive(initial: &str) -> Result<String> {
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
     let temp_path = std::env::temp_dir().join(format!(
@@ -82,11 +86,11 @@ pub fn run(conn: &Connection, args: ModifyArgs) -> Result<()> {
     // 3. Due Date
     if args.clear_due {
         input.due_at = Some(None);
-    } else if let Some(ref d) = args.due {
-        if d.eq_ignore_ascii_case("none") || d.eq_ignore_ascii_case("clear") {
+    } else if let Some(d) = args.due {
+        if is_clear(&d) {
             input.due_at = Some(None);
         } else {
-            let ms = time::parse_time(d)?;
+            let ms = time::parse_time(&d)?;
             input.due_at = Some(Some(ms));
         }
     }
@@ -97,11 +101,11 @@ pub fn run(conn: &Connection, args: ModifyArgs) -> Result<()> {
         input.scheduled_end_at = Some(None);
         input.rrule = Some(None);
     } else {
-        if let Some(ref s) = args.start {
-            if s.eq_ignore_ascii_case("none") || s.eq_ignore_ascii_case("clear") {
+        if let Some(s) = args.start {
+            if is_clear(&s) {
                 input.scheduled_start_at = Some(None);
             } else {
-                let ms = time::parse_time(s)?;
+                let ms = time::parse_time(&s)?;
                 input.scheduled_start_at = Some(Some(ms));
             }
         } else if let Some(ref qa) = quick_add {
@@ -111,20 +115,20 @@ pub fn run(conn: &Connection, args: ModifyArgs) -> Result<()> {
             }
         }
 
-        if let Some(ref e) = args.end {
-            if e.eq_ignore_ascii_case("none") || e.eq_ignore_ascii_case("clear") {
+        if let Some(e) = args.end {
+            if is_clear(&e) {
                 input.scheduled_end_at = Some(None);
             } else {
-                let ms = time::parse_time(e)?;
+                let ms = time::parse_time(&e)?;
                 input.scheduled_end_at = Some(Some(ms));
             }
         }
 
-        if let Some(ref r) = args.rrule {
-            if r.eq_ignore_ascii_case("none") || r.eq_ignore_ascii_case("clear") {
+        if let Some(r) = args.rrule {
+            if is_clear(&r) {
                 input.rrule = Some(None);
             } else {
-                let normalized = horae_core::parser::parse_rrule_shorthand(r);
+                let normalized = horae_core::parser::parse_rrule_shorthand(&r);
                 crate::commands::capture::ensure_rrule_supported(&normalized)?;
                 input.rrule = Some(Some(normalized));
             }
@@ -137,7 +141,7 @@ pub fn run(conn: &Connection, args: ModifyArgs) -> Result<()> {
     }
 
     // 5. Status
-    if let Some(ref s) = args.status {
+    if let Some(s) = args.status {
         let st: horae_core::model::task::Status =
             s.parse().map_err(|e| anyhow::anyhow!("{}", e))?;
         input.status = Some(st);

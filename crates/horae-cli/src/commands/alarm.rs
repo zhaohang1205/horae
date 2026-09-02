@@ -208,7 +208,7 @@ fn alarm_item(
     };
 
     let mut title = t.title.clone();
-    if title.chars().count() > 14 {
+    if title.chars().nth(14).is_some() {
         let truncated: String = title.chars().take(13).collect();
         title = format!("{}…", truncated);
     }

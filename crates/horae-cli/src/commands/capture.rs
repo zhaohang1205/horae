@@ -93,7 +93,7 @@ pub fn run(conn: &Connection, mut args: CaptureArgs) -> Result<()> {
             // 用户没有显式提供标题：从剪贴板第一行提取前 30 个字作为标题，如果内容有多行或超长，全文沉淀到 notes
             let first_line = trimmed_clip.lines().next().unwrap_or("").trim();
             let char_count = first_line.chars().count();
-            let has_more_lines = trimmed_clip.lines().count() > 1;
+            let has_more_lines = trimmed_clip.lines().nth(1).is_some();
 
             if char_count > 30 || has_more_lines {
                 let truncated: String = first_line.chars().take(30).collect();

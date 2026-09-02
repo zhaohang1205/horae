@@ -2,6 +2,8 @@ mod cli;
 mod cli_i18n;
 mod commands;
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use anyhow::Result;
 use clap::{CommandFactory, FromArgMatches};
 

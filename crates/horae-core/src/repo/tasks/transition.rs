@@ -12,7 +12,7 @@ use crate::repo::log_event;
 use crate::time;
 use anyhow::Result;
 
-use super::{checked_in_today, get, resolve_id};
+use super::{get, has_checked_in_today, resolve_id};
 
 /// Input for creating a task (capture).
 pub struct CaptureInput {
@@ -46,7 +46,7 @@ impl Default for CaptureInput {
 pub fn create_capture(conn: &Connection, input: &CaptureInput) -> Result<Task> {
     let id = Uuid::new_v4().to_string();
     let status = input.status;
-    let cl_str = serde_json::to_string(&input.checklist).unwrap_or_else(|_| "[]".to_string());
+    let cl_str = serde_json::to_string(&input.checklist)?;
 
     crate::repo::mutate(conn, |tx, now| {
         let clarified = if status != task::Status::Inbox {
@@ -267,7 +267,7 @@ fn write_checklist(
     checklist: &[task::ChecklistItem],
     meta: &str,
 ) -> Result<()> {
-    let cl_str = serde_json::to_string(checklist).unwrap_or_else(|_| "[]".to_string());
+    let cl_str = serde_json::to_string(checklist)?;
     crate::repo::mutate(conn, |tx, now| {
         tx.execute(
             "UPDATE tasks SET checklist=?1, updated_at=?2 WHERE id=?3",
@@ -405,10 +405,7 @@ pub fn transition(conn: &Connection, id: &str, to_status: task::Status) -> Resul
     // 循环习惯一天只允许打卡一次（防止把排程再次推进/重复记录打卡）。
     if to_status == task::Status::Done && t.rrule.is_some() {
         let today_start = time::local_day_bounds(0).0;
-        if checked_in_today(conn, today_start)?
-            .iter()
-            .any(|tid| tid == id)
-        {
+        if has_checked_in_today(conn, id, today_start)? {
             return Err(Error::AlreadyCheckedInToday(id.to_string()).into());
         }
     }
@@ -660,7 +657,7 @@ pub fn ensure_ready_for_pomodoro(conn: &Connection, id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repo::tasks::events;
+    use crate::repo::tasks::{checked_in_today, events};
     use crate::testutil::test_conn;
 
     fn count_rows(conn: &Connection, table: &str, task_id: &str) -> usize {
