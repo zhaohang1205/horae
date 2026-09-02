@@ -231,7 +231,11 @@ impl<'a> App<'a> {
 
     pub(super) fn handle_review_keys(&mut self, key: KeyEvent) -> Result<bool> {
         match key.code {
-            KeyCode::Char('r') => {
+            KeyCode::Char('r')
+                if !key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
                 if !self.modules.review {
                     return Ok(true);
                 }

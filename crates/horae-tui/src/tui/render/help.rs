@@ -265,8 +265,8 @@ impl<'a> App<'a> {
             Line::from(Span::styled(
                 tr!(
                     self.lang,
-                    "◈ 4. 自动补全与极速盲打 (Tab · Alt+1~9 · 智能槽位引导)",
-                    "◈ 4. Autocomplete & Fast Typing (Tab · Alt+1~9 · Slot hints)"
+                    "◈ 4. 自动补全与极速盲打 (Tab · 智能槽位引导)",
+                    "◈ 4. Autocomplete & Fast Typing (Tab · Slot hints)"
                 ),
                 s_hdr,
             )),
@@ -277,15 +277,6 @@ impl<'a> App<'a> {
                     self.lang,
                     "键入 @ / ~ / * / ! 自动唤出候选浮层 (大小写无关 & 拼音检索)",
                     "Type @ / ~ / * / ! to pop dropdown (case-insensitive & pinyin)"
-                )),
-            ]),
-            Line::from(vec![
-                Span::raw("  "),
-                Span::styled(format!("{:<22}", "Alt+1 ~ Alt+9"), s_tok),
-                Span::raw(tr!(
-                    self.lang,
-                    "快捷直选 1~9 号候选并立即采纳上屏",
-                    "Quick pick candidate 1~9 directly"
                 )),
             ]),
             Line::from(vec![

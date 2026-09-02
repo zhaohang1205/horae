@@ -282,17 +282,6 @@ impl<'a> AppHandlers for App<'a> {
                     self.completion_up();
                     return Ok(());
                 }
-                // 快捷直选：Alt+1 ~ Alt+9
-                KeyCode::Char(d)
-                    if key.modifiers.contains(KeyModifiers::ALT) && ('1'..='9').contains(&d) =>
-                {
-                    let pick_idx = (d as usize) - ('1' as usize);
-                    if pick_idx < self.completion_candidates.len() {
-                        self.completion_index = pick_idx;
-                        self.accept_completion();
-                        return Ok(());
-                    }
-                }
                 _ => {}
             }
         }

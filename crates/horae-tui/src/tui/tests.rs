@@ -3375,14 +3375,15 @@ fn smart_autocomplete_matching_and_quick_pick() {
     app.handle_key(kc(KeyCode::Tab)).unwrap();
     assert_eq!(app.input, "!high ");
 
-    // 4. Alt+1..9 快捷直选
+    // 4. 候选导航与采纳（已取消 Alt+1..9 快捷直选）
     app.input_clear();
     app.handle_key(key('!')).unwrap();
     assert!(app.completion_active());
     assert!(app.completion_candidates.len() >= 3);
-    // Alt+2 直选第 2 项 ("medium")
-    app.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::ALT))
-        .unwrap();
+    // 按 Down 切换至第 2 项 ("medium") 并 Tab 采纳
+    app.handle_key(kc(KeyCode::Down)).unwrap();
+    assert_eq!(app.completion_index, 1);
+    app.handle_key(kc(KeyCode::Tab)).unwrap();
     assert!(!app.completion_active());
     assert_eq!(app.input, "!medium ");
 
@@ -3500,12 +3501,22 @@ fn pomodoro_in_focus_checklist_space_toggle_and_undo() {
     )
     .unwrap();
 
-    let c1 = horae_core::repo::tasks::add_checklist_item(&conn, &t.id, "Step 1").unwrap();
-    let _c2 = horae_core::repo::tasks::add_checklist_item(&conn, &t.id, "Step 2").unwrap();
+    let c1 = horae_core::repo::tasks::add_checklist_item(&conn, &t.id, "Step 1")
+        .unwrap()
+        .unwrap();
+    let _c2 = horae_core::repo::tasks::add_checklist_item(&conn, &t.id, "Step 2")
+        .unwrap()
+        .unwrap();
 
     // 开启番茄钟
-    horae_core::pomo::start(&conn, &t.id).unwrap();
-    app.pomo = horae_core::repo::pomodoro::get_state().unwrap();
+    let pomo = horae_core::model::pomodoro::PomoState {
+        phase: horae_core::model::pomodoro::Phase::Work,
+        task_id: Some(t.id.clone()),
+        task_title: Some(t.title.clone()),
+        ..Default::default()
+    };
+    horae_core::repo::pomodoro::save_state(&pomo).unwrap();
+    app.pomo = pomo;
 
     // 在专注态按 Space 勾选子项
     app.handle_key(key(' ')).unwrap();
@@ -3514,14 +3525,9 @@ fn pomodoro_in_focus_checklist_space_toggle_and_undo() {
     assert!(app.status_message.contains("打卡子项"));
 
     // 渲染帧验证进度条
-    let mut term = test_term();
-    let mut out = String::new();
-    let s = norm(&frame(
-        "focus-mode-checklist",
-        &mut term,
-        &mut app,
-        &mut out,
-    ));
+    let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let s = snap(&term);
     assert!(s.contains("Step 2") || s.contains("Project Alpha"));
 
     // 撤销子项打卡
@@ -3555,7 +3561,9 @@ fn micro_progress_bar_renders_in_list_items() {
     .unwrap();
 
     horae_core::repo::tasks::add_checklist_item(&conn, &t.id, "Sub 1").unwrap();
-    let c2 = horae_core::repo::tasks::add_checklist_item(&conn, &t.id, "Sub 2").unwrap();
+    let c2 = horae_core::repo::tasks::add_checklist_item(&conn, &t.id, "Sub 2")
+        .unwrap()
+        .unwrap();
     horae_core::repo::tasks::toggle_checklist_item(&conn, &t.id, &c2).unwrap();
 
     app.set_view(View::Next);
@@ -3586,8 +3594,14 @@ fn pomodoro_x_completes_focused_task_and_stops_pomo() {
     .unwrap();
 
     // 启动专注番茄钟
-    horae_core::pomo::start(&conn, &t.id).unwrap();
-    app.force_reload_pomo();
+    let pomo = horae_core::model::pomodoro::PomoState {
+        phase: horae_core::model::pomodoro::Phase::Work,
+        task_id: Some(t.id.clone()),
+        task_title: Some(t.title.clone()),
+        ..Default::default()
+    };
+    horae_core::repo::pomodoro::save_state(&pomo).unwrap();
+    app.pomo = pomo;
     assert_eq!(app.pomo.phase, horae_core::model::pomodoro::Phase::Work);
     assert_eq!(app.pomo.task_id.as_deref(), Some(t.id.as_str()));
 

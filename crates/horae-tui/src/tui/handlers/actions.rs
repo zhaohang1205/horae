@@ -143,25 +143,31 @@ impl<'a> App<'a> {
             KeyCode::Char(' ') => {
                 if self.pomo.phase == horae_core::model::pomodoro::Phase::Work {
                     if let Some(ref tid) = self.pomo.task_id {
-                        if let Ok(Some(title)) =
-                            horae_core::repo::tasks::toggle_next_checklist_item(self.conn, tid)
-                        {
-                            self.push_undo(crate::tui::app::UndoAction::ChecklistToggled {
-                                task_id: tid.clone(),
-                                item_id: String::new(),
-                                item_title: title.clone(),
-                            });
-                            self.set_toast(
-                                tr!(
-                                    self.lang,
-                                    "✓ 打卡子项: {} (按 u 撤销)",
-                                    "✓ Checked step: {} (press u to undo)",
-                                    title
-                                ),
-                                true,
-                            );
-                            self.load_detail();
-                            return Ok(true);
+                        if let Ok(task) = horae_core::repo::tasks::get(self.conn, tid) {
+                            if let Some(item) = task.checklist.iter().find(|i| !i.done) {
+                                let item_id = item.id.clone();
+                                let item_title = item.title.clone();
+                                if let Ok(Some(_)) = horae_core::repo::tasks::toggle_checklist_item(
+                                    self.conn, tid, &item_id,
+                                ) {
+                                    self.push_undo(crate::tui::app::UndoAction::ChecklistToggled {
+                                        task_id: tid.clone(),
+                                        item_id,
+                                        item_title: item_title.clone(),
+                                    });
+                                    self.set_toast(
+                                        tr!(
+                                            self.lang,
+                                            "✓ 打卡子项: {} (按 u 撤销)",
+                                            "✓ Checked step: {} (press u to undo)",
+                                            item_title
+                                        ),
+                                        true,
+                                    );
+                                    self.load_detail();
+                                    return Ok(true);
+                                }
+                            }
                         }
                     }
                 } else if matches!(
@@ -213,24 +219,29 @@ impl<'a> App<'a> {
                     self.items.get(self.selected).map(|r| r.id.clone())
                 };
                 if let Some(tid) = target_id {
-                    match horae_core::repo::tasks::toggle_next_checklist_item(self.conn, &tid) {
-                        Ok(Some(title)) => {
-                            self.push_undo(crate::tui::app::UndoAction::ChecklistToggled {
-                                task_id: tid.clone(),
-                                item_id: String::new(),
-                                item_title: title.clone(),
-                            });
-                            self.set_toast(
-                                tr!(
-                                    self.lang,
-                                    "✓ 打卡子项: {} (按 u 撤销)",
-                                    "✓ Checked step: {} (press u to undo)",
-                                    title
-                                ),
-                                true,
-                            );
-                        }
-                        Ok(None) => {
+                    if let Ok(task) = horae_core::repo::tasks::get(self.conn, &tid) {
+                        if let Some(item) = task.checklist.iter().find(|i| !i.done) {
+                            let item_id = item.id.clone();
+                            let item_title = item.title.clone();
+                            if let Ok(Some(_)) = horae_core::repo::tasks::toggle_checklist_item(
+                                self.conn, &tid, &item_id,
+                            ) {
+                                self.push_undo(crate::tui::app::UndoAction::ChecklistToggled {
+                                    task_id: tid.clone(),
+                                    item_id,
+                                    item_title: item_title.clone(),
+                                });
+                                self.set_toast(
+                                    tr!(
+                                        self.lang,
+                                        "✓ 打卡子项: {} (按 u 撤销)",
+                                        "✓ Checked step: {} (press u to undo)",
+                                        item_title
+                                    ),
+                                    true,
+                                );
+                            }
+                        } else {
                             self.set_toast(
                                 tr!(
                                     self.lang,
@@ -240,7 +251,6 @@ impl<'a> App<'a> {
                                 true,
                             );
                         }
-                        Err(_) => {}
                     }
                     self.load_detail();
                 }

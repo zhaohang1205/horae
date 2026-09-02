@@ -262,7 +262,7 @@ impl<'a> App<'a> {
 
     /// 补全候选下拉层：自适应输入框下方/上方渲染，支持视口保护与滚动窗口。
     /// - 语法参考模式 (Reference)：提供丰富语义解释与语法范式 (Cheat-Sheet)。
-    /// - 极速补全模式 (Speed)：紧凑单列快速匹配，带 Alt+1~9 快捷直选序号。
+    /// - 极速补全模式 (Speed)：紧凑单列快速匹配。
     fn render_completion_dropdown(&mut self, f: &mut Frame, input_area: Rect) {
         use crate::tui::app::completion::{completion_meta, CompletionStyle};
         let prefix = self.completion_prefix;
@@ -290,7 +290,7 @@ impl<'a> App<'a> {
         let space_below = screen_h.saturating_sub(input_area.y + input_area.height);
         let space_above = input_area.y;
 
-        // 最大可见内容行数（9 行，支持 Alt+1~9 快捷直选）
+        // 最大可见内容行数（9 行）
         let max_content_lines = 9usize;
         let ideal_height = (total.min(max_content_lines) as u16) + 2;
 
@@ -328,12 +328,6 @@ impl<'a> App<'a> {
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(self.theme.fg)
-            };
-
-            let num_badge = if !is_reference && actual_idx < 9 {
-                format!("{}. ", actual_idx + 1)
-            } else {
-                String::new()
             };
 
             if is_reference {
@@ -377,9 +371,9 @@ impl<'a> App<'a> {
                 };
                 let mut spans = vec![Span::styled(
                     if is_sel {
-                        format!("❯{}{}", num_badge, label)
+                        format!("❯{}", label)
                     } else {
-                        format!("  {}{}", num_badge, label)
+                        format!("  {}", label)
                     },
                     key_style,
                 )];
@@ -412,8 +406,8 @@ impl<'a> App<'a> {
         } else {
             tr!(
                 self.lang,
-                " 极速补全 ({}/{}) · Alt+1~9 直选 · Tab 补全 ",
-                " Quick Complete ({}/{}) · Alt+1~9 pick · Tab complete ",
+                " 极速补全 ({}/{}) · ↑↓ 切换 · Tab 补全 ",
+                " Quick Complete ({}/{}) · ↑↓ cycle · Tab complete ",
                 idx + 1,
                 total
             )
