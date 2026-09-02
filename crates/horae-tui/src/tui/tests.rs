@@ -3441,3 +3441,169 @@ fn smart_autocomplete_matching_and_quick_pick() {
         .unwrap();
     assert!(hot_pos < rare_pos, "高频使用的标签应排在低频标签前面");
 }
+
+#[test]
+fn undo_and_redo_status_transitions() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    let t = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "Task for Undo".to_string(),
+            status: task::Status::Next,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    app.set_view(View::Next);
+    app.selected = 0;
+
+    // 1. 标记完成 (x)
+    app.handle_key(key('x')).unwrap();
+    let task_after_x = horae_core::repo::tasks::get(&conn, &t.id).unwrap();
+    assert_eq!(task_after_x.status, task::Status::Done);
+    assert!(app.status_message.contains("✓ 已完成"));
+
+    // 2. 撤销 (u)
+    app.handle_key(key('u')).unwrap();
+    let task_after_u = horae_core::repo::tasks::get(&conn, &t.id).unwrap();
+    assert_eq!(task_after_u.status, task::Status::Next);
+    assert!(app.status_message.contains("已撤销"));
+
+    // 3. 重做 (Ctrl+r)
+    let mut ctrl_r = key('r');
+    ctrl_r.modifiers = crossterm::event::KeyModifiers::CONTROL;
+    app.handle_key(ctrl_r).unwrap();
+    let task_after_redo = horae_core::repo::tasks::get(&conn, &t.id).unwrap();
+    assert_eq!(task_after_redo.status, task::Status::Done);
+    assert!(app.status_message.contains("已重做"));
+}
+
+#[test]
+fn pomodoro_in_focus_checklist_space_toggle_and_undo() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    let t = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "Project Alpha".to_string(),
+            status: task::Status::Next,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let c1 = horae_core::repo::tasks::add_checklist_item(&conn, &t.id, "Step 1").unwrap();
+    let _c2 = horae_core::repo::tasks::add_checklist_item(&conn, &t.id, "Step 2").unwrap();
+
+    // 开启番茄钟
+    horae_core::pomo::start(&conn, &t.id).unwrap();
+    app.pomo = horae_core::repo::pomodoro::get_state().unwrap();
+
+    // 在专注态按 Space 勾选子项
+    app.handle_key(key(' ')).unwrap();
+    let task = horae_core::repo::tasks::get(&conn, &t.id).unwrap();
+    assert!(task.checklist.iter().find(|i| i.id == c1).unwrap().done);
+    assert!(app.status_message.contains("打卡子项"));
+
+    // 渲染帧验证进度条
+    let mut term = test_term();
+    let mut out = String::new();
+    let s = norm(&frame(
+        "focus-mode-checklist",
+        &mut term,
+        &mut app,
+        &mut out,
+    ));
+    assert!(s.contains("Step 2") || s.contains("Project Alpha"));
+
+    // 撤销子项打卡
+    app.handle_key(key('u')).unwrap();
+    let task_reverted = horae_core::repo::tasks::get(&conn, &t.id).unwrap();
+    assert!(
+        !task_reverted
+            .checklist
+            .iter()
+            .find(|i| i.id == c1)
+            .unwrap()
+            .done
+    );
+}
+
+#[test]
+fn micro_progress_bar_renders_in_list_items() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    let t = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "Task with checklist".to_string(),
+            status: task::Status::Next,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    horae_core::repo::tasks::add_checklist_item(&conn, &t.id, "Sub 1").unwrap();
+    let c2 = horae_core::repo::tasks::add_checklist_item(&conn, &t.id, "Sub 2").unwrap();
+    horae_core::repo::tasks::toggle_checklist_item(&conn, &t.id, &c2).unwrap();
+
+    app.set_view(View::Next);
+    app.refresh().unwrap();
+
+    let list_items = crate::tui::ui::build_list_items(&app);
+    assert_eq!(list_items.len(), 1);
+    // 检查清单进度包含 1/2
+    let item_str = format!("{:?}", list_items[0]);
+    assert!(item_str.contains("1/2"));
+}
+
+#[test]
+fn pomodoro_x_completes_focused_task_and_stops_pomo() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    let t = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "Task in focus".to_string(),
+            status: task::Status::Next,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // 启动专注番茄钟
+    horae_core::pomo::start(&conn, &t.id).unwrap();
+    app.force_reload_pomo();
+    assert_eq!(app.pomo.phase, horae_core::model::pomodoro::Phase::Work);
+    assert_eq!(app.pomo.task_id.as_deref(), Some(t.id.as_str()));
+
+    // 在专注模式下按 x 完成当前任务
+    app.handle_key(key('x')).unwrap();
+
+    // 验证任务已完成
+    let task_done = horae_core::repo::tasks::get(&conn, &t.id).unwrap();
+    assert_eq!(task_done.status, task::Status::Done);
+
+    // 验证番茄钟已停止重置为 Idle
+    assert_eq!(app.pomo.phase, horae_core::model::pomodoro::Phase::Idle);
+    assert!(app.status_message.contains("🎉 专注达成"));
+
+    // 验证支持按 u 撤销
+    app.handle_key(key('u')).unwrap();
+    let task_reverted = horae_core::repo::tasks::get(&conn, &t.id).unwrap();
+    assert_eq!(task_reverted.status, task::Status::Next);
+}

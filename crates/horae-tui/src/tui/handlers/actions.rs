@@ -92,6 +92,21 @@ impl<'a> App<'a> {
                 }
             }
             KeyCode::Char('x') => {
+                if self.pomo.phase != horae_core::model::pomodoro::Phase::Idle {
+                    if let Some(ref tid) = self.pomo.task_id.clone() {
+                        self.complete_pomodoro_task(tid)?;
+                        return Ok(true);
+                    } else {
+                        let _ = horae_core::pomo::stop();
+                        self.force_reload_pomo();
+                        self.set_toast(
+                            tr!(self.lang, "🎉 专注达成！", "🎉 Focus completed!"),
+                            true,
+                        );
+                        self.refresh()?;
+                        return Ok(true);
+                    }
+                }
                 self.act_on_selected(task::Status::Done)?;
                 self.move_sel(1);
             }
@@ -101,8 +116,19 @@ impl<'a> App<'a> {
                 self.toggle_quotes()?;
             }
             KeyCode::Char('u') => {
-                let r = self.restore_selected();
-                self.note(r);
+                if self.view == View::Archived {
+                    let r = self.restore_selected();
+                    self.note(r);
+                } else {
+                    let _ = self.undo()?;
+                }
+            }
+            KeyCode::Char('r')
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
+                let _ = self.redo()?;
             }
             KeyCode::Enter => self.open_organize()?,
             _ => return Ok(false),
@@ -111,9 +137,62 @@ impl<'a> App<'a> {
     }
 
     /// 批量选择相关按键：Space 切换当前行（Ctrl+a 全选 / Ctrl+i 反选在系统键处理）。
+    /// 在番茄钟专注态下，Space 优先勾选当前专注任务的下一项检查单。
     pub(super) fn handle_selection_keys(&mut self, key: KeyEvent) -> Result<bool> {
         match key.code {
             KeyCode::Char(' ') => {
+                if self.pomo.phase == horae_core::model::pomodoro::Phase::Work {
+                    if let Some(ref tid) = self.pomo.task_id {
+                        if let Ok(Some(title)) =
+                            horae_core::repo::tasks::toggle_next_checklist_item(self.conn, tid)
+                        {
+                            self.push_undo(crate::tui::app::UndoAction::ChecklistToggled {
+                                task_id: tid.clone(),
+                                item_id: String::new(),
+                                item_title: title.clone(),
+                            });
+                            self.set_toast(
+                                tr!(
+                                    self.lang,
+                                    "✓ 打卡子项: {} (按 u 撤销)",
+                                    "✓ Checked step: {} (press u to undo)",
+                                    title
+                                ),
+                                true,
+                            );
+                            self.load_detail();
+                            return Ok(true);
+                        }
+                    }
+                } else if matches!(
+                    self.pomo.phase,
+                    horae_core::model::pomodoro::Phase::ShortBreak
+                        | horae_core::model::pomodoro::Phase::LongBreak
+                ) {
+                    let target_id = self
+                        .pomo
+                        .task_id
+                        .clone()
+                        .or_else(|| self.items.get(self.selected).map(|r| r.id.clone()));
+                    if let Some(ref tid) = target_id {
+                        self.note(horae_core::repo::tasks::ensure_ready_for_pomodoro(
+                            self.conn, tid,
+                        ));
+                        if self.note(horae_core::pomo::start(self.conn, tid)) {
+                            self.force_reload_pomo();
+                            self.set_toast(
+                                tr!(
+                                    self.lang,
+                                    "🚀 零摩擦开启新一轮专注！",
+                                    "🚀 Started new focus round!"
+                                ),
+                                true,
+                            );
+                        }
+                        self.load_detail();
+                        return Ok(true);
+                    }
+                }
                 self.toggle_selected();
             }
             _ => return Ok(false),
@@ -125,18 +204,41 @@ impl<'a> App<'a> {
     pub(super) fn handle_pomodoro_keys(&mut self, key: KeyEvent) -> Result<bool> {
         match key.code {
             KeyCode::Char('=') => {
-                if let Some(row) = self.items.get(self.selected).cloned() {
-                    match horae_core::repo::tasks::toggle_next_checklist_item(self.conn, &row.id) {
+                let target_id = if self.pomo.phase == horae_core::model::pomodoro::Phase::Work {
+                    self.pomo
+                        .task_id
+                        .clone()
+                        .or_else(|| self.items.get(self.selected).map(|r| r.id.clone()))
+                } else {
+                    self.items.get(self.selected).map(|r| r.id.clone())
+                };
+                if let Some(tid) = target_id {
+                    match horae_core::repo::tasks::toggle_next_checklist_item(self.conn, &tid) {
                         Ok(Some(title)) => {
-                            self.status_message = tr!(self.lang, "打卡: {}", "Checked: {}", title);
+                            self.push_undo(crate::tui::app::UndoAction::ChecklistToggled {
+                                task_id: tid.clone(),
+                                item_id: String::new(),
+                                item_title: title.clone(),
+                            });
+                            self.set_toast(
+                                tr!(
+                                    self.lang,
+                                    "✓ 打卡子项: {} (按 u 撤销)",
+                                    "✓ Checked step: {} (press u to undo)",
+                                    title
+                                ),
+                                true,
+                            );
                         }
                         Ok(None) => {
-                            self.status_message = tr!(
-                                self.lang,
-                                "检查单已全部完成，可按 x 标记任务完成",
-                                "All steps done — press x to complete the task"
-                            )
-                            .to_string();
+                            self.set_toast(
+                                tr!(
+                                    self.lang,
+                                    "检查单已全部完成，可按 x 标记任务完成",
+                                    "All steps done — press x to complete the task"
+                                ),
+                                true,
+                            );
                         }
                         Err(_) => {}
                     }
@@ -171,6 +273,7 @@ impl<'a> App<'a> {
                                 self.note(r);
                             }
                             if self.note(horae_core::pomo::start(self.conn, &tid)) {
+                                self.force_reload_pomo();
                                 self.status_message = tr!(
                                     self.lang,
                                     "🚀 零摩擦开启新一轮专注！ ({})",
@@ -201,6 +304,7 @@ impl<'a> App<'a> {
                         self.note(r);
                     }
                     if self.note(horae_core::pomo::start(self.conn, &tid)) {
+                        self.force_reload_pomo();
                         self.status_message = tr!(
                             self.lang,
                             "🎯 已为 {} 开启专注与番茄钟",
@@ -213,7 +317,9 @@ impl<'a> App<'a> {
             }
             KeyCode::Char('S') => {
                 if self.note(horae_core::pomo::stop()) {
+                    self.force_reload_pomo();
                     self.status_message.clear();
+                    self.refresh()?;
                 }
             }
             _ => return Ok(false),

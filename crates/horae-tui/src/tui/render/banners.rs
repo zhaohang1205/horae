@@ -119,14 +119,33 @@ impl<'a> App<'a> {
             .constraints([Constraint::Min(0), Constraint::Length(7)])
             .split(area);
 
-        // 内容区三态：消息 > F2 关闭提示 > 全局键条。
+        // 内容区三态：消息(支持 Toast 高亮) > F2 关闭提示 > 全局键条。
         let mut content_spans: Vec<Span> = Vec::new();
+        let now_ms = horae_core::time::now_ms();
+        let is_active_toast = self.toast.as_ref().is_some_and(|t| {
+            now_ms - t.created_at_ms < t.duration_ms && t.message == self.status_message
+        });
+
         if !self.status_message.is_empty() {
+            let (fg, bold) = if is_active_toast {
+                let is_success = self.toast.as_ref().is_none_or(|t| t.is_success);
+                (
+                    if is_success {
+                        self.theme.text_success
+                    } else {
+                        self.theme.accent
+                    },
+                    Modifier::BOLD,
+                )
+            } else {
+                (self.theme.status_fg, Modifier::empty())
+            };
             content_spans.push(Span::styled(
                 format!(" {}", self.status_message),
                 Style::default()
-                    .fg(self.theme.status_fg)
-                    .bg(self.theme.status_bg),
+                    .fg(fg)
+                    .bg(self.theme.status_bg)
+                    .add_modifier(bold),
             ));
         } else if !self.show_shortcut_bar {
             content_spans.push(Span::styled(

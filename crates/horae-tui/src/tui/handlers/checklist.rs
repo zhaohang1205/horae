@@ -88,8 +88,20 @@ impl<'a> App<'a> {
                     let item_id = item.id.clone();
                     let title = item.title.clone();
                     if tasks::toggle_checklist_item(self.conn, &row.id, &item_id).is_ok() {
-                        self.status_message =
-                            tr!(self.lang, "打卡: {}", "Checked: {}", title).to_string();
+                        self.push_undo(crate::tui::app::UndoAction::ChecklistToggled {
+                            task_id: row.id.clone(),
+                            item_id,
+                            item_title: title.clone(),
+                        });
+                        self.set_toast(
+                            tr!(
+                                self.lang,
+                                "✓ 打卡: {} (按 u 撤销)",
+                                "✓ Checked: {} (press u to undo)",
+                                title
+                            ),
+                            true,
+                        );
                         self.load_detail();
                     }
                 }

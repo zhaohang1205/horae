@@ -256,13 +256,22 @@ impl<'a> App<'a> {
                     ..Default::default()
                 },
             )?;
+            let created_title = t.title.clone();
+            let created_id = t.id.clone();
+            self.push_undo(crate::tui::app::UndoAction::Created {
+                task_id: created_id.clone(),
+                title: created_title.clone(),
+            });
             if is_quote {
                 self.set_view(View::Quotes);
-                self.status_message = tr!(
-                    self.lang,
-                    "已加入金句 {}",
-                    "added to quotes {}",
-                    short_id(&t.id)
+                self.set_toast(
+                    tr!(
+                        self.lang,
+                        "✓ 已加入金句: {} (按 u 撤销)",
+                        "✓ added to quotes: {} (press u to undo)",
+                        created_title
+                    ),
+                    true,
                 );
             } else {
                 let scheduled_ok = if let Some(ts) = &time_str {
@@ -273,8 +282,15 @@ impl<'a> App<'a> {
                 };
                 self.set_view(View::Inbox);
                 if scheduled_ok {
-                    self.status_message =
-                        tr!(self.lang, "已捕获 {}", "captured {}", short_id(&t.id));
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "✓ 已捕获: {} (按 u 撤销)",
+                            "✓ captured: {} (press u to undo)",
+                            created_title
+                        ),
+                        true,
+                    );
                 }
             }
         }

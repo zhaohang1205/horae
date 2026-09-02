@@ -62,6 +62,45 @@ impl<'a> App<'a> {
         s
     }
 
+    /// 在番茄钟全屏专注模式下直接完成当前专注任务并结算番茄钟。
+    pub(crate) fn complete_pomodoro_task(&mut self, task_id: &str) -> Result<()> {
+        let task = tasks::get(self.conn, task_id)?;
+        let prev_status = task.status;
+        let title = task.title.clone();
+
+        // 1. 状态流转为 Done
+        let t = tasks::transition(self.conn, task_id, task::Status::Done)?;
+        self.push_undo(super::UndoAction::StatusChange {
+            task_id: task_id.to_string(),
+            from: prev_status,
+            to: t.status,
+            title: title.clone(),
+        });
+
+        // 2. 终止并重置番茄钟
+        let _ = horae_core::pomo::stop();
+        self.force_reload_pomo();
+
+        // 3. 播放完成音效/桌面提示
+        let _ = horae_core::notify::completed_feedback(self.conn);
+
+        // 4. 弹出成功 Toast
+        self.set_toast(
+            tr!(
+                self.lang,
+                "🎉 专注达成并已完成: {} (按 u 撤销)",
+                "🎉 Focus completed: {} (press u to undo)",
+                title
+            ),
+            true,
+        );
+
+        // 5. 刷新视图
+        self.refresh()?;
+        self.load_detail();
+        Ok(())
+    }
+
     pub(crate) fn act_on_selected(&mut self, to: task::Status) -> Result<()> {
         let mut ids = vec![];
         if !self.selected_ids.is_empty() {
@@ -78,11 +117,14 @@ impl<'a> App<'a> {
             let id = &ids[0];
             if let Ok(task) = tasks::get(self.conn, id) {
                 if task.status == to {
-                    self.status_message = tr!(
-                        self.lang,
-                        "已是 {} 状态",
-                        "already {}",
-                        crate::tui::status_cn(self.lang, task.status)
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "已是 {} 状态",
+                            "already {}",
+                            crate::tui::status_cn(self.lang, task.status)
+                        ),
+                        false,
                     );
                     return Ok(());
                 }
@@ -97,13 +139,17 @@ impl<'a> App<'a> {
                     .iter()
                     .any(|tid| tid == id);
                 if already_checked_in {
-                    self.status_message = tr!(
-                        self.lang,
-                        "{} 今日已打卡",
-                        "{} already checked in today",
-                        &id[..8]
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "{} 今日已打卡",
+                            "{} already checked in today",
+                            &id[..8]
+                        ),
+                        false,
                     );
                 } else {
+                    let prev_status = task.status;
                     // 如果当前变动状态的任务正处于 Pomodoro 专注中，且新状态为 Done/Waiting，终止番茄钟
                     if let Ok(pomo) = horae_core::repo::pomodoro::get_state() {
                         if pomo.task_id.as_deref() == Some(id)
@@ -116,38 +162,72 @@ impl<'a> App<'a> {
                         }
                     }
                     let t = tasks::transition(self.conn, id, to)?;
-                    self.status_message = format!(
-                        "{} -> {}",
-                        &t.id[..8],
-                        crate::tui::status_cn(self.lang, t.status)
-                    );
+                    self.push_undo(super::UndoAction::StatusChange {
+                        task_id: id.clone(),
+                        from: prev_status,
+                        to: t.status,
+                        title: task.title.clone(),
+                    });
+                    if to == task::Status::Done {
+                        self.set_toast(
+                            tr!(
+                                self.lang,
+                                "✓ 已完成: {} (按 u 撤销)",
+                                "✓ Done: {} (press u to undo)",
+                                task.title
+                            ),
+                            true,
+                        );
+                    } else {
+                        self.set_toast(
+                            format!(
+                                "{} -> {} (u 撤销)",
+                                &t.id[..8],
+                                crate::tui::status_cn(self.lang, t.status)
+                            ),
+                            true,
+                        );
+                    }
                 }
             }
         } else {
-            let mut count = 0;
+            let mut records = Vec::new();
             for id in &ids {
                 if let Ok(task) = tasks::get(self.conn, id) {
-                    if task.status != to
-                        && task.status != task::Status::Scheduled
-                        && tasks::transition(self.conn, id, to).is_ok()
-                    {
-                        count += 1;
-                        if let Ok(pomo) = horae_core::repo::pomodoro::get_state() {
-                            if pomo.task_id.as_deref() == Some(id)
-                                && matches!(
-                                    to,
-                                    task::Status::Done
-                                        | task::Status::Waiting
-                                        | task::Status::Someday
-                                )
-                            {
-                                let _ = horae_core::pomo::stop();
+                    if task.status != to && task.status != task::Status::Scheduled {
+                        let prev_status = task.status;
+                        if tasks::transition(self.conn, id, to).is_ok() {
+                            records.push((id.clone(), prev_status, to));
+                            if let Ok(pomo) = horae_core::repo::pomodoro::get_state() {
+                                if pomo.task_id.as_deref() == Some(id)
+                                    && matches!(
+                                        to,
+                                        task::Status::Done
+                                            | task::Status::Waiting
+                                            | task::Status::Someday
+                                    )
+                                {
+                                    let _ = horae_core::pomo::stop();
+                                }
                             }
                         }
                     }
                 }
             }
-            self.status_message = tr!(self.lang, "批量 {} {} 项", "Bulk {} {} items", to, count);
+            let count = records.len();
+            if !records.is_empty() {
+                self.push_undo(super::UndoAction::BulkStatusChange { records });
+            }
+            self.set_toast(
+                tr!(
+                    self.lang,
+                    "批量 {} {} 项 (按 u 撤销)",
+                    "Bulk {} {} items (press u to undo)",
+                    to,
+                    count
+                ),
+                true,
+            );
         }
 
         if !self.selected_ids.is_empty() {
@@ -216,5 +296,282 @@ impl<'a> App<'a> {
         }
         self.reload()?;
         Ok(())
+    }
+
+    /// 弹出/更新瞬时 Toast 通知（3 秒自动淡出）。
+    pub(crate) fn set_toast(&mut self, message: impl Into<String>, is_success: bool) {
+        let msg = message.into();
+        self.status_message = msg.clone();
+        self.toast = Some(super::Toast {
+            message: msg,
+            created_at_ms: horae_core::time::now_ms(),
+            duration_ms: 3000,
+            is_success,
+        });
+    }
+
+    /// 压入一步可撤销操作。
+    pub(crate) fn push_undo(&mut self, action: super::UndoAction) {
+        if self.undo_stack.len() >= 50 {
+            self.undo_stack.remove(0);
+        }
+        self.undo_stack.push(action);
+        self.redo_stack.clear();
+    }
+
+    /// 撤销上一步操作。
+    pub(crate) fn undo(&mut self) -> Result<bool> {
+        let Some(action) = self.undo_stack.pop() else {
+            self.set_toast(
+                tr!(self.lang, "已没有可撤销的操作", "Nothing to undo"),
+                false,
+            );
+            return Ok(false);
+        };
+
+        match &action {
+            super::UndoAction::StatusChange {
+                task_id,
+                from,
+                to: _,
+                title,
+            } => {
+                let _ = tasks::transition(self.conn, task_id, *from)?;
+                self.set_toast(
+                    tr!(
+                        self.lang,
+                        "⤺ 已撤销: 恢复「{}」为 {}",
+                        "⤺ Undone: restored '{}' to {}",
+                        title,
+                        crate::tui::status_cn(self.lang, *from)
+                    ),
+                    true,
+                );
+            }
+            super::UndoAction::BulkStatusChange { records } => {
+                let mut count = 0;
+                for (id, from, _) in records {
+                    if tasks::transition(self.conn, id, *from).is_ok() {
+                        count += 1;
+                    }
+                }
+                self.set_toast(
+                    tr!(
+                        self.lang,
+                        "⤺ 已撤销: 恢复 {} 个任务的状态",
+                        "⤺ Undone: restored status for {} tasks",
+                        count
+                    ),
+                    true,
+                );
+            }
+            super::UndoAction::Archive {
+                task_id,
+                from_status,
+                title,
+            } => {
+                tasks::unarchive(self.conn, task_id)?;
+                let _ = tasks::transition(self.conn, task_id, *from_status);
+                self.set_toast(
+                    tr!(
+                        self.lang,
+                        "⤺ 已撤销: 移出归档「{}」",
+                        "⤺ Undone: unarchived '{}'",
+                        title
+                    ),
+                    true,
+                );
+            }
+            super::UndoAction::BulkArchive { records } => {
+                let mut count = 0;
+                for (id, from_status) in records {
+                    if tasks::unarchive(self.conn, id).is_ok() {
+                        let _ = tasks::transition(self.conn, id, *from_status);
+                        count += 1;
+                    }
+                }
+                self.set_toast(
+                    tr!(
+                        self.lang,
+                        "⤺ 已撤销: 移出归档 {} 项",
+                        "⤺ Undone: unarchived {} items",
+                        count
+                    ),
+                    true,
+                );
+            }
+            super::UndoAction::Unarchive { task_id, title } => {
+                let _ = tasks::archive(self.conn, task_id);
+                self.set_toast(
+                    tr!(
+                        self.lang,
+                        "⤺ 已撤销: 重新归档「{}」",
+                        "⤺ Undone: re-archived '{}'",
+                        title
+                    ),
+                    true,
+                );
+            }
+            super::UndoAction::Created { task_id, title } => {
+                let _ = tasks::archive(self.conn, task_id);
+                self.set_toast(
+                    tr!(
+                        self.lang,
+                        "⤺ 已撤销: 删除新建的「{}」",
+                        "⤺ Undone: deleted created '{}'",
+                        title
+                    ),
+                    true,
+                );
+            }
+            super::UndoAction::ChecklistToggled {
+                task_id,
+                item_id,
+                item_title,
+            } => {
+                let _ = tasks::toggle_checklist_item(self.conn, task_id, item_id);
+                self.set_toast(
+                    tr!(
+                        self.lang,
+                        "⤺ 已撤销: 切换检查单「{}」",
+                        "⤺ Undone: toggled checklist '{}'",
+                        item_title
+                    ),
+                    true,
+                );
+            }
+        }
+
+        self.redo_stack.push(action);
+        self.refresh()?;
+        self.load_detail();
+        Ok(true)
+    }
+
+    /// 重做上一步撤销的操作。
+    pub(crate) fn redo(&mut self) -> Result<bool> {
+        let Some(action) = self.redo_stack.pop() else {
+            self.set_toast(
+                tr!(self.lang, "已没有可重做的操作", "Nothing to redo"),
+                false,
+            );
+            return Ok(false);
+        };
+
+        match &action {
+            super::UndoAction::StatusChange {
+                task_id,
+                from: _,
+                to,
+                title,
+            } => {
+                let _ = tasks::transition(self.conn, task_id, *to)?;
+                self.set_toast(
+                    tr!(
+                        self.lang,
+                        "↷ 已重做: 将「{}」流转为 {}",
+                        "↷ Redone: moved '{}' to {}",
+                        title,
+                        crate::tui::status_cn(self.lang, *to)
+                    ),
+                    true,
+                );
+            }
+            super::UndoAction::BulkStatusChange { records } => {
+                let mut count = 0;
+                for (id, _, to) in records {
+                    if tasks::transition(self.conn, id, *to).is_ok() {
+                        count += 1;
+                    }
+                }
+                self.set_toast(
+                    tr!(
+                        self.lang,
+                        "↷ 已重做: 批量流转 {} 项",
+                        "↷ Redone: bulk transitioned {} items",
+                        count
+                    ),
+                    true,
+                );
+            }
+            super::UndoAction::Archive {
+                task_id,
+                from_status: _,
+                title,
+            } => {
+                let _ = tasks::archive(self.conn, task_id);
+                self.set_toast(
+                    tr!(
+                        self.lang,
+                        "↷ 已重做: 归档「{}」",
+                        "↷ Redone: archived '{}'",
+                        title
+                    ),
+                    true,
+                );
+            }
+            super::UndoAction::BulkArchive { records } => {
+                let mut count = 0;
+                for (id, _) in records {
+                    if tasks::archive(self.conn, id).is_ok() {
+                        count += 1;
+                    }
+                }
+                self.set_toast(
+                    tr!(
+                        self.lang,
+                        "↷ 已重做: 批量归档 {} 项",
+                        "↷ Redone: bulk archived {} items",
+                        count
+                    ),
+                    true,
+                );
+            }
+            super::UndoAction::Unarchive { task_id, title } => {
+                tasks::unarchive(self.conn, task_id)?;
+                self.set_toast(
+                    tr!(
+                        self.lang,
+                        "↷ 已重做: 移出归档「{}」",
+                        "↷ Redone: unarchived '{}'",
+                        title
+                    ),
+                    true,
+                );
+            }
+            super::UndoAction::Created { task_id, title } => {
+                tasks::unarchive(self.conn, task_id)?;
+                self.set_toast(
+                    tr!(
+                        self.lang,
+                        "↷ 已重做: 恢复新建的「{}」",
+                        "↷ Redone: recreated '{}'",
+                        title
+                    ),
+                    true,
+                );
+            }
+            super::UndoAction::ChecklistToggled {
+                task_id,
+                item_id,
+                item_title,
+            } => {
+                let _ = tasks::toggle_checklist_item(self.conn, task_id, item_id);
+                self.set_toast(
+                    tr!(
+                        self.lang,
+                        "↷ 已重做: 切换检查单「{}」",
+                        "↷ Redone: toggled checklist '{}'",
+                        item_title
+                    ),
+                    true,
+                );
+            }
+        }
+
+        self.undo_stack.push(action);
+        self.refresh()?;
+        self.load_detail();
+        Ok(true)
     }
 }

@@ -159,6 +159,52 @@ pub(crate) enum Popup {
     ModuleToggles(usize),
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct Toast {
+    pub message: String,
+    pub created_at_ms: i64,
+    pub duration_ms: i64,
+    pub is_success: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum UndoAction {
+    StatusChange {
+        task_id: String,
+        from: horae_core::model::task::Status,
+        to: horae_core::model::task::Status,
+        title: String,
+    },
+    BulkStatusChange {
+        records: Vec<(
+            String,
+            horae_core::model::task::Status,
+            horae_core::model::task::Status,
+        )>,
+    },
+    Archive {
+        task_id: String,
+        from_status: horae_core::model::task::Status,
+        title: String,
+    },
+    BulkArchive {
+        records: Vec<(String, horae_core::model::task::Status)>,
+    },
+    Unarchive {
+        task_id: String,
+        title: String,
+    },
+    Created {
+        task_id: String,
+        title: String,
+    },
+    ChecklistToggled {
+        task_id: String,
+        item_id: String,
+        item_title: String,
+    },
+}
+
 #[derive(Clone)]
 pub(crate) struct Row {
     pub(crate) id: String,
@@ -199,6 +245,12 @@ pub(crate) struct App<'a> {
     /// 组织/编辑模式正在编辑的任务 id。
     pub(crate) organizing_id: Option<String>,
     pub(crate) status_message: String,
+    /// 瞬时操作提示浮层（Toast）。
+    pub(crate) toast: Option<Toast>,
+    /// 操作撤销栈（最多记录 50 步操作）。
+    pub(crate) undo_stack: Vec<UndoAction>,
+    /// 操作重做栈。
+    pub(crate) redo_stack: Vec<UndoAction>,
     pub(crate) lang: horae_core::i18n::Lang,
     pub(crate) show_help: bool,
     pub(crate) show_syntax: bool,
@@ -311,6 +363,9 @@ impl<'a> App<'a> {
             input_cursor: 0,
             organizing_id: None,
             status_message: String::new(),
+            toast: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
             lang,
             show_help: false,
             show_syntax: false,
@@ -441,6 +496,12 @@ impl<'a> App<'a> {
             return;
         }
         self.pomo_loaded_ms = now;
+        self.pomo = horae_core::repo::pomodoro::get_state().unwrap_or_default();
+    }
+
+    /// 强制立即重新加载番茄钟状态（用于启动/停止/完成番茄钟操作后瞬时刷新 UI）。
+    pub(crate) fn force_reload_pomo(&mut self) {
+        self.pomo_loaded_ms = horae_core::time::now_ms();
         self.pomo = horae_core::repo::pomodoro::get_state().unwrap_or_default();
     }
 

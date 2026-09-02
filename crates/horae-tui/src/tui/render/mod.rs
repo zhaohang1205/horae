@@ -147,8 +147,23 @@ impl<'a> AppRender for App<'a> {
             Phase::Idle => return,
         };
 
-        // ── 全屏背景 ──
-        f.render_widget(Block::default().style(Style::default().bg(bg_color)), area);
+        // ── 检查单子项与上下文卡片判定 ──
+        let active_task = pomo
+            .task_id
+            .as_deref()
+            .and_then(|tid| horae_core::repo::tasks::get(self.conn, tid).ok());
+
+        let has_checklist = active_task
+            .as_ref()
+            .map(|t| !t.checklist.is_empty())
+            .unwrap_or(false);
+
+        let show_checklist = has_checklist && area.height >= 26;
+        let checklist_constraint = if show_checklist {
+            Constraint::Length(2)
+        } else {
+            Constraint::Length(1)
+        };
 
         // ── 布局（垂直分区）──
         let rows = Layout::default()
@@ -156,9 +171,9 @@ impl<'a> AppRender for App<'a> {
             .constraints([
                 Constraint::Length(2), // 顶部留白
                 Constraint::Length(2), // 任务标题
-                Constraint::Min(10),   // Canvas 番茄进度环
+                Constraint::Min(8),    // Canvas 番茄进度环
                 Constraint::Length(7), // 大数字倒计时
-                Constraint::Length(1), // 留白
+                checklist_constraint,  // 检查单行内卡片 / 留白
                 Constraint::Length(1), // 统计栏
                 Constraint::Length(1), // 操作提示
             ])
@@ -209,7 +224,59 @@ impl<'a> AppRender for App<'a> {
             rows[3],
         );
 
-        // ── 4. 克制的统计信息 & 快捷键 ──
+        // ── 4. 检查单行内沉浸式步骤卡片 ──
+        if show_checklist {
+            if let Some(ref task) = active_task {
+                let total = task.checklist.len();
+                let done = task.checklist.iter().filter(|i| i.done).count();
+                let next_item = task.checklist.iter().find(|i| !i.done);
+
+                let filled = (done * 5).checked_div(total).unwrap_or(0).min(5);
+                let empty = 5 - filled;
+                let bar = format!(
+                    "[{}{}] {}/{}",
+                    "■".repeat(filled),
+                    "□".repeat(empty),
+                    done,
+                    total
+                );
+
+                let item_text = if let Some(item) = next_item {
+                    format!("▶ [ ] {}", item.title)
+                } else {
+                    tr!(self.lang, "✓ 所有子项已达成", "✓ All steps completed").to_string()
+                };
+
+                let cl_line = Line::from(vec![
+                    Span::styled(
+                        bar,
+                        Style::default()
+                            .fg(if done == total {
+                                self.theme.text_success
+                            } else {
+                                ring_color
+                            })
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        item_text,
+                        Style::default()
+                            .fg(self.theme.fg)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]);
+
+                f.render_widget(
+                    Paragraph::new(cl_line)
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(bg_color)),
+                    rows[4],
+                );
+            }
+        }
+
+        // ── 5. 克制的统计信息 & 快捷键 ──
         let hints = if matches!(pomo.phase, Phase::ShortBreak | Phase::LongBreak) {
             tr!(
                 self.lang,
@@ -217,11 +284,18 @@ impl<'a> AppRender for App<'a> {
                 "{} [Space/P] next round  |  [S] end focus",
                 self.icon(Icon::Active)
             )
+        } else if has_checklist {
+            tr!(
+                self.lang,
+                "{} [Space/=] 打卡子项  |  [x] 完成任务  |  [S] 停止番茄钟",
+                "{} [Space/=] Tick step  |  [x] Complete task  |  [S] Stop pomodoro",
+                self.icon(Icon::Active)
+            )
         } else {
             tr!(
                 self.lang,
-                "{} [S] 停止番茄钟",
-                "{} [S] stop pomodoro",
+                "{} [x] 完成任务  |  [S] 停止番茄钟",
+                "{} [x] Complete task  |  [S] Stop pomodoro",
                 self.icon(Icon::Active)
             )
         };

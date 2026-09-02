@@ -64,11 +64,42 @@ pub fn priority_label(priority: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
-/// 列表行内的迷你进度条（如 [3/5]），用于项目/检查单。
-fn progress_text(done: Option<usize>, total: Option<usize>) -> String {
-    match (done, total) {
-        (Some(d), Some(t)) if t > 0 => format!("[{}/{}]", d, t),
-        _ => String::new(),
+/// 列表行内的迷你微进度条（如 [■■■□□ 3/5]），用于项目/检查单。
+fn append_progress_spans(
+    spans: &mut Vec<Span<'static>>,
+    done: Option<usize>,
+    total: Option<usize>,
+    theme: &crate::tui::theme::Theme,
+    is_ascii: bool,
+) {
+    if let (Some(d), Some(t)) = (done, total) {
+        if let Some(div) = (d * 5).checked_div(t) {
+            let filled = div.min(5);
+            let empty = 5 - filled;
+            let (fill_char, empty_char) = if is_ascii { ("=", "-") } else { ("■", "□") };
+            let bar_filled = fill_char.repeat(filled);
+            let bar_empty = empty_char.repeat(empty);
+            let is_all_done = d == t;
+            let bar_color = if is_all_done {
+                theme.text_success
+            } else {
+                theme.accent
+            };
+
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                format!("[{}{}", bar_filled, bar_empty),
+                Style::default().fg(bar_color).add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(
+                format!(" {}/{}]", d, t),
+                Style::default().fg(if is_all_done {
+                    theme.text_success
+                } else {
+                    theme.text_dim
+                }),
+            ));
+        }
     }
 }
 
@@ -105,7 +136,7 @@ pub(crate) fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
                 ""
             };
 
-            // 到期：相对时间 + 逾期红色强调（已完成/归档任务显示过去时间，不再标红）
+            // 到期：相对时间 + 逾期红色强调 + 今日暖黄强调
             let reason_cn = if is_archived {
                 match r.archive_reason.as_deref() {
                     Some("completed") => tr!(app.lang, "[完成]", "[Done]"),
@@ -129,10 +160,27 @@ pub(crate) fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
                     .map(|s| format!("~{}", s))
                     .unwrap_or_default()
             };
+
+            let is_overdue =
+                !is_archived && !is_done && !is_checked_in && !is_quote && time::is_overdue(r.due);
+            let is_today = !is_overdue
+                && !is_archived
+                && !is_done
+                && !is_checked_in
+                && !is_quote
+                && r.due
+                    .map(|d| {
+                        let (s, e) = horae_core::time::local_day_bounds(0);
+                        d >= s && d <= e
+                    })
+                    .unwrap_or(false);
+
             let due_color = if is_archived || is_done || is_checked_in || is_quote {
                 app.theme.text_dim
-            } else if time::is_overdue(r.due) {
+            } else if is_overdue {
                 app.theme.text_urgent
+            } else if is_today {
+                Color::Rgb(249, 226, 175)
             } else {
                 app.theme.text_dim
             };
@@ -183,24 +231,24 @@ pub(crate) fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
             };
             spans.push(Span::styled(r.title.clone(), title_style));
 
-            // 进度
-            let prog = progress_text(r.done, r.total);
-            if !prog.is_empty() {
-                spans.push(Span::styled(
-                    format!(" {}", prog),
-                    Style::default().fg(app.theme.text_success),
-                ));
-            }
+            // 进度微进度条
+            append_progress_spans(
+                &mut spans,
+                r.done,
+                r.total,
+                &app.theme,
+                app.icon_style == crate::tui::icons::IconStyle::Ascii,
+            );
 
             // 优先级徽标（独立字段，不再作为标签渲染）
             if let Some(ref p) = r.priority {
                 if let Some((zh, en)) = priority_label(p) {
                     let c = priority_color(p).unwrap_or(app.theme.hl_fg);
+                    spans.push(Span::raw(" "));
                     spans.push(Span::styled(
                         format!("!{}", app.lang.tr(zh, en)),
                         Style::default().fg(c).add_modifier(Modifier::BOLD),
                     ));
-                    spans.push(Span::raw(" "));
                 }
             }
 
@@ -225,13 +273,13 @@ pub(crate) fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
             if !due_text.is_empty() || !reason_cn.is_empty() {
                 spans.push(Span::styled(
                     format!("  {}{}", reason_cn, due_text),
-                    Style::default().fg(due_color).add_modifier(
-                        if due_color == app.theme.text_urgent {
+                    Style::default()
+                        .fg(due_color)
+                        .add_modifier(if is_overdue || is_today {
                             Modifier::BOLD
                         } else {
                             Modifier::empty()
-                        },
-                    ),
+                        }),
                 ));
             }
 

@@ -11,8 +11,10 @@ impl<'a> App<'a> {
                 let ids = std::mem::take(&mut self.pending_archive_ids);
                 let had_selection = !self.selected_ids.is_empty();
                 let mut count = 0;
+                let mut archived_records = Vec::new();
                 for id in &ids {
                     if let Ok(task) = tasks::get(self.conn, id) {
+                        let prev_status = task.status;
                         if matches!(
                             task.status,
                             task::Status::Done | task::Status::Waiting | task::Status::Someday
@@ -25,15 +27,38 @@ impl<'a> App<'a> {
                         }
                         if tasks::archive(self.conn, id).is_ok() {
                             count += 1;
+                            archived_records.push((id.clone(), prev_status, task.title.clone()));
                         }
                     }
+                }
+                if archived_records.len() == 1 {
+                    let (id, status, title) = archived_records.remove(0);
+                    self.push_undo(crate::tui::app::UndoAction::Archive {
+                        task_id: id,
+                        from_status: status,
+                        title,
+                    });
+                } else if !archived_records.is_empty() {
+                    let records = archived_records
+                        .into_iter()
+                        .map(|(id, st, _)| (id, st))
+                        .collect();
+                    self.push_undo(crate::tui::app::UndoAction::BulkArchive { records });
                 }
                 self.set_mode(Mode::Normal);
                 if had_selection {
                     self.selected_ids.clear();
                     self.visual_start_idx = None;
                 }
-                self.status_message = tr!(self.lang, "已归档 {} 项", "archived {} items", count);
+                self.set_toast(
+                    tr!(
+                        self.lang,
+                        "📦 已归档 {} 项 (按 u 撤销)",
+                        "📦 archived {} items (press u to undo)",
+                        count
+                    ),
+                    true,
+                );
                 self.reload()?;
             }
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {

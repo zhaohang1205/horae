@@ -437,15 +437,34 @@ impl<'a> AppHandlers for App<'a> {
             return Ok(());
         }
         let mut count = 0;
+        let mut restored_titles = Vec::new();
         for id in &ids {
+            let title = tasks::get(self.conn, id)
+                .map(|t| t.title)
+                .unwrap_or_default();
             if tasks::unarchive(self.conn, id).is_ok() {
                 count += 1;
+                restored_titles.push((id.clone(), title));
             }
         }
+        for (id, title) in restored_titles {
+            self.push_undo(crate::tui::app::UndoAction::Unarchive { task_id: id, title });
+        }
         if count == 1 && ids.len() == 1 {
-            self.status_message = tr!(self.lang, "已恢复 {}", "restored {}", short_id(&ids[0]));
+            self.set_toast(
+                tr!(self.lang, "✓ 已恢复 {}", "✓ restored {}", short_id(&ids[0])),
+                true,
+            );
         } else {
-            self.status_message = tr!(self.lang, "已恢复 {} 项", "restored {} items", count);
+            self.set_toast(
+                tr!(
+                    self.lang,
+                    "✓ 已恢复 {} 项 (按 u 撤销)",
+                    "✓ restored {} items (press u to undo)",
+                    count
+                ),
+                true,
+            );
         }
         if !self.selected_ids.is_empty() {
             self.selected_ids.clear();
