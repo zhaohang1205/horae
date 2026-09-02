@@ -12,9 +12,9 @@ pub struct ModifyArgs {
     pub tags: Vec<String>,
     pub untags: Vec<String>,
     pub clear_tags: bool,
-    pub p1: bool,
-    pub p2: bool,
-    pub p3: bool,
+    pub high: bool,
+    pub medium: bool,
+    pub low: bool,
     pub clear_priority: bool,
     pub due: Option<String>,
     pub clear_due: bool,
@@ -169,27 +169,19 @@ pub fn run(conn: &Connection, args: ModifyArgs) -> Result<()> {
     }
 
     if args.clear_priority {
-        input.remove_tags.push("p1".to_string());
-        input.remove_tags.push("p2".to_string());
-        input.remove_tags.push("p3".to_string());
-    } else if args.p1 || args.p2 || args.p3 {
-        input.remove_tags.push("p1".to_string());
-        input.remove_tags.push("p2".to_string());
-        input.remove_tags.push("p3".to_string());
-        let p = if args.p1 {
-            "p1"
-        } else if args.p2 {
-            "p2"
+        input.priority = Some(None);
+    } else if args.high || args.medium || args.low {
+        let p = if args.high {
+            "high"
+        } else if args.medium {
+            "medium"
         } else {
-            "p3"
+            "low"
         };
-        input.add_tags.push(p.to_string());
+        input.priority = Some(Some(p.to_string()));
     } else if let Some(ref qa) = quick_add {
         if let Some(ref p) = qa.priority {
-            input.remove_tags.push("p1".to_string());
-            input.remove_tags.push("p2".to_string());
-            input.remove_tags.push("p3".to_string());
-            input.add_tags.push(p.clone());
+            input.priority = Some(Some(p.clone()));
         }
     }
 
@@ -275,15 +267,15 @@ mod tests {
                     "task".into(),
                     "@work".into(),
                     "~tomorrow 10:00".into(),
-                    "!b".into(),
+                    "!low".into(),
                 ],
                 title: None,
                 tags: vec![],
                 untags: vec![],
                 clear_tags: false,
-                p1: false,
-                p2: false,
-                p3: false,
+                high: false,
+                medium: false,
+                low: false,
                 clear_priority: false,
                 due: None,
                 clear_due: false,
@@ -303,6 +295,7 @@ mod tests {
         assert_eq!(updated.title, "renamed task");
         assert_eq!(updated.status, Status::Scheduled);
         assert!(updated.scheduled_start_at.is_some());
+        assert_eq!(updated.priority.as_deref(), Some("low"));
 
         let tags: Vec<String> = horae_core::repo::tags::get_task_tags(&conn, &t.id)
             .unwrap()
@@ -310,7 +303,6 @@ mod tests {
             .map(|tg| tg.name)
             .collect();
         assert!(tags.contains(&"work".to_string()));
-        assert!(tags.contains(&"p2".to_string()));
         assert!(tags.contains(&"initial_tag".to_string()));
     }
 
@@ -329,9 +321,9 @@ mod tests {
                 tags: vec!["extra".into()],
                 untags: vec!["initial_tag".into()],
                 clear_tags: false,
-                p1: true,
-                p2: false,
-                p3: false,
+                high: true,
+                medium: false,
+                low: false,
                 clear_priority: false,
                 due: Some("tomorrow 15:00".into()),
                 clear_due: false,
@@ -352,6 +344,7 @@ mod tests {
         assert_eq!(updated.notes, "explicit notes");
         assert_eq!(updated.status, Status::Next);
         assert!(updated.due_at.is_some());
+        assert_eq!(updated.priority.as_deref(), Some("high"));
 
         let tags: Vec<String> = horae_core::repo::tags::get_task_tags(&conn, &t.id)
             .unwrap()
@@ -359,7 +352,6 @@ mod tests {
             .map(|tg| tg.name)
             .collect();
         assert!(tags.contains(&"extra".to_string()));
-        assert!(tags.contains(&"p1".to_string()));
         assert!(!tags.contains(&"initial_tag".to_string()));
 
         // Clear due and priority
@@ -372,9 +364,9 @@ mod tests {
                 tags: vec![],
                 untags: vec![],
                 clear_tags: false,
-                p1: false,
-                p2: false,
-                p3: false,
+                high: false,
+                medium: false,
+                low: false,
                 clear_priority: true,
                 due: None,
                 clear_due: true,
@@ -392,12 +384,12 @@ mod tests {
 
         let updated2 = tasks::get(&conn, &t.id).unwrap();
         assert_eq!(updated2.due_at, None);
+        assert_eq!(updated2.priority, None);
         let tags2: Vec<String> = horae_core::repo::tags::get_task_tags(&conn, &t.id)
             .unwrap()
             .into_iter()
             .map(|tg| tg.name)
             .collect();
-        assert!(!tags2.contains(&"p1".to_string()));
         assert!(tags2.contains(&"extra".to_string()));
     }
 }

@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   parent_id         TEXT    REFERENCES tasks(id) ON DELETE CASCADE,
   status            TEXT    NOT NULL DEFAULT 'inbox',
   rrule             TEXT,                          -- recurrence rule, NULL = none
+  priority          TEXT,                          -- high|medium|low|NULL (独立优先级，取代原 p1/p2/p3 标签)
   created_at        INTEGER NOT NULL,             -- = captured_at (UTC ms)
   clarified_at      INTEGER,                      -- set when leaving inbox
   organized_at      INTEGER,                      -- set when assigned to a project / organized
@@ -41,7 +42,7 @@ CREATE INDEX IF NOT EXISTS idx_events_task ON task_events(task_id, at);
 CREATE TABLE IF NOT EXISTS tags (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   name        TEXT    NOT NULL UNIQUE,
-  category    TEXT    NOT NULL,  -- context|priority|custom
+  category    TEXT    NOT NULL,  -- context|custom
   is_system   INTEGER NOT NULL DEFAULT 0,
   color       TEXT,
   icon        TEXT,

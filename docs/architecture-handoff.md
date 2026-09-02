@@ -11,7 +11,7 @@
 - 吸收：`time.rs` 的 `rrule_occurrences` + 私有辅助（`step`/`add_months`/`days_in_month`/`month_day_matches`/`parse_until`）、`commands/mod.rs` 的 `effective_due*`、`tasks.rs::transition` 的 reschedule 纯部分、TUI `day_lists_from`/`row_due`/`row_from_tags` 的锚点选择+366+窗口匹配+展示阶梯。
 - `time.rs` 退化为纯时间原语（`parse_time`/`now_ms`/`local_day_bounds`/`format_local`/`relative_*`）。
 - 顺带修：**BYDAY 之前用 UTC 星期匹配**（BYMONTHDAY 已是本地历日），已对齐为本地历日（真实 bug）。
-- `rrule_valid` 拒绝 `*y`/`4y`/`yearly`/`FREQ=YEARLY`（引擎支持 DAILY|WEEKLY|MONTHLY；TUI 输入层与 CLI capture/schedule 入口均调用该校验，写库前拦截）。
+- `rrule_valid` 已放开 YEARLY（`*y`/`4y`/`yearly`/`FREQ=YEARLY` 现在合法，引擎支持 DAILY|WEEKLY|MONTHLY|YEARLY）；TUI 输入层与 CLI capture/schedule 入口均调用该校验，写库前拦截不支持的频率。
 - DB 写入留在调用方（`tasks.rs::transition` 调 `next_window` 后自己写库）。
 
 ### 2. JSON 状态文件合并 — `36695f0`
@@ -99,6 +99,6 @@
 ## 下一步建议方向 (Proposed Next Steps)
 
 1. **`horae focus` (或 `horae do`) — Done**
-   - **目标**：终结选择困难症。直接计算并输出**目前最应该做的一件事**（综合考虑 p1/p2、有效截止期、当前上下文时间），甚至支持附加 `--start` 直接起番茄钟。
+   - **目标**：终结选择困难症。直接计算并输出**目前最应该做的一件事**（综合考虑优先级 high/medium/low、有效截止期、当前上下文时间），甚至支持附加 `--start` 直接起番茄钟。
 2. **`horae log` (无任务碎碎念) — Done**
    - **目标**：复用底层强大的 `task_events` append-only 时间线，支持纯粹记录带时间戳的事件/日记，不产生待办任务。

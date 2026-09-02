@@ -431,7 +431,7 @@ fn modify_quick_add_and_explicit_flags() {
             "买有机牛奶",
             "@groceries",
             "~tomorrow 10:00",
-            "!a",
+            "!high",
         ])
         .assert()
         .success()
@@ -440,6 +440,7 @@ fn modify_quick_add_and_explicit_flags() {
     let show = show_json(&env, &id);
     assert_eq!(show["task"]["title"], "买有机牛奶");
     assert_eq!(show["task"]["status"], "Scheduled");
+    assert_eq!(show["task"]["priority"], "high");
     let tag_names: Vec<String> = show["tags"]
         .as_array()
         .unwrap()
@@ -447,7 +448,6 @@ fn modify_quick_add_and_explicit_flags() {
         .map(|t| t["name"].as_str().unwrap().to_string())
         .collect();
     assert!(tag_names.contains(&"groceries".to_string()));
-    assert!(tag_names.contains(&"p1".to_string()));
     assert!(tag_names.contains(&"old".to_string()));
 
     // 2. 使用显式参数更新 notes、due，并通过 --untag 移除旧标签

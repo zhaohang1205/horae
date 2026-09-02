@@ -166,10 +166,7 @@ impl<'a> App<'a> {
             if !quick_add.title.is_empty() {
                 ok &= self.note(tasks::rename(self.conn, &id, &quick_add.title));
             }
-            let mut tag_names = quick_add.tags;
-            if let Some(p) = &quick_add.priority {
-                tag_names.push(p.clone());
-            }
+            let tag_names = quick_add.tags;
             let new_set: std::collections::HashSet<String> = tag_names.iter().cloned().collect();
             let old_tags =
                 horae_core::repo::tags::get_task_tags(self.conn, &id).unwrap_or_default();
@@ -185,6 +182,8 @@ impl<'a> App<'a> {
                     self.conn, &id, name,
                 ));
             }
+            // 优先级为独立字段，不再混入标签。
+            ok &= self.note(tasks::set_priority(self.conn, &id, quick_add.priority.clone()));
             // @quote 路由：组织/编辑时出现金句标签 → 工作态任务流转为参考资料，离开收件箱。
             let is_quote =
                 self.quotes.enabled && new_set.contains(horae_core::repo::tasks::QUOTE_TAG);
@@ -228,10 +227,7 @@ impl<'a> App<'a> {
                     return Ok(());
                 }
             }
-            let mut tag_names = quick_add.tags;
-            if let Some(p) = &quick_add.priority {
-                tag_names.push(p.clone());
-            }
+            let tag_names = quick_add.tags;
             // @quote 路由：捕获输入含金句标签 → 直接创建为 reference + @quote，
             // 自动进入金句视图，不落收件箱。~time/*rrule 让位给金句。
             let is_quote = self.quotes.enabled
@@ -251,6 +247,7 @@ impl<'a> App<'a> {
                     },
                     due_at: None,
                     tag_names,
+                    priority: quick_add.priority.clone(),
                     rrule: if time_str.is_some() || is_quote {
                         None
                     } else {

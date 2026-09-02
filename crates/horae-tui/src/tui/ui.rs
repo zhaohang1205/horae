@@ -44,12 +44,22 @@ pub fn status_color(s: &Status, is_dark: bool) -> Color {
     }
 }
 
-/// 优先级标签的配色：p1 红 / p2 黄 / p3 蓝，与状态色区分开。
-pub fn priority_color(tag: &str) -> Option<Color> {
-    match tag {
-        "p1" => Some(Color::Rgb(243, 139, 168)), // Red
-        "p2" => Some(Color::Rgb(249, 226, 175)), // Yellow
-        "p3" => Some(Color::Rgb(137, 180, 250)), // Blue
+/// 优先级的配色：high 红 / medium 黄 / low 蓝，与状态色区分开。
+pub fn priority_color(priority: &str) -> Option<Color> {
+    match priority {
+        "high" => Some(Color::Rgb(243, 139, 168)), // Red
+        "medium" => Some(Color::Rgb(249, 226, 175)), // Yellow
+        "low" => Some(Color::Rgb(137, 180, 250)), // Blue
+        _ => None,
+    }
+}
+
+/// 优先级的展示名 (zh, en)。用于列表/详情/预览的徽标文案。
+pub fn priority_label(priority: &str) -> Option<(&'static str, &'static str)> {
+    match priority {
+        "high" => Some(("高", "High")),
+        "medium" => Some(("中", "Medium")),
+        "low" => Some(("低", "Low")),
         _ => None,
     }
 }
@@ -182,7 +192,19 @@ pub(crate) fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
                 ));
             }
 
-            // 标签（优先级彩色；金句视图隐藏冗余的 @quote）
+            // 优先级徽标（独立字段，不再作为标签渲染）
+            if let Some(ref p) = r.priority {
+                if let Some((zh, en)) = priority_label(p) {
+                    let c = priority_color(p).unwrap_or(app.theme.hl_fg);
+                    spans.push(Span::styled(
+                        format!("!{}", app.lang.tr(zh, en)),
+                        Style::default().fg(c).add_modifier(Modifier::BOLD),
+                    ));
+                    spans.push(Span::raw(" "));
+                }
+            }
+
+            // 标签（金句视图隐藏冗余的 @quote）
             let shown_tags: Vec<&String> = r
                 .tags
                 .iter()

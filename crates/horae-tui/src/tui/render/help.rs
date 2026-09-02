@@ -156,8 +156,17 @@ impl<'a> App<'a> {
             ]),
             Line::from(vec![
                 Span::raw("  "),
+                Span::styled("*y[jan,jul]", Style::default().fg(self.theme.rrule_fg)),
+                Span::raw(tr!(
+                    self.lang,
+                    " = 每年 1 月与 7 月 (用月份名或 1-12，可加间隔 *2y[6])",
+                    " = yearly in Jan & Jul  (month names or 1-12, interval *2y[6])"
+                )),
+            ]),
+            Line::from(vec![
+                Span::raw("  "),
                 Span::styled(
-                    "FREQ=DAILY|WEEKLY|MONTHLY",
+                    "FREQ=DAILY|WEEKLY|MONTHLY|YEARLY",
                     Style::default().fg(self.theme.text_success),
                 ),
                 Span::raw(tr!(self.lang, "   循环频率", "   frequency")),

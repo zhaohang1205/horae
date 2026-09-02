@@ -279,6 +279,7 @@ mod tests {
             notes: String::new(),
             status,
             rrule: None,
+            priority: None,
             created_at: 0,
             clarified_at: None,
             due_at: due,

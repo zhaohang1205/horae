@@ -49,11 +49,11 @@ let task = tasks::get(conn, &task_id)?;
 
 ## Issue 2（高优）：CLI 路径不校验 RRULE，`FREQ=YEARLY` 被静默存入且完成后不重排
 
-**✅ 已修复（方案 A：校验前置）**：见 CHANGELOG「Unreleased → Fixed」；
-`capture.rs::run` 与 `status.rs::schedule` 写库前均调 `parser::rrule_valid`
-（经 `commands/capture.rs::ensure_rrule_supported`），watch 手机桥复用 capture
-路径自动覆盖；README_cn/README_en/AGENTS.md/architecture-handoff 与 skills 文档
-措辞已同步。方案 B（引擎补 YEARLY）仍可作为后续增强。
+**✅ 已修复**：
+- 方案 A（校验前置）：`capture.rs::run` 与 `status.rs::schedule` 写库前均调 `parser::rrule_valid`
+  （经 `commands/capture.rs::ensure_rrule_supported`），watch 手机桥复用 capture 路径自动覆盖；
+- 方案 B（引擎补 YEARLY）**已实现**：`*y` / `*Ny` / `*y[jan,jul]`（BYMONTH）现在可正常解析并展开，
+  `rrule_valid` 不再拒绝 YEARLY。文档（README_cn/README_en/AGENTS.md/architecture-handoff/skills）已同步。
 
 **现象**
 
@@ -67,38 +67,22 @@ horae schedule <id> --start 明天 --rrule "FREQ=YEARLY"
 # scheduled ... rrule: FREQ=YEARLY                  ← schedule 子命令同样不校验
 ```
 
-引擎只支持 `FREQ=DAILY|WEEKLY|MONTHLY`（src/schedule.rs），YEARLY 无法展开。
-TUI 输入层有防呆（`rrule_valid` 拒绝 YEARLY），但两条 CLI 路径都没有调用校验，
-导致同一输入在 TUI 报错、在 CLI 放行——违反"never silently degraded"的设计意图。
+引擎现在支持 `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`（src/schedule.rs），YEARLY 通过
+`*y` / `*Ny` / `*y[jan,jul]`（BYMONTH）展开。`rrule_valid` 已放开 YEARLY，CLI 与 TUI
+在所有写入路径统一校验，不再静默降级。
 
-**根因**
+**根因（历史）**
 
-- `crate::parser::rrule_valid`（src/parser.rs:263，内含 YEARLY 拒绝逻辑 276-283）
-  目前只有 TUI 在调用：
-  - src/tui/handlers/input.rs:102、150、215（保存前校验）
-  - src/tui/render/input.rs:362（实时红绿提示）
-- CLI capture 路径：src/commands/capture.rs:22 只做 `parse_quick_add`，
-  简写展开结果（含 fallback 的原样串）未经 `rrule_valid` 直接入库；
-- CLI schedule 路径：src/commands/mod.rs:64-75 → status.rs::schedule（status.rs:25 起）
-  把 `--rrule` 原样传给 `tasks::schedule`，同样无校验。
+- 原 `crate::parser::rrule_valid` 内含 YEARLY 拒绝逻辑，只有 TUI 在调用；
+- CLI capture 路径原只做 `parse_quick_add`，简写展开结果未经 `rrule_valid` 直接入库；
+- CLI schedule 路径原把 `--rrule` 原样传给 `tasks::schedule`，无校验。
 
-**附带文档不一致**
+上述根因已在方案 A 中消除（CLI 两入口统一校验），并在方案 B 中进一步让 YEARLY 本身合法可展开。
 
-- docs/AGENTS.md "Recurring tasks" 条目称 "`FREQ=YEARLY` (`*y`) is rejected at the
-  parser layer" —— 实际只在 TUI 输入层拒绝，措辞需修正为 TUI input layer；
-- docs/README_cn.md 循环简写一节把 `*y`（每年）列为受支持简写 —— 与引擎能力不符，
-  应删除或标注不支持。
+**附带文档不一致（已同步）**
 
-**建议修复（二选一，推荐 A）**
-
-- A. 校验前置：capture 与 schedule 两个 CLI 入口在写入前调用
-  `parser::rrule_valid`，非法值报错（错误信息说明支持的三种频率）。
-  补测试：`*y` capture 报错；`--rrule FREQ=YEARLY` 报错。
-- B. 引擎补齐 YEARLY 展开（改动面大，含 366 天视野内的年份槽位计算）。
-
-若选 A，同步修改：
-- docs/skills/horae/references/syntax.md 的「⚠️ 已知坑：YEARLY」小节改为
-  「CLI 与 TUI 一致拒绝」的表述。
+- docs/AGENTS.md / README_cn / README_en / architecture-handoff / skills 文档已改为
+  YEARLY 受支持的表述；CLI 与 TUI 在所有写入路径一致校验。
 
 ---
 

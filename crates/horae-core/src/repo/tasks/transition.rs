@@ -22,6 +22,7 @@ pub struct CaptureInput {
     pub due_at: Option<i64>,
     pub tag_names: Vec<String>,
     pub rrule: Option<String>,
+    pub priority: Option<String>,
     pub delegated_to: Option<String>,
     pub checklist: Vec<task::ChecklistItem>,
 }
@@ -35,6 +36,7 @@ impl Default for CaptureInput {
             due_at: None,
             tag_names: Vec::new(),
             rrule: None,
+            priority: None,
             delegated_to: None,
             checklist: Vec::new(),
         }
@@ -54,14 +56,15 @@ pub fn create_capture(conn: &Connection, input: &CaptureInput) -> Result<Task> {
         };
         tx.execute(
             "INSERT INTO tasks \
-             (id,title,notes,status,rrule,created_at,clarified_at,due_at,updated_at,delegated_to,checklist) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+             (id,title,notes,status,rrule,priority,created_at,clarified_at,due_at,updated_at,delegated_to,checklist) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
             rusqlite::params![
                 id,
                 input.title,
                 input.notes,
                 status.to_string(),
                 input.rrule,
+                input.priority,
                 now,
                 clarified,
                 input.due_at,
@@ -109,6 +112,7 @@ pub struct ModifyInput {
     pub scheduled_start_at: Option<Option<i64>>,
     pub scheduled_end_at: Option<Option<i64>>,
     pub rrule: Option<Option<String>>,
+    pub priority: Option<Option<String>>,
     pub delegated_to: Option<Option<String>>,
     pub add_tags: Vec<String>,
     pub remove_tags: Vec<String>,
@@ -176,6 +180,12 @@ pub fn modify(conn: &Connection, id: &str, input: &ModifyInput) -> Result<Task> 
                 sched_changed = true;
             }
         }
+        if let Some(priority_opt) = input.priority.clone() {
+            if priority_opt != t.priority {
+                t.priority = priority_opt;
+                log_event(tx, id, event::EV_PRIORITY, None, None, None, now)?;
+            }
+        }
         if sched_changed {
             let meta = t
                 .rrule
@@ -208,8 +218,8 @@ pub fn modify(conn: &Connection, id: &str, input: &ModifyInput) -> Result<Task> 
         t.updated_at = now;
         tx.execute(
             "UPDATE tasks SET title=?1, notes=?2, status=?3, clarified_at=?4, completed_at=?5, \
-             due_at=?6, scheduled_start_at=?7, scheduled_end_at=?8, rrule=?9, delegated_to=?10, \
-             updated_at=?11 WHERE id=?12",
+             due_at=?6, scheduled_start_at=?7, scheduled_end_at=?8, rrule=?9, priority=?10, \
+             delegated_to=?11, updated_at=?12 WHERE id=?13",
             rusqlite::params![
                 t.title,
                 t.notes,
@@ -220,6 +230,7 @@ pub fn modify(conn: &Connection, id: &str, input: &ModifyInput) -> Result<Task> 
                 t.scheduled_start_at,
                 t.scheduled_end_at,
                 t.rrule,
+                t.priority,
                 t.delegated_to,
                 t.updated_at,
                 id
@@ -515,6 +526,25 @@ pub fn set_rrule(conn: &Connection, id: &str, rrule: Option<String>) -> Result<T
         Ok(())
     })?;
     Ok(t)
+}
+
+/// Set a task's priority (high|medium|low|NULL), recording a `priority` event.
+pub fn set_priority(conn: &Connection, id: &str, priority: Option<String>) -> Result<Task> {
+    let mut t = get(conn, id)?;
+    if t.priority == priority {
+        return Ok(t);
+    }
+    crate::repo::mutate(conn, |tx, now| {
+        t.priority = priority.clone();
+        t.updated_at = now;
+        tx.execute(
+            "UPDATE tasks SET priority=?1, updated_at=?2 WHERE id=?3",
+            rusqlite::params![t.priority, t.updated_at, id],
+        )?;
+        log_event(tx, id, event::EV_PRIORITY, None, None, None, now)?;
+        Ok(())
+    })?;
+    get(conn, id)
 }
 
 /// Schedule a task: set planned start/end + optional recurrence, move to

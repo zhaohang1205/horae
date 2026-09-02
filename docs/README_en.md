@@ -59,10 +59,10 @@ Task refs accept a full id, a unique id-prefix, or an exact title.
 | Command | Description |
 | --- | --- |
 | `horae` | Launch the TUI |
-| `horae capture [title] [--clip] [--notes N] [--tag T]... [--due TIME] [--status S] [--p1\|--p2\|--p3] [--json]` | Capture (alias `c`, supports `--clip` ingest) |
+| `horae capture [title] [--clip] [--notes N] [--tag T]... [--due TIME] [--status S] [--high\|--medium\|--low] [--json]` | Capture (alias `c`, supports `--clip` ingest) |
 | `horae list [--status S] [--tag T]... [--date MMDD] [--due-before TIME] [--json]` | List tasks (alias `l`); date search uses four digits, e.g. `0829` |
 | `horae show <id> [--json]` | Show with timeline (alias `s`) |
-| `horae modify <id> [text] [--title T] [--due TIME] [--notes N] [--edit-notes] [--tag T]... [--untag T]... [--p1\|--p2\|--p3] [--status S] [--json]` | Modify task (aliases `m`, `mod`, `edit`; quick-add syntax supported) |
+| `horae modify <id> [text] [--title T] [--due TIME] [--notes N] [--edit-notes] [--tag T]... [--untag T]... [--high\|--medium\|--low\|--clear-priority] [--status S] [--json]` | Modify task (aliases `m`, `mod`, `edit`; quick-add syntax supported) |
 | `horae next\|wait\|someday\|done\|restore\|purge <id>` | Move / restore / hard-delete (alias `d` for `done`) |
 | `horae schedule <id> [--start TIME] [--end TIME] [--rrule R]` | Schedule (+recurrence) |
 | `horae archive <id>` / `horae restore <id>` / `horae purge <id>` | Soft delete / restore / hard delete (aliases `rm`, `delete` for `archive`) |
@@ -155,7 +155,7 @@ HH:MM                             same-day time (past → tomorrow)
 
 `~time` in a quick-add line sets the **schedule start** (`scheduled_start_at`, status becomes Scheduled; start only, no end); `--due` sets a soft deadline (`due_at`).
 
-Recurrence RRULE (`*` shorthand in a quick-add line): `FREQ=DAILY|WEEKLY|MONTHLY`, `INTERVAL=2`, `BYDAY=SA,SU`, `BYMONTHDAY=1,-1` (-1 = last day of month), `COUNT=10` / `UNTIL=YYYY-MM-DD`. Shorthands: `*d`/`*w`/`*m` (daily/weekly/monthly), `*2w[1,3]` (every two weeks on Mon & Wed; 1-7 = Mon-Sun, 0 = Sun), `*m[1,-1]` (the 1st and last day of each month), `*m[1,15]` (the 1st and 15th), priority `!a`/`!b`/`!c`. Note: `FREQ=YEARLY` (`*y`) is not supported by the expansion engine and is rejected by both TUI and CLI; use a monthly recurrence instead.
+Recurrence RRULE (`*` shorthand in a quick-add line): `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`, `INTERVAL=2`, `BYDAY=SA,SU`, `BYMONTHDAY=1,-1` (-1 = last day of month), `BYMONTH=1,7` (months by number or name, e.g. `jan,jul`), `COUNT=10` / `UNTIL=YYYY-MM-DD`. Shorthands: `*d`/`*w`/`*m` (daily/weekly/monthly), `*2w[1,3]` (every two weeks on Mon & Wed; 1-7 = Mon-Sun, 0 = Sun), `*m[1,-1]` (the 1st and last day of each month), `*m[1,15]` (the 1st and 15th), `*y` (yearly), `*2y[6]` (every two years in June), `*y[jan,jul]` (yearly in Jan & Jul). Priority `!high`/`!medium`/`!low` (case-insensitive).
 
 ## Backup
 

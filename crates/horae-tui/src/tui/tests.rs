@@ -30,10 +30,10 @@ fn seed(conn: &Connection) {
         )
         .unwrap();
     };
-    mk("Write homepage copy", task::Status::Inbox, &["work", "p1"]);
+    mk("Write homepage copy", task::Status::Inbox, &["work"]);
     mk("Buy groceries", task::Status::Inbox, &["home", "errands"]);
     mk("Read Rust book", task::Status::Next, &["learning"]);
-    mk("Pay taxes", task::Status::Waiting, &["work", "p2"]);
+    mk("Pay taxes", task::Status::Waiting, &["work"]);
     mk("Plan vacation", task::Status::Someday, &["home"]);
     mk("Finish report", task::Status::Done, &[]);
 }
@@ -2625,6 +2625,38 @@ fn active_pomodoro_exits_capture_mode_before_handling_stop_key() {
         horae_core::model::pomodoro::Phase::Idle,
         "S 应停止番茄钟"
     );
+}
+
+#[test]
+fn exclamation_pops_priority_completion_immediately() {
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    seed(&conn);
+    let mut app = app_normal(&conn);
+    app.mode = Mode::Capturing;
+    // 仅输入 '!' 一个字符（光标在末尾）即应弹出优先级候选，无需再敲字符。
+    app.input_insert_char('!');
+    assert_eq!(app.input, "!");
+    assert!(
+        app.completion_active(),
+        "输入 '!' 后补全候选应立即可用"
+    );
+    assert_eq!(
+        app.completion_candidates,
+        vec!["high".to_string(), "medium".to_string(), "low".to_string()],
+        "优先级候选应为 high/medium/low"
+    );
+    assert_eq!(app.completion_prefix, '!');
+
+    // 空 '*' 同样应立刻弹出循环候选。
+    app.input_clear();
+    app.input_insert_char('*');
+    assert!(app.completion_active(), "输入 '*' 后补全候选应立即可用");
+    assert!(!app.completion_candidates.is_empty(), "循环候选不应为空");
+
+    // 继续敲字符可过滤候选。
+    app.input_insert_char('w');
+    assert!(app.completion_candidates.iter().all(|c| c.starts_with('w')));
 }
 
 #[test]

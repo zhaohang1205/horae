@@ -5,12 +5,11 @@ use horae_core::model::task;
 use horae_core::repo::tasks;
 use horae_core::time;
 
-/// 校验 RRULE 可被展开引擎支持；非法值报错并说明支持的三种频率。
+/// 校验 RRULE 可被展开引擎支持；非法值报错并说明支持的频率。
 pub fn ensure_rrule_supported(rrule: &str) -> Result<()> {
     if !horae_core::parser::rrule_valid(rrule) {
         anyhow::bail!(
-            "invalid rrule `{rrule}`: engine only supports FREQ=DAILY|WEEKLY|MONTHLY \
-             (YEARLY is not implemented)"
+            "invalid rrule `{rrule}`: engine only supports FREQ=DAILY|WEEKLY|MONTHLY|YEARLY"
         );
     }
     Ok(())
@@ -22,9 +21,9 @@ pub struct CaptureArgs {
     pub title: String,
     pub clip: bool,
     pub tags: Vec<String>,
-    pub p1: bool,
-    pub p2: bool,
-    pub p3: bool,
+    pub high: bool,
+    pub medium: bool,
+    pub low: bool,
     pub due: Option<String>,
     pub status: Option<String>,
     pub notes: Option<String>,
@@ -119,7 +118,7 @@ pub fn run(conn: &Connection, mut args: CaptureArgs) -> Result<()> {
 
     let quick_add = horae_core::parser::parse_quick_add(&args.title);
 
-    // 与 TUI 输入层同源防呆：非法 RRULE（含引擎不支持的 YEARLY）在写库前报错，
+    // 与 TUI 输入层同源防呆：非法 RRULE（引擎不支持的频率/语法）在写库前报错，
     // 避免循环任务静默退化成一次性任务（watch 手机桥复用本函数，一并覆盖）。
     if let Some(rr) = &quick_add.rrule {
         ensure_rrule_supported(rr)?;
@@ -127,18 +126,17 @@ pub fn run(conn: &Connection, mut args: CaptureArgs) -> Result<()> {
 
     let mut tag_names: Vec<String> = args.tags.clone();
     tag_names.extend(quick_add.tags);
-    if let Some(p) = &quick_add.priority {
-        tag_names.push(p.clone());
-    }
-    if args.p1 {
-        tag_names.push("p1".into());
-    }
-    if args.p2 {
-        tag_names.push("p2".into());
-    }
-    if args.p3 {
-        tag_names.push("p3".into());
-    }
+
+    // 优先级为独立字段（CLI 标志优先于标题里的 !high）。
+    let priority = if args.high {
+        Some("high".to_string())
+    } else if args.medium {
+        Some("medium".to_string())
+    } else if args.low {
+        Some("low".to_string())
+    } else {
+        quick_add.priority.clone()
+    };
 
     // `--due` 仍是软截止（due_at）；一句话里的 `~time` 是排程起点（scheduled_start_at）。
     let due_at = match args.due {
@@ -163,6 +161,7 @@ pub fn run(conn: &Connection, mut args: CaptureArgs) -> Result<()> {
         },
         due_at,
         tag_names,
+        priority,
         rrule: if scheduled_start.is_some() {
             None
         } else {
@@ -202,9 +201,9 @@ mod tests {
                 title: "晨跑 *d".into(),
                 clip: false,
                 tags: vec![],
-                p1: false,
-                p2: false,
-                p3: false,
+                high: false,
+                medium: false,
+                low: false,
                 due: None,
                 status: None,
                 notes: None,
@@ -237,9 +236,9 @@ mod tests {
                 title: "买牛奶 ~tomorrow 09:00".into(),
                 clip: false,
                 tags: vec![],
-                p1: false,
-                p2: false,
-                p3: false,
+                high: false,
+                medium: false,
+                low: false,
                 due: None,
                 status: None,
                 notes: None,
@@ -286,31 +285,36 @@ mod tests {
     // ---------- rrule 校验（与 TUI 输入层同源防呆） ----------
 
     #[test]
-    fn capture_rejects_yearly_rrule_without_creating_task() {
+    fn capture_accepts_yearly_rrule() {
         let (_dir, conn) = test_conn();
-        let err = run(
+        run(
             &conn,
             CaptureArgs {
                 title: "年度体检 *y".into(),
                 clip: false,
                 tags: vec![],
-                p1: false,
-                p2: false,
-                p3: false,
+                high: false,
+                medium: false,
+                low: false,
                 due: None,
                 status: None,
                 notes: None,
                 json: false,
             },
         )
-        .unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("FREQ=YEARLY"), "{msg}");
-        assert!(msg.contains("FREQ=DAILY|WEEKLY|MONTHLY"), "{msg}");
-        assert!(
-            empty_list(&conn).is_empty(),
-            "非法 rrule 不得落库（否则静默退化成一次性任务）"
-        );
+        .unwrap();
+        let task = tasks::list(
+            &conn,
+            &tasks::ListFilter {
+                status: None,
+                tags: vec![],
+                query: None,
+                review_stale: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(task.len(), 1);
+        assert_eq!(task[0].rrule.as_deref(), Some("FREQ=YEARLY"));
     }
 
     #[test]
@@ -323,9 +327,9 @@ mod tests {
                 title: "晨跑 *sometimes".into(),
                 clip: false,
                 tags: vec![],
-                p1: false,
-                p2: false,
-                p3: false,
+                high: false,
+                medium: false,
+                low: false,
                 due: None,
                 status: None,
                 notes: None,
@@ -344,12 +348,12 @@ mod tests {
         let err = run(
             &conn,
             CaptureArgs {
-                title: "年度体检 *y ~tomorrow 09:00".into(),
+                title: "晨跑 *2d[1,3] ~tomorrow 09:00".into(),
                 clip: false,
                 tags: vec![],
-                p1: false,
-                p2: false,
-                p3: false,
+                high: false,
+                medium: false,
+                low: false,
                 due: None,
                 status: None,
                 notes: None,
@@ -357,7 +361,7 @@ mod tests {
             },
         )
         .unwrap_err();
-        assert!(err.to_string().contains("FREQ=YEARLY"), "{}", err);
+        assert!(err.to_string().contains("2d[1,3]"), "{}", err);
         assert!(empty_list(&conn).is_empty());
     }
 
@@ -370,9 +374,9 @@ mod tests {
                 title: "".into(),
                 clip: false,
                 tags: vec![],
-                p1: false,
-                p2: false,
-                p3: false,
+                high: false,
+                medium: false,
+                low: false,
                 due: None,
                 status: None,
                 notes: None,

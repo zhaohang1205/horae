@@ -9,7 +9,7 @@
 | --- | --- |
 | 收集 Capture | `horae c "..."` / TUI `a` / 手机 `capture.txt`——先入库再想 |
 | 厘清 Clarify | TUI 选中条目 `Enter`：一句话补成可执行格式；`x/w/s/e` 分流 |
-| 组织 Organize | 状态视图（1-7）+ 情境标签 `@work @home...` + 优先级 `!a/b/c` + 排期/循环 |
+| 组织 Organize | 状态视图（1-7）+ 情境标签 `@work @home...` + 优先级 `!high/!medium/!low` + 排期/循环 |
 | 回顾 Reflect | 每周 `horae review` 或 TUI `r` 向导；随时 `horae stats` 看板 |
 | 执行 Do | `horae do` 终结选择困难；TUI `P` 起番茄钟 |
 
@@ -82,7 +82,7 @@ alias hw='horae --profile work'   # 加进 rc 文件
 | `@learning` | 学习类（可配番茄钟专注） |
 | `@quick` | 5 分钟内的小事（排队时过滤出来清掉） |
 | `@focus` | 需要整块深度时间的 |
-| `!a !b !c` | 每天 `!a` 尽量不超过 3 件，否则优先级失效 |
+| `!high !medium !low` | 每天 `!high` 尽量不超过 3 件，否则优先级失效 |
 
 自定义标签（如 `@老板名字`、`@项目代号`）随用随建，但每月回顾时清理孤儿标签。
 

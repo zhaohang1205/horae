@@ -24,22 +24,15 @@ pub struct QuickAddToken {
     pub text: String,
 }
 
-/// Map a priority letter to its tag name: `!a`→p1 (最高), `!b`→p2, `!c`→p3.
-pub fn priority_tag(letter: &str) -> Option<&'static str> {
-    match letter {
-        "a" | "A" => Some("p1"),
-        "b" | "B" => Some("p2"),
-        "c" | "C" => Some("p3"),
-        _ => None,
-    }
-}
-
-/// Reverse of [`priority_tag`]: `p1`→'a' (最高), `p2`→'b', `p3`→'c'.
-pub fn priority_letter(tag: &str) -> Option<char> {
-    match tag {
-        "p1" => Some('a'),
-        "p2" => Some('b'),
-        "p3" => Some('c'),
+/// Map a priority token (after `!`) to its canonical value: `!high` → "high"
+/// (最高), `!medium` → "medium", `!low` → "low". Case-insensitive.
+/// Returns `None` for unrecognized input (e.g. `!foo`), which callers fall back
+/// to treating the word as a normal title.
+pub fn priority_value(token: &str) -> Option<&'static str> {
+    match token.to_ascii_lowercase().as_str() {
+        "high" => Some("high"),
+        "medium" => Some("medium"),
+        "low" => Some("low"),
         _ => None,
     }
 }
@@ -136,9 +129,9 @@ pub fn parse_quick_add(input: &str) -> QuickAdd {
                 rrule = Some(parse_rrule_shorthand(strip_token_prefix(&tok.text)))
             }
             QuickAddKind::Priority => {
-                let letter = strip_token_prefix(&tok.text);
-                if let Some(tag) = priority_tag(letter) {
-                    priority = Some(tag.to_string());
+                let val = strip_token_prefix(&tok.text);
+                if let Some(p) = priority_value(val) {
+                    priority = Some(p.to_string());
                 } else {
                     // 无法识别的 !x 词按普通标题处理, 不静默丢弃
                     title_parts.push(tok.text.clone());
@@ -264,6 +257,23 @@ pub fn parse_rrule_shorthand(s: &str) -> String {
                     }
                 }
             }
+            if let Some(interval) = parse_yearly_head(head) {
+                if let Some(months) = parse_month_codes(body) {
+                    let mut out = String::from("FREQ=YEARLY");
+                    if let Some(iv) = interval {
+                        if iv > 1 {
+                            out.push_str(&format!(";INTERVAL={}", iv));
+                        }
+                    }
+                    let joined = months
+                        .iter()
+                        .map(|m| m.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    out.push_str(&format!(";BYMONTH={}", joined));
+                    return out;
+                }
+            }
         }
     }
 
@@ -290,30 +300,16 @@ pub fn parse_rrule_shorthand(s: &str) -> String {
 /// 判定一个循环简写/标准 RRULE 是否有效。
 ///
 /// 简写能映射成标准 RRULE（非原样 fallback），或已是 `FREQ=` 开头的 RRULE。
-/// 无法被任何分支识别的词（原样 fallback）视为无效。
-/// `FREQ=YEARLY`（`*y` / `4y` / `yearly`）暂不支持：展开引擎只接受
-/// DAILY/WEEKLY/MONTHLY，解析层在此拒绝，避免年循环习惯静默退化成一次性任务。
+/// 无法被任何分支识别的词（原样 fallback）视为无效。支持
+/// `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY` 及其 INTERVAL/BYDAY/BYMONTHDAY/BYMONTH 组合。
 pub fn rrule_valid(rrule: &str) -> bool {
     let trimmed = rrule.trim();
     if trimmed.is_empty() {
         return false;
     }
-    if rrule_contains_yearly(trimmed) {
-        return false;
-    }
     let resolved = parse_rrule_shorthand(trimmed);
     let looks_like_rrule = resolved.to_lowercase().starts_with("freq=");
     resolved != trimmed || looks_like_rrule
-}
-
-fn rrule_contains_yearly(s: &str) -> bool {
-    let lower = s.to_lowercase();
-    lower.starts_with("freq=yearly")
-        || lower.contains(";freq=yearly")
-        || matches!(lower.as_str(), "y" | "yearly")
-        || (lower.ends_with('y')
-            && lower.len() > 1
-            && lower[..lower.len() - 1].chars().all(|c| c.is_ascii_digit()))
 }
 
 /// Map a weekday token (name or number) to its two-letter RRULE code.
@@ -367,6 +363,21 @@ fn parse_monthly_head(head: &str) -> Option<Option<u32>> {
     num_part.parse::<u32>().ok().map(Some)
 }
 
+/// Parse the head of a bracketed yearly shorthand (`y` or `<N>y`), returning
+/// the interval (None when omitted).
+fn parse_yearly_head(head: &str) -> Option<Option<u32>> {
+    let h = head.to_lowercase();
+    let last = h.chars().last()?;
+    if last != 'y' {
+        return None;
+    }
+    let num_part = &h[..h.len() - 1];
+    if num_part.is_empty() {
+        return Some(None);
+    }
+    num_part.parse::<u32>().ok().map(Some)
+}
+
 /// Parse a comma-separated day-of-month list into numbers, deduplicated in
 /// first-appearance order. Supports 1-31 and negative counts from the end of
 /// the month (-1 = last day, -2 = second-to-last, ...). Invalid entries
@@ -404,35 +415,68 @@ fn parse_day_codes(body: &str) -> Option<Vec<&'static str>> {
     Some(out)
 }
 
+/// Parse a comma-separated month list (numbers 1-12 or names) into RRULE
+/// BYMONTH numbers, deduplicated in first-appearance order. Invalid entries → None.
+fn parse_month_codes(body: &str) -> Option<Vec<i32>> {
+    if body.trim().is_empty() {
+        return None;
+    }
+    let mut out = Vec::new();
+    for part in body.split(',') {
+        let n = month_number(part.trim())?;
+        if !out.contains(&n) {
+            out.push(n);
+        }
+    }
+    Some(out)
+}
+
+/// Map a month token (number 1-12 or English name/abbr) to its 1-based number.
+fn month_number(part: &str) -> Option<i32> {
+    let p = part.to_lowercase();
+    match p.as_str() {
+        "1" | "jan" | "january" => Some(1),
+        "2" | "feb" | "february" => Some(2),
+        "3" | "mar" | "march" => Some(3),
+        "4" | "apr" | "april" => Some(4),
+        "5" | "may" => Some(5),
+        "6" | "jun" | "june" => Some(6),
+        "7" | "jul" | "july" => Some(7),
+        "8" | "aug" | "august" => Some(8),
+        "9" | "sep" | "sept" | "september" => Some(9),
+        "10" | "oct" | "october" => Some(10),
+        "11" | "nov" | "november" => Some(11),
+        "12" | "dec" | "december" => Some(12),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn priority_letters_map_to_tags() {
-        assert_eq!(priority_tag("a"), Some("p1"));
-        assert_eq!(priority_tag("b"), Some("p2"));
-        assert_eq!(priority_tag("c"), Some("p3"));
-        assert_eq!(priority_tag("A"), Some("p1"));
-        assert_eq!(priority_tag("x"), None);
-        assert_eq!(priority_letter("p1"), Some('a'));
-        assert_eq!(priority_letter("p3"), Some('c'));
+    fn priority_value_maps_to_canonical() {
+        assert_eq!(priority_value("high"), Some("high"));
+        assert_eq!(priority_value("Medium"), Some("medium"));
+        assert_eq!(priority_value("LOW"), Some("low"));
+        assert_eq!(priority_value("x"), None);
     }
 
     #[test]
     fn quick_add_parses_priority() {
-        let q = parse_quick_add("写周报 @work !a ~+3d");
+        let q = parse_quick_add("写周报 @work !high ~+3d");
         assert_eq!(q.title, "写周报");
         assert_eq!(q.tags, vec!["work"]);
-        assert_eq!(q.priority.as_deref(), Some("p1"));
+        assert_eq!(q.priority.as_deref(), Some("high"));
         assert_eq!(q.time_str.as_deref(), Some("+3d"));
     }
 
     #[test]
     fn last_priority_wins() {
-        let q = parse_quick_add("任务 !a !c");
+        let q = parse_quick_add("任务 !high !low");
         assert_eq!(q.title, "任务");
-        assert_eq!(q.priority.as_deref(), Some("p3"));
+        assert_eq!(q.priority.as_deref(), Some("low"));
     }
 
     #[test]
@@ -571,10 +615,12 @@ mod tests {
         assert!(rrule_valid("d"));
         assert!(rrule_valid("w"));
         assert!(rrule_valid("m"));
-        assert!(!rrule_valid("y"), "YEARLY 引擎不支持，解析层拒绝");
-        assert!(!rrule_valid("4y"), "间隔年循环同样拒绝");
-        assert!(!rrule_valid("yearly"));
-        assert!(!rrule_valid("FREQ=YEARLY"));
+        assert!(rrule_valid("y"), "YEARLY 现已被引擎支持");
+        assert!(rrule_valid("4y"), "间隔年循环同样有效");
+        assert!(rrule_valid("yearly"));
+        assert!(rrule_valid("FREQ=YEARLY"));
+        assert!(rrule_valid("y[jan,jul]"));
+        assert!(rrule_valid("2y[6]"));
         assert!(rrule_valid("2w[1,3]"));
         assert!(rrule_valid("m[1,15]"));
         assert!(rrule_valid("weekday"));
@@ -590,10 +636,10 @@ mod tests {
 
     #[test]
     fn fullwidth_chinese_symbols_quick_add() {
-        let q = parse_quick_add("写周报 ＠work ！a ～+3d");
+        let q = parse_quick_add("写周报 ＠work ！high ～+3d");
         assert_eq!(q.title, "写周报");
         assert_eq!(q.tags, vec!["work"]);
-        assert_eq!(q.priority.as_deref(), Some("p1"));
+        assert_eq!(q.priority.as_deref(), Some("high"));
         assert_eq!(q.time_str.as_deref(), Some("+3d"));
 
         let q2 = parse_quick_add("开会 ～2026-08-20 15：30 ＠work");

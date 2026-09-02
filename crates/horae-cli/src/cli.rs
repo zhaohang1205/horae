@@ -9,7 +9,7 @@ use std::path::PathBuf;
     about = "GTD terminal task manager",
     long_about = "A GTD terminal task manager in Rust: SQLite data layer + CLI + ratatui TUI in one binary.\n\
     Every task state change is stamped with UTC-ms and appended to an append-only task_events timeline.",
-    after_help = "Examples:\n  horae                       launch the TUI\n  horae capture \"buy milk\" --tag home --p2\n  horae list --status next\n  horae show <id>\n  horae completions bash\n\nTime syntax: now, +2h, +30m, +1d, today, tomorrow, 2026-07-24 14:30\nDate search: four digits MMDD, for example 0829\nTask refs: full id, unique id-prefix, or exact title."
+    after_help = "Examples:\n  horae                       launch the TUI\n  horae capture \"buy milk\" --tag home --high\n  horae list --status next\n  horae show <id>\n  horae completions bash\n\nTime syntax: now, +2h, +30m, +1d, today, tomorrow, 2026-07-24 14:30\nDate search: four digits MMDD, for example 0829\nTask refs: full id, unique id-prefix, or exact title."
 )]
 pub struct Cli {
     /// Profile (data set) to use; defaults to the configured default profile.
@@ -46,9 +46,9 @@ pub enum Command {
     /// Capture a new item into the inbox
     #[command(long_about = "Capture a new item into the inbox. Tags auto-create on first use; \
         quick-add syntax (@tag ~time *rrule !priority) is parsed in the title.",
-        after_help = "Examples:\n  horae capture \"buy milk\" --tag home\n  horae capture \"call mom\" --p2 --due tomorrow\n  horae capture \"submit report\" --status scheduled --due +1d\n  horae capture \"email boss ~today @work !a\"",
+        after_help = "Examples:\n  horae capture \"buy milk\" --tag home\n  horae capture \"call mom\" --high --due tomorrow\n  horae capture \"submit report\" --status scheduled --due +1d\n  horae capture \"email boss ~today @work !high\"",
         visible_alias = "c",
-        group = clap::ArgGroup::new("priority").args(["p1", "p2", "p3"]))]
+        group = clap::ArgGroup::new("priority").args(["high", "medium", "low"]))]
     Capture {
         #[arg(num_args = 0.., help = "Task title (quotes optional)")]
         title: Vec<String>,
@@ -56,12 +56,12 @@ pub enum Command {
         clip: bool,
         #[arg(long = "tag", value_name = "TAG", help = "Tag to apply (repeatable)")]
         tag: Vec<String>,
-        #[arg(long, help = "Priority 1 (high)")]
-        p1: bool,
-        #[arg(long, help = "Priority 2 (medium)")]
-        p2: bool,
-        #[arg(long, help = "Priority 3 (low)")]
-        p3: bool,
+        #[arg(long, help = "Set priority high")]
+        high: bool,
+        #[arg(long, help = "Set priority medium")]
+        medium: bool,
+        #[arg(long, help = "Set priority low")]
+        low: bool,
         #[arg(
             long,
             value_name = "TIME",
@@ -123,7 +123,7 @@ pub enum Command {
         (@tag ~time *rrule !priority) in the title/tokens and explicit flags.",
         after_help = "Examples:\n  horae modify <id> \"buy organic milk @groceries\"\n  horae modify <id> --due tomorrow\n  horae modify <id> --tag home --untag work\n  horae modify <id> --clear-due\n  horae modify <id> --clear-schedule\n  horae modify <id> --notes \"call at 3pm\"\n  horae modify <id> --edit-notes\n  horae modify <id> --status next",
         visible_aliases = ["m", "mod", "edit"],
-        group = clap::ArgGroup::new("priority").args(["p1", "p2", "p3", "clear_priority"])
+        group = clap::ArgGroup::new("priority").args(["high", "medium", "low", "clear_priority"])
     )]
     Modify {
         #[arg(help = "Task ID, unique prefix, or exact title")]
@@ -146,13 +146,13 @@ pub enum Command {
         untag: Vec<String>,
         #[arg(long, help = "Clear all tags from task")]
         clear_tags: bool,
-        #[arg(long, help = "Set priority 1 (high)")]
-        p1: bool,
-        #[arg(long, help = "Set priority 2 (medium)")]
-        p2: bool,
-        #[arg(long, help = "Set priority 3 (low)")]
-        p3: bool,
-        #[arg(long, help = "Clear priority tag (p1/p2/p3)")]
+        #[arg(long, help = "Set priority high")]
+        high: bool,
+        #[arg(long, help = "Set priority medium")]
+        medium: bool,
+        #[arg(long, help = "Set priority low")]
+        low: bool,
+        #[arg(long, help = "Clear priority")]
         clear_priority: bool,
         #[arg(
             long,
@@ -169,7 +169,7 @@ pub enum Command {
         #[arg(
             long,
             value_name = "RRULE",
-            help = "Recurrence rule (FREQ=DAILY|WEEKLY|MONTHLY, or 'none')"
+            help = "Recurrence rule (FREQ=DAILY|WEEKLY|MONTHLY|YEARLY, or 'none')"
         )]
         rrule: Option<String>,
         #[arg(long, help = "Clear schedule (start, end, and rrule)")]
@@ -214,7 +214,7 @@ pub enum Command {
         #[arg(
             long,
             value_name = "RRULE",
-            help = "Recurrence rule (FREQ=DAILY|WEEKLY|MONTHLY;INTERVAL=..;BYDAY=..;COUNT=..|UNTIL=..)"
+            help = "Recurrence rule (FREQ=DAILY|WEEKLY|MONTHLY|YEARLY;INTERVAL=..;BYDAY=..;BYMONTH=..;COUNT=..|UNTIL=..)"
         )]
         rrule: Option<String>,
     },
@@ -240,7 +240,7 @@ pub enum Command {
     Tags,
     /// Calculate and output the single most important task right now
     #[command(
-        long_about = "Calculate and output the single most important task right now, ending decision fatigue. Considers priority (p1/p2), effective due time, and context.",
+        long_about = "Calculate and output the single most important task right now, ending decision fatigue. Considers priority (high/medium/low), effective due time, and context.",
         visible_alias = "do"
     )]
     Focus {
@@ -426,15 +426,15 @@ mod tests {
 
     #[test]
     fn capture_joins_title_words_and_flags() {
-        let cli = parse(&["capture", "buy", "milk", "--tag", "home", "--p2"]).unwrap();
+        let cli = parse(&["capture", "buy", "milk", "--tag", "home", "--medium"]).unwrap();
         match cli.command.unwrap() {
             Command::Capture {
                 title,
                 clip,
                 tag,
-                p1,
-                p2,
-                p3,
+                high,
+                medium,
+                low,
                 due,
                 status,
                 notes,
@@ -443,7 +443,7 @@ mod tests {
                 assert_eq!(title.join(" "), "buy milk");
                 assert!(!clip);
                 assert_eq!(tag, vec!["home".to_string()]);
-                assert!(!p1 && p2 && !p3);
+                assert!(!high && medium && !low);
                 assert!(due.is_none() && status.is_none() && notes.is_none() && !json);
             }
             _ => panic!("应为 Capture"),
@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn capture_rejects_conflicting_priorities() {
         // ArgGroup(priority) 互斥
-        assert!(parse(&["capture", "x", "--p1", "--p2"]).is_err());
+        assert!(parse(&["capture", "x", "--high", "--medium"]).is_err());
     }
 
     #[test]
@@ -513,7 +513,7 @@ mod tests {
     fn modify_parses_tokens_and_flags_and_aliases() {
         let cli = parse(&[
             "modify", "1234", "new", "title", "--tag", "work", "--untag", "home", "--due",
-            "tomorrow", "--p1",
+            "tomorrow", "--high",
         ])
         .unwrap();
         match cli.command.unwrap() {
@@ -522,7 +522,7 @@ mod tests {
                 text,
                 tag,
                 untag,
-                p1,
+                high,
                 due,
                 ..
             } => {
@@ -530,7 +530,7 @@ mod tests {
                 assert_eq!(text, vec!["new".to_string(), "title".to_string()]);
                 assert_eq!(tag, vec!["work".to_string()]);
                 assert_eq!(untag, vec!["home".to_string()]);
-                assert!(p1);
+                assert!(high);
                 assert_eq!(due.as_deref(), Some("tomorrow"));
             }
             _ => panic!("应为 Modify"),

@@ -150,7 +150,7 @@ fn zh_long_about(path: &str) -> Option<&'static str> {
         "show" => "查看任务详情及其完整的只追加事件时间线。",
         "modify" => "修改已有任务。支持在一句话标题中使用 quick-add 语法（@tag ~time *rrule !priority），也支持通过显式参数修改特定字段。",
         "schedule" => "为任务排程，设定计划开始/结束时间，以及可选的重复规则（RRULE）。",
-        "focus" => "计算并输出当前最重要的一件事，终结选择困难。综合优先级（p1/p2）、有效截止时间与上下文。",
+        "focus" => "计算并输出当前最重要的一件事，终结选择困难。综合优先级（high/medium/low）、有效截止时间与上下文。",
         "log" => "向时间线记录一条带时间戳的事件/日志，而不创建待办任务。",
         "pomo" => "番茄钟专注模式。`start` 会启动一个后台守护进程，每秒计时，写入 pomo.json 并发送桌面通知。",
         "alarm" => "临近任务的闹钟提醒：`waybar` 为 waybar 模块输出 JSON，`next` 打印最近的待响闹钟。",
@@ -166,15 +166,15 @@ fn zh_long_about(path: &str) -> Option<&'static str> {
 
 fn zh_after_help(path: &str) -> Option<&'static str> {
     Some(match path {
-        "horae" => "示例:\n  horae                       启动 TUI\n  horae capture \"买牛奶\" --tag home --p2\n  horae list --status next\n  horae show <id>\n  horae completions bash\n\n时间语法: now、+2h、+30m、+1d、today、tomorrow、2026-07-24 14:30\n日期搜索: 四位数字 MMDD，例如 0829\n任务引用: 完整 id、唯一 id 前缀，或精确标题",
-        "capture" => "示例:\n  horae capture \"买牛奶\" --tag home\n  horae capture \"给妈妈打电话\" --p2 --due tomorrow\n  horae capture \"提交报告\" --status scheduled --due +1d\n  horae capture \"给老板发邮件 ~today @work !a\"",
+        "horae" => "示例:\n  horae                       启动 TUI\n  horae capture \"买牛奶\" --tag home --high\n  horae list --status next\n  horae show <id>\n  horae completions bash\n\n时间语法: now、+2h、+30m、+1d、today、tomorrow、2026-07-24 14:30\n日期搜索: 四位数字 MMDD，例如 0829\n任务引用: 完整 id、唯一 id 前缀，或精确标题",
+        "capture" => "示例:\n  horae capture \"买牛奶\" --tag home\n  horae capture \"给妈妈打电话\" --high --due tomorrow\n  horae capture \"提交报告\" --status scheduled --due +1d\n  horae capture \"给老板发邮件 ~today @work !high\"",
         "modify" => "示例:\n  horae modify <id> \"买有机牛奶 @groceries\"\n  horae modify <id> --due tomorrow\n  horae modify <id> --tag home --untag work\n  horae modify <id> --clear-due\n  horae modify <id> --clear-schedule\n  horae modify <id> --notes \"下午3点电话\"\n  horae modify <id> --edit-notes\n  horae modify <id> --status next",
         "list" => "示例:\n  horae list\n  horae list --status next\n  horae list --status scheduled --tag work\n  horae list --date 0829 --json\n  horae list --due-before +1d --json",
         "schedule" => "示例:\n  horae schedule <id> --start tomorrow\n  horae schedule <id> --start +1d --end +1d 14:00\n  horae schedule <id> --start +1w --rrule 'FREQ=WEEKLY;BYDAY=MO,WE'",
         "log" => "示例:\n  horae log \"喝了 3 杯水\"\n  horae log",
         "pomo" => "示例:\n  horae pomo start <task-id>\n  horae pomo stop\n  horae pomo daemon\n  horae pomo waybar",
         "ntfy" => "示例:\n  horae ntfy test\n  horae --profile work ntfy test",
-        "watch" => "文件夹协议（手机写入，电脑消费）:\n    capture.txt   每行一条 quick-add 捕获：标题 @tag ~time *rrule !p\n    actions.txt   done <id|标题> | set <id|标题> status next | set <id|标题> due <时间>\n电脑回写:\n    today.md          活动任务快照（Next / Scheduled / Waiting / 逾期）\n    reminders/*.md    到期/逾期任务提醒（Syncthing 通过文件变更通知手机）\n    *.done            已消费行的回执",
+        "watch" => "文件夹协议（手机写入，电脑消费）:\n    capture.txt   每行一条 quick-add 捕获：标题 @tag ~time *rrule !high\n    actions.txt   done <id|标题> | set <id|标题> status next | set <id|标题> due <时间>\n电脑回写:\n    today.md          活动任务快照（Next / Scheduled / Waiting / 逾期）\n    reminders/*.md    到期/逾期任务提醒（Syncthing 通过文件变更通知手机）\n    *.done            已消费行的回执",
         "export" => "示例:\n  horae export\n  horae export --file ~/backups/horae.json",
         "import" => "示例:\n  horae import horae-backup-2026-08-15.json\n  horae import --replace ~/backups/horae.json",
         "completions" => "用法:\n  horae completions bash\n  horae completions fish\n\n安装到 ~/.bashrc 或 ~/.config/fish/completions/",
@@ -198,9 +198,9 @@ fn zh_arg_help(path: &str, arg: &str) -> Option<&'static str> {
         ("capture", "title") => "任务标题（可省略引号）",
         ("capture", "clip") => "从系统剪贴板读取内容作为任务标题/语法",
         ("capture", "tag") => "要添加的标签（可重复）",
-        ("capture", "p1") => "优先级 1（高）",
-        ("capture", "p2") => "优先级 2（中）",
-        ("capture", "p3") => "优先级 3（低）",
+        ("capture", "high") => "设为高优先级",
+        ("capture", "medium") => "设为中优先级",
+        ("capture", "low") => "设为低优先级",
         ("capture", "due") => "截止时间（now、+2h、today、2026-07-24 14:30）",
         ("capture", "status") => "初始状态（inbox、next、waiting、scheduled、someday、reference）",
         ("capture", "notes") => "任务备注/详细描述（剪贴板长文本会自动沉淀在此）",
@@ -210,15 +210,15 @@ fn zh_arg_help(path: &str, arg: &str) -> Option<&'static str> {
         ("modify", "tag") => "要添加的标签（可重复）",
         ("modify", "untag") => "要移除的标签（可重复）",
         ("modify", "clear_tags") => "清空所有标签",
-        ("modify", "p1") => "设为优先级 1（高）",
-        ("modify", "p2") => "设为优先级 2（中）",
-        ("modify", "p3") => "设为优先级 3（低）",
-        ("modify", "clear_priority") => "清除优先级标签（p1/p2/p3）",
+        ("modify", "high") => "设为高优先级",
+        ("modify", "medium") => "设为中优先级",
+        ("modify", "low") => "设为低优先级",
+        ("modify", "clear_priority") => "清除优先级",
         ("modify", "due") => "截止时间（now、+2h、today、2026-07-24 14:30 或 'none' 清除）",
         ("modify", "clear_due") => "清除截止时间",
         ("modify", "start") => "计划开始时间（或 'none' 清除）",
         ("modify", "end") => "计划结束时间（或 'none' 清除）",
-        ("modify", "rrule") => "重复规则（FREQ=DAILY|WEEKLY|MONTHLY 或 'none' 清除）",
+        ("modify", "rrule") => "重复规则（FREQ=DAILY|WEEKLY|MONTHLY|YEARLY 或 'none' 清除）",
         ("modify", "clear_schedule") => "清空排程（开始、结束与重复规则）",
         ("modify", "status") => {
             "更改状态（inbox、next、waiting、scheduled、someday、reference、done）"
@@ -236,7 +236,7 @@ fn zh_arg_help(path: &str, arg: &str) -> Option<&'static str> {
         ("schedule", "start") => "计划开始时间",
         ("schedule", "end") => "计划结束时间",
         ("schedule", "rrule") => {
-            "重复规则（FREQ=DAILY|WEEKLY|MONTHLY;INTERVAL=..;BYDAY=..;COUNT=..|UNTIL=..）"
+            "重复规则（FREQ=DAILY|WEEKLY|MONTHLY|YEARLY;INTERVAL=..;BYDAY=..;BYMONTH=..;COUNT=..|UNTIL=..）"
         }
         ("tag", "name") | ("untag", "name") => "标签名称",
         ("focus", "start") => "立即为此任务开启番茄钟",

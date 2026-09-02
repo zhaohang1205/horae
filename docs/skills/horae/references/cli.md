@@ -20,16 +20,16 @@
 ### capture（别名 c）
 
 ```sh
-horae capture "买牛奶" --tag home --p2          # flag 风格
-horae capture "提交报告 @work ~明天 14:00 !a"   # quick-add 内联风格（推荐）
+horae capture "买牛奶" --tag home --medium       # flag 风格
+horae capture "提交报告 @work ~明天 14:00 !high"  # quick-add 内联风格（推荐）
 horae capture "周报" --status scheduled --due +1d
 horae capture "句子" --tag quote --status reference   # 直接收藏金句
 ```
 
 - 标题可不加引号（多个词自动拼接）。
 - `--tag` 可重复；自定义标签首次使用自动创建。
-- `--p1/--p2/--p3` 互斥（对应优先级标签 p1/p2/p3）。
-- 标题里的内联 token 同样生效：`@tag` `~time` `*rrule` `!a|b|c` → 见 [syntax.md](syntax.md)。
+- `--high/--medium/--low` 互斥（对应独立 priority 字段）；`--clear-priority` 清除。
+- 标题里的内联 token 同样生效：`@tag` `~time` `*rrule` `!high|!medium|!low` → 见 [syntax.md](syntax.md)。
 - `--json` 输出新建任务的 JSON。
 
 实测行为：`~今天` 会把任务直接置为 `scheduled`（设排程起点）；只有 RRULE 没有时间时
@@ -95,7 +95,7 @@ horae tags                # 标签库：context 组 / priority 组，(sys) 为�
 ```
 
 系统预设情境标签：`home work learning errands calls computer quick focus quote`；
-优先级：`p1 p2 p3`。
+优先级为独立字段（`high`/`medium`/`low`，经由 `!high`/`!medium`/`!low` 或 `--high`/`--medium`/`--low` 设置）。
 
 ## 执行与专注
 
@@ -107,7 +107,7 @@ horae do --start      # 同时启动番茄钟
 ```
 
 推荐算法（详见仓库 docs/focus-algorithm.md）：过滤掉 Someday/Reference/Done 及未到点的
-Scheduled/Waiting 后打分——`@p1` +10000（统治级）、`@p2` +5000、`@p3` +1000；
+Scheduled/Waiting 后打分——优先级 `high` +10000（统治级）、`medium` +5000、`low` +1000；
 逾期 +2000 且每多逾期一天 +10（封顶 +500）、今天到期 +1000；Next 状态 +500；
 同分比创建时间，越早越优先。
 

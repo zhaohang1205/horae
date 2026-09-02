@@ -74,9 +74,13 @@ pub(crate) const RRULE_CANDIDATES: &[&str] = &[
     "weekday",
     "weekend",
     "2w[1,3]",
-    "m[1,15]",
+    "m[1,2,-2,-1]",
     "1w[mo,we]",
+    "y[jan,jul]",
 ];
+
+/// `!` 优先级补全候选（输入即弹，按前缀过滤）。
+pub(crate) const PRIORITY_CANDIDATES: &[&str] = &["high", "medium", "low"];
 
 pub(crate) struct KeyDef {
     pub keys: &'static str,

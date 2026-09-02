@@ -12,7 +12,7 @@
 
 - 完整 GTD 流程：收件箱 → 下一步/已排程/等待中/将来也许/参考资料 → 已完成，含周回顾向导与今日/明日视图
 - 循环任务：RRULE 支持 + 快捷简写（`*2w[1,3]`），完成后自动重排
-- 标签系统：情境标签 + `p1/p2/p3` 优先级，自定义标签自动创建
+- 标签系统：情境标签 + `high/medium/low` 优先级（独立字段，`!high`/`!medium`/`!low` 简写），自定义标签自动创建
 - 检查单：逐项勾选/删除/排序/改名，列表行显示 n/total 进度徽标
 - 金句（可选功能）：随心记录好句子/灵感/知识，一键入库，独立视图管理
 - 番茄钟专注模式：全屏倒计时环、连击、桌面通知、waybar 模块
@@ -59,10 +59,10 @@ horae show <task-id>                 # 查看完整时间线
 | 命令 / Command | 说明 |
 | --- | --- |
 | `horae` | 启动 TUI |
-| `horae capture [title] [--clip] [--notes N] [--tag T]... [--due TIME] [--status S] [--p1\|--p2\|--p3] [--json]` | 捕获新任务（别名 `c`，支持 `--clip` 瞬时入库） |
+| `horae capture [title] [--clip] [--notes N] [--tag T]... [--due TIME] [--status S] [--high\|--medium\|--low] [--json]` | 捕获新任务（别名 `c`，支持 `--clip` 瞬时入库） |
 | `horae list [--status S] [--tag T]... [--date MMDD] [--due-before TIME] [--json]` | 列出任务（别名 `l`）；日期搜索统一用四位数字，如 `0829` |
 | `horae show <id> [--json]` | 任务详情 + 时间线（别名 `s`） |
-| `horae modify <id> [text] [--title T] [--due TIME] [--notes N] [--edit-notes] [--tag T]... [--untag T]... [--p1\|--p2\|--p3] [--status S] [--json]` | 修改任务（别名 `m` / `mod` / `edit`，支持一句话 quick-add 语法） |
+| `horae modify <id> [text] [--title T] [--due TIME] [--notes N] [--edit-notes] [--tag T]... [--untag T]... [--high\|--medium\|--low\|--clear-priority] [--status S] [--json]` | 修改任务（别名 `m` / `mod` / `edit`，支持一句话 quick-add 语法） |
 | `horae next\|wait\|someday\|done\|restore\|purge <id>` | 状态流转 / 恢复 / 永久删除（别名 `d` 对应 `done`） |
 | `horae schedule <id> [--start TIME] [--end TIME] [--rrule R]` | 排期（可加循环） |
 | `horae archive <id>` / `horae restore <id>` / `horae purge <id>` | 软删除 / 恢复 / 永久删除归档（`archive` 别名 `rm` / `delete`） |
@@ -157,7 +157,7 @@ HH:MM                             当日时刻（已过则视为明日）
 
 一句话里的 `~time` 设**排程起点**（`scheduled_start_at`，状态进入已排程，只设起点不设终点）；`--due` 设软截止（`due_at`）。
 
-循环 RRULE（一句话里 `*` 简写）：`FREQ=DAILY|WEEKLY|MONTHLY`、`INTERVAL=2`、`BYDAY=SA,SU`、`BYMONTHDAY=1,-1`（-1=月末最后一天）、`COUNT=10` / `UNTIL=YYYY-MM-DD`。快速简写：`*d`/`*w`/`*m`（每天/周/月）、`*2w[1,3]`（每两周周一、周三，1-7=周一至周日，0=周日）、`*m[1,-1]`（每月 1 号和最后一天，负数=月末倒数）、`*m[1,15]`（每月 1 号、15 号），优先级 `!a`/`!b`/`!c`。注意：`FREQ=YEARLY`（`*y`）不受展开引擎支持，TUI 与 CLI 均会拒绝；年循环请用月循环替代。
+循环 RRULE（一句话里 `*` 简写）：`FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`、`INTERVAL=2`、`BYDAY=SA,SU`、`BYMONTHDAY=1,-1`（-1=月末最后一天）、`BYMONTH=1,7`（按月份数字或名称，如 `jan,jul`）、`COUNT=10` / `UNTIL=YYYY-MM-DD`。快速简写：`*d`/`*w`/`*m`（每天/周/月）、`*2w[1,3]`（每两周周一、周三，1-7=周一至周日，0=周日）、`*m[1,-1]`（每月 1 号和最后一天，负数=月末倒数）、`*m[1,15]`（每月 1 号、15 号）、`*y`（每年）、`*2y[6]`（每两年 6 月）、`*y[jan,jul]`（每年 1 月与 7 月）。优先级 `!high`/`!medium`/`!low`（大小写均可）。
 
 ## 备份
 

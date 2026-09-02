@@ -124,6 +124,20 @@ impl<'a> App<'a> {
             ]));
         }
 
+        // 优先级（独立字段，不再作为标签）
+        if let Some(ref p) = d.task.priority {
+            if let Some((zh, en)) = ui::priority_label(p) {
+                let c = ui::priority_color(p).unwrap_or(self.theme.hl_fg);
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        tr!(self.lang, "优先级: ", "Priority: "),
+                        Style::default().fg(self.theme.text_dim),
+                    ),
+                    Span::styled(format!("!{}", self.lang.tr(zh, en)), Style::default().fg(c)),
+                ]));
+            }
+        }
+
         // 标签
         if !d.tags.is_empty() {
             let mut tag_spans = vec![Span::styled(

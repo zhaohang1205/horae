@@ -36,11 +36,7 @@ pub fn get_tag_by_name(conn: &Connection, name: &str) -> Result<Option<Tag>> {
 
 /// Return the tag id for `name`, creating a custom tag if it doesn't exist.
 pub fn find_or_create_tag(conn: &Connection, name: &str) -> Result<i64> {
-    let category = if name == "p1" || name == "p2" || name == "p3" {
-        "priority"
-    } else {
-        "custom"
-    };
+    let category = "custom";
     let now = time::now_ms();
     conn.execute(
         "INSERT OR IGNORE INTO tags (name, category, is_system, created_at) VALUES (?1, ?2, 0, ?3)",
@@ -256,13 +252,8 @@ mod tests {
     }
 
     #[test]
-    fn find_or_create_classifies_priority_and_is_idempotent() {
+    fn find_or_create_classifies_custom_and_is_idempotent() {
         let (_dir, conn) = test_conn();
-        let id1 = find_or_create_tag(&conn, "p1").unwrap();
-        let p1 = get_tag_by_name(&conn, "p1").unwrap().unwrap();
-        assert_eq!(id1, p1.id);
-        assert_eq!(p1.category, "priority");
-
         let urgent = get_tag_by_name(&conn, "urgent").unwrap();
         assert!(urgent.is_none(), "前置：urgent 尚不存在");
         let _ = find_or_create_tag(&conn, "urgent").unwrap();

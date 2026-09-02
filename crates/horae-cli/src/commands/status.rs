@@ -166,12 +166,11 @@ mod tests {
     }
 
     #[test]
-    fn schedule_rejects_yearly_rrule_without_touching_task() {
+    fn schedule_accepts_yearly_rrule() {
         let (_dir, conn) = test_conn();
         let t = mk_task(&conn, "年度体检");
 
-        // FREQ=YEARLY 引擎无法展开，必须报错而非静默存入
-        let err = crate::commands::run(
+        crate::commands::run(
             Command::Schedule {
                 id: t.id.clone(),
                 start: Some("+1d".into()),
@@ -181,16 +180,12 @@ mod tests {
             &conn,
             None,
         )
-        .unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("FREQ=YEARLY"), "{msg}");
-        assert!(msg.contains("FREQ=DAILY|WEEKLY|MONTHLY"), "{msg}");
+        .unwrap();
 
-        // 任务保持原样：未排程、无 rrule
         let task = tasks::get(&conn, &t.id).unwrap();
-        assert_eq!(task.status, Status::Inbox);
-        assert_eq!(task.rrule, None);
-        assert!(task.scheduled_start_at.is_none());
+        assert_eq!(task.status, Status::Scheduled);
+        assert_eq!(task.rrule.as_deref(), Some("FREQ=YEARLY"));
+        assert!(task.scheduled_start_at.is_some());
     }
 
     #[test]

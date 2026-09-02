@@ -166,6 +166,7 @@ pub(crate) struct Row {
     pub(crate) status: String,
     pub(crate) due: Option<i64>,
     pub(crate) tags: Vec<String>,
+    pub(crate) priority: Option<String>,
     pub(crate) indent: usize,
     /// 完成进度（用于项目/带检查单的任务）：已完成数，None 表示无进度概念。
     pub(crate) done: Option<usize>,

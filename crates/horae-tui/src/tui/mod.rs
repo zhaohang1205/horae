@@ -96,6 +96,7 @@ pub(crate) fn row_from_tags_with_due(
         status: t.status.to_string(),
         due,
         tags,
+        priority: t.priority.clone(),
         indent,
         done,
         total,

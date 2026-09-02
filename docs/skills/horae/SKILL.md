@@ -17,8 +17,8 @@ horae 是一个 Rust 单二进制的 GTD 任务管理器：SQLite 数据层 + CL
   歧义标题报错 `ambiguous title`，查不到报 `task not found`。前缀只对 id 生效，
   标题必须一字不差。
 - **循环任务**：带 RRULE 的任务按 `done` 后自动重排到下一次发生，而不是完成。
-  引擎只支持 `FREQ=DAILY|WEEKLY|MONTHLY`——`*y`/YEARLY 会被 TUI 与 CLI 一致拒绝
-  （写库前报错，不会静默退化；见 syntax.md）。
+  引擎支持 `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`——`*y`/`*Ny`/`*y[jan,jul]`（BYMONTH）
+  可正常解析展开；非法频率会在写库前被 TUI 与 CLI 一致拒绝（不会静默退化；见 syntax.md）。
 - **排序看有效截止期**：循环任务的列表排序取"下一次发生"，不是原始 due 列。
 - **Profile = 数据集**：工作/生活可分库存放（各自独立 SQLite），`--profile <name>`
   全局切换；不指定则用默认库。
@@ -50,7 +50,7 @@ horae 是一个 Rust 单二进制的 GTD 任务管理器：SQLite 数据层 + CL
 horae 命令并汇报结果。配方：
 
 ```sh
-horae capture "买牛奶 @home ~今天 !b"      # 捕获（quick-add 一句话搞定标签/时间/优先级）
+horae capture "买牛奶 @home ~今天 !medium"      # 捕获（quick-add 一句话搞定标签/时间/优先级）
 horae do                                  # 不知道该干嘛时：算法推荐当前最该做的一件事
 horae list --status inbox                 # 看收件箱堆积
 horae list --json                         # 供程序读取的结构化输出
@@ -133,8 +133,8 @@ CLI 帮助默认英文；`--lang zh`（或环境变量 `HORAE_LANG=zh`）可切�
 - **每周回顾**：周日跑 `horae review`（或 TUI 里 `r` 进向导），核对各状态桶数量。
 - **工作生活分离**：`horae profile new work` 建工作库，别名 `hw='horae --profile work'`，
   下班切回默认库，互不打扰。
-- **情境标签**：预设 `@home @work @errands @calls @computer @learning @quick @focus` +
-  `!a/b/c` 优先级；自定义标签首次使用自动创建。
+- **情境标签**：预设 `@home @work @errands @calls @computer @learning @quick @focus`；
+  优先级为独立字段 `!high/!medium/!low`（或 `--high/--medium/--low/--clear-priority`）；自定义标签首次使用自动创建。
 - **灵感不占行动流**：好句子记金句库（TUI F7 开启后 `0` 视图，或
   `horae capture "句子" --tag quote --status reference`），与待办隔离。
 - **备份习惯**：cron 里加 `horae export`，一个 JSON 文件即可 git / 网盘托管。

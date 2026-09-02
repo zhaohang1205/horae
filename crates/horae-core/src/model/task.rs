@@ -59,6 +59,7 @@ pub struct Task {
     pub notes: String,
     pub status: Status,
     pub rrule: Option<String>,
+    pub priority: Option<String>, // high|medium|low|NULL
     pub created_at: i64,
     pub clarified_at: Option<i64>,
     pub due_at: Option<i64>,

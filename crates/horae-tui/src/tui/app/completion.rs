@@ -138,15 +138,17 @@ impl<'a> App<'a> {
             .or_else(|| last_word.strip_prefix('×'))
         {
             ('*', t)
+        } else if let Some(t) = last_word
+            .strip_prefix('!')
+            .or_else(|| last_word.strip_prefix('！'))
+        {
+            ('!', t)
         } else if matches!(self.mode, Mode::Tagging | Mode::FilteringTag) {
             // Tagging/FilteringTag 直接输入裸标签名 → 按标签补全。
             ('@', last_word)
         } else {
             return;
         };
-        if token.is_empty() {
-            return;
-        }
         let candidates = match prefix {
             '@' => self.tag_candidates(token),
             '~' => crate::tui::keys::TIME_CANDIDATES
@@ -155,6 +157,11 @@ impl<'a> App<'a> {
                 .map(|s| s.to_string())
                 .collect::<Vec<_>>(),
             '*' => crate::tui::keys::RRULE_CANDIDATES
+                .iter()
+                .filter(|c| c.starts_with(token))
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>(),
+            '!' => crate::tui::keys::PRIORITY_CANDIDATES
                 .iter()
                 .filter(|c| c.starts_with(token))
                 .map(|s| s.to_string())
@@ -174,7 +181,7 @@ impl<'a> App<'a> {
         let (start, end) = self.completion_range?;
         let sub = &self.input[start..end];
         let body_start = if let Some((len, c)) = horae_core::parser::first_char_info(sub) {
-            if matches!(c, '@' | '＠' | '~' | '～' | '〜' | '*' | '＊' | '×') {
+            if matches!(c, '@' | '＠' | '~' | '～' | '〜' | '*' | '＊' | '×' | '!' | '！') {
                 start + len
             } else {
                 start
@@ -212,7 +219,7 @@ impl<'a> App<'a> {
         // 词首是否已含前缀字符（中英文均归一替换为半角前缀）：Tagging 裸标签词首是首字母，不插入前缀。
         let sub = &self.input[start..];
         let has_prefix = horae_core::parser::first_char_info(sub)
-            .is_some_and(|(_, c)| matches!(c, '@' | '＠' | '~' | '～' | '〜' | '*' | '＊' | '×'));
+            .is_some_and(|(_, c)| matches!(c, '@' | '＠' | '~' | '～' | '〜' | '*' | '＊' | '×' | '!' | '！'));
         let tail = self.input[self.input_cursor..].to_string();
         self.input.truncate(start);
         if has_prefix {

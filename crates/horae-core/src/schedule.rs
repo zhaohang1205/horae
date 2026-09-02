@@ -8,8 +8,8 @@ use crate::model::task::{self, Task};
 const HORIZON: usize = 366;
 
 /// 展开一个循环规则从锚点开始的全部发生点（inclusive anchor）。
-/// 支持 FREQ=DAILY|WEEKLY|MONTHLY 加 INTERVAL、COUNT、UNTIL、BYDAY、BYMONTHDAY。
-/// 视野上限为 [`HORIZON`]；COUNT/UNTIL 在其中收紧。
+/// 支持 FREQ=DAILY|WEEKLY|MONTHLY|YEARLY 加 INTERVAL、COUNT、UNTIL、BYDAY、
+/// BYMONTHDAY、BYMONTH。视野上限为 [`HORIZON`]；COUNT/UNTIL 在其中收紧。
 pub fn occurrences(rrule: &str, anchor_ms: i64) -> Result<Vec<i64>> {
     rrule_occurrences(rrule, anchor_ms, HORIZON)
 }
@@ -74,7 +74,8 @@ pub fn display_due(task: &Task, cached: Option<&[i64]>) -> Option<i64> {
 }
 
 /// Minimal, self-contained RRULE expansion (no external crate).
-/// Supports FREQ=DAILY|WEEKLY|MONTHLY with INTERVAL, COUNT, UNTIL.
+/// Supports FREQ=DAILY|WEEKLY|MONTHLY|YEARLY with INTERVAL, COUNT, UNTIL, and the
+/// BYDAY / BYMONTHDAY / BYMONTH qualifiers the shorthands emit.
 /// `anchor_ms` is the task's scheduled_start_at (UTC ms). Occurrences start at
 /// the anchor (inclusive) and stop at COUNT / `limit` / UNTIL.
 fn rrule_occurrences(rrule: &str, anchor_ms: i64, limit: usize) -> Result<Vec<i64>> {
@@ -89,6 +90,7 @@ fn rrule_occurrences(rrule: &str, anchor_ms: i64, limit: usize) -> Result<Vec<i6
     let mut until_ms: Option<i64> = None;
     let mut byday: Vec<chrono::Weekday> = Vec::new();
     let mut bymonthday: Vec<i32> = Vec::new();
+    let mut bymonth: Vec<i32> = Vec::new();
 
     for part in rrule.split(';') {
         if part.is_empty() {
@@ -119,6 +121,15 @@ fn rrule_occurrences(rrule: &str, anchor_ms: i64, limit: usize) -> Result<Vec<i6
                     if let Ok(n) = d.trim().parse::<i32>() {
                         if n != 0 && n.abs() <= 31 && !bymonthday.contains(&n) {
                             bymonthday.push(n);
+                        }
+                    }
+                }
+            }
+            "BYMONTH" => {
+                for m in v.split(',') {
+                    if let Ok(n) = m.trim().parse::<i32>() {
+                        if (1..=12).contains(&n) && !bymonth.contains(&n) {
+                            bymonth.push(n);
                         }
                     }
                 }
@@ -178,6 +189,36 @@ fn rrule_occurrences(rrule: &str, anchor_ms: i64, limit: usize) -> Result<Vec<i6
                 current_day = add_months(current_day, interval - 1);
             }
         }
+    } else if freq == "YEARLY" && !bymonth.is_empty() {
+        let mut occurrences_found = 0;
+        let anchor_local = cur.with_timezone(&Local);
+        let anchor_day = anchor_local.day() as i32;
+        let anchor_time = anchor_local.time();
+        let mut year = anchor_local.year();
+
+        while occurrences_found < max_iter {
+            for m in bymonth.iter().copied() {
+                let last_day = days_in_month(year, m as u32) as i32;
+                let day = anchor_day.min(last_day);
+                if let Some(nd) = NaiveDate::from_ymd_opt(year, m as u32, day as u32) {
+                    let local_dt = nd.and_time(anchor_time);
+                    let ms = crate::time::local_to_utc_ms(local_dt)?;
+                    if ms >= anchor_ms {
+                        if let Some(u) = until_ms {
+                            if ms > u {
+                                return Ok(out);
+                            }
+                        }
+                        out.push(ms);
+                        occurrences_found += 1;
+                        if occurrences_found >= max_iter {
+                            break;
+                        }
+                    }
+                }
+            }
+            year += interval as i32;
+        }
     } else {
         for _ in 0..max_iter {
             let ms = cur.timestamp_millis();
@@ -198,6 +239,7 @@ fn step(dt: DateTime<Utc>, freq: &str, interval: i64) -> Result<DateTime<Utc>> {
         "DAILY" => Ok(dt + Duration::days(interval)),
         "WEEKLY" => Ok(dt + Duration::weeks(interval)),
         "MONTHLY" => Ok(add_months(dt, interval)),
+        "YEARLY" => Ok(add_months(dt, 12 * interval)),
         _ => Err(anyhow!("unsupported FREQ in RRULE: {}", freq)),
     }
 }
@@ -265,6 +307,7 @@ mod tests {
             notes: String::new(),
             status: task::Status::Scheduled,
             rrule: rrule.map(String::from),
+            priority: None,
             created_at: 0,
             clarified_at: None,
             due_at: due,
@@ -366,6 +409,54 @@ mod tests {
                 "occurrence {}",
                 i
             );
+        }
+    }
+
+    #[test]
+    fn rrule_yearly() {
+        let anchor = local_ms(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(), midnight());
+        let occs = rrule_occurrences("FREQ=YEARLY", anchor, 3).unwrap();
+        let expect = ["2026-01-01 00:00", "2027-01-01 00:00", "2028-01-01 00:00"];
+        for (i, e) in expect.iter().enumerate() {
+            assert_eq!(crate::time::format_local(Some(occs[i])), *e, "{}", i);
+        }
+    }
+
+    #[test]
+    fn rrule_yearly_interval() {
+        let anchor = local_ms(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(), midnight());
+        let occs = rrule_occurrences("FREQ=YEARLY;INTERVAL=2", anchor, 3).unwrap();
+        let expect = ["2026-01-01 00:00", "2028-01-01 00:00", "2030-01-01 00:00"];
+        for (i, e) in expect.iter().enumerate() {
+            assert_eq!(crate::time::format_local(Some(occs[i])), *e, "{}", i);
+        }
+    }
+
+    #[test]
+    fn rrule_yearly_bymonth() {
+        let anchor = local_ms(NaiveDate::from_ymd_opt(2026, 1, 15).unwrap(), midnight());
+        let occs = rrule_occurrences("FREQ=YEARLY;BYMONTH=6,12", anchor, 5).unwrap();
+        let expect = [
+            "2026-06-15 00:00",
+            "2026-12-15 00:00",
+            "2027-06-15 00:00",
+            "2027-12-15 00:00",
+            "2028-06-15 00:00",
+        ];
+        assert_eq!(occs.len(), expect.len());
+        for (i, e) in expect.iter().enumerate() {
+            assert_eq!(crate::time::format_local(Some(occs[i])), *e, "{}", i);
+        }
+    }
+
+    #[test]
+    fn rrule_yearly_bymonth_clamps_day() {
+        // 锚点 2/28，BYMONTH=2,6：2 月按 28 天，6 月按锚点日 28（<=30）保留。
+        let anchor = local_ms(NaiveDate::from_ymd_opt(2026, 2, 28).unwrap(), midnight());
+        let occs = rrule_occurrences("FREQ=YEARLY;BYMONTH=2,6", anchor, 2).unwrap();
+        let expect = ["2026-02-28 00:00", "2026-06-28 00:00"];
+        for (i, e) in expect.iter().enumerate() {
+            assert_eq!(crate::time::format_local(Some(occs[i])), *e, "{}", i);
         }
     }
 

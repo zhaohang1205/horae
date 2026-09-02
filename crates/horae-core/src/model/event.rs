@@ -23,6 +23,7 @@ pub const EV_ARCHIVED: &str = "archived";
 pub const EV_RESTORED: &str = "restored"; // archived task brought back (soft-delete undone)
 pub const EV_TAG_ADDED: &str = "tag_added";
 pub const EV_TAG_REMOVED: &str = "tag_removed";
+pub const EV_PRIORITY: &str = "priority"; // priority changed (high|medium|low|NULL)
 
 // Events not tied to a status transition:
 pub const EV_HABIT_COMPLETED: &str = "habit_completed"; // a recurring task's occurrence done; rescheduled

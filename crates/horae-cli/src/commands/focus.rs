@@ -57,12 +57,11 @@ pub fn run(conn: &Connection, start: bool) -> Result<()> {
 
         let mut score = 0_i64;
 
-        if tag_names.contains(&"p1") {
-            score += 10000;
-        } else if tag_names.contains(&"p2") {
-            score += 5000;
-        } else if tag_names.contains(&"p3") {
-            score += 1000;
+        match task.priority.as_deref() {
+            Some("high") => score += 10000,
+            Some("medium") => score += 5000,
+            Some("low") => score += 1000,
+            _ => {}
         }
 
         if task.status == Status::Next {
@@ -133,10 +132,10 @@ mod tests {
             CaptureArgs {
                 title: "low priority".into(),
                 clip: false,
-                tags: vec!["p3".into()],
-                p1: false,
-                p2: false,
-                p3: true,
+                tags: vec![],
+                high: false,
+                medium: false,
+                low: true,
                 due: None,
                 status: None,
                 notes: None,
@@ -150,10 +149,10 @@ mod tests {
             CaptureArgs {
                 title: "high priority".into(),
                 clip: false,
-                tags: vec!["p1".into()],
-                p1: true,
-                p2: false,
-                p3: false,
+                tags: vec![],
+                high: true,
+                medium: false,
+                low: false,
                 due: None,
                 status: Some("next".into()),
                 notes: None,

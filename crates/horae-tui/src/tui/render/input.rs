@@ -1,7 +1,7 @@
 use super::AppRender;
 use crate::tui::app::{App, Mode, Pane, View};
 use horae_core::parser::{
-    parse_quick_add, parse_rrule_shorthand, priority_letter, tokenize_quick_add, QuickAddKind,
+    parse_quick_add, parse_rrule_shorthand, priority_value, tokenize_quick_add, QuickAddKind,
 };
 use horae_core::time;
 use ratatui::symbols::border;
@@ -30,10 +30,10 @@ impl<'a> App<'a> {
                 QuickAddKind::Time => Style::default().fg(self.theme.text_success),
                 QuickAddKind::Rrule => Style::default().fg(self.theme.rrule_fg),
                 QuickAddKind::Priority => {
-                    let letter = horae_core::parser::strip_token_prefix(&tok.text);
-                    let tag = horae_core::parser::priority_tag(letter).unwrap_or("");
+                    let val = horae_core::parser::strip_token_prefix(&tok.text);
+                    let p = priority_value(val).unwrap_or("");
                     Style::default()
-                        .fg(crate::tui::ui::priority_color(tag).unwrap_or(self.theme.hl_fg))
+                        .fg(crate::tui::ui::priority_color(p).unwrap_or(self.theme.hl_fg))
                         .add_modifier(Modifier::BOLD)
                 }
                 QuickAddKind::Title => Style::default(),
@@ -240,6 +240,9 @@ impl<'a> App<'a> {
                     .map(|ms| time::format_local(Some(ms)))
                     .unwrap_or_default(),
                 '*' => horae_core::parser::parse_rrule_shorthand(c),
+                '!' => crate::tui::ui::priority_label(c)
+                    .map(|(zh, en)| self.lang.tr(zh, en).to_string())
+                    .unwrap_or_default(),
                 _ => String::new(),
             };
             let is_sel = i == idx;
@@ -387,7 +390,7 @@ impl<'a> App<'a> {
             ]));
         }
         if let Some(p) = &parsed.priority {
-            let letter = priority_letter(p).unwrap_or('?');
+            let (zh, en) = crate::tui::ui::priority_label(p).unwrap_or(("", ""));
             let color = crate::tui::ui::priority_color(p).unwrap_or(self.theme.hl_fg);
             text_lines.push(Line::from(vec![
                 Span::styled(
@@ -395,11 +398,11 @@ impl<'a> App<'a> {
                     Style::default().fg(self.theme.text_dim),
                 ),
                 Span::styled(
-                    format!("!{}", letter),
+                    format!("!{}", self.lang.tr(zh, en)),
                     Style::default().fg(self.theme.text_success),
                 ),
                 Span::raw(" → "),
-                Span::styled(format!("@{}", p), Style::default().fg(color)),
+                Span::styled(format!("!{}", self.lang.tr(zh, en)), Style::default().fg(color)),
             ]));
         }
         text_lines
@@ -410,8 +413,8 @@ impl<'a> App<'a> {
         Line::from(Span::styled(
             tr!(
                 self.lang,
-                " [语法] @标签 (如 @work)  |  ~时间 (如 ~tomorrow, ~+3d, ~18:00)  |  *循环 (如 *2w[1,3], *m[1,15])  |  !优先级 (如 !a)  |  日期搜索: MMDD (如 0829)",
-                " [syntax] @tag (@work)  |  ~time (~tomorrow, ~+3d, ~18:00)  |  *rrule (*2w[1,3], *m[1,15])  |  !priority (!a)  |  date search: MMDD (e.g. 0829)"
+                " [语法] @标签 (如 @work)  |  ~时间 (如 ~tomorrow, ~+3d, ~18:00)  |  *循环 (如 *2w[1,3], *m[1,2,-2,-1], *y[jan,jul])  |  !优先级 (如 !high)  |  日期搜索: MMDD (如 0829)",
+                " [syntax] @tag (@work)  |  ~time (~tomorrow, ~+3d, ~18:00)  |  *rrule (*2w[1,3], *m[1,2,-2,-1], *y[jan,jul])  |  !priority (!high)  |  date search: MMDD (e.g. 0829)"
             ),
             Style::default().fg(self.theme.text_dim),
         ))
