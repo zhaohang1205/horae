@@ -13,7 +13,7 @@
 
 ## 高频单字母别名
 
-`c`=capture, `l`=list, `s`=show, `d`=done, `p`=pomo, `do`=focus
+`c`=capture, `l`=list, `s`=show, `m`=modify/edit, `d`=done, `p`=pomo, `do`=focus
 
 ## 任务生命周期
 
@@ -22,6 +22,7 @@
 ```sh
 horae capture "买牛奶" --tag home --medium       # flag 风格
 horae capture "提交报告 @work ~明天 14:00 !high"  # quick-add 内联风格（推荐）
+horae capture --clip                             # 从系统剪贴板瞬时捕获
 horae capture "周报" --status scheduled --due +1d
 horae capture "句子" --tag quote --status reference   # 直接收藏金句
 ```
@@ -30,6 +31,7 @@ horae capture "句子" --tag quote --status reference   # 直接收藏金句
 - `--tag` 可重复；自定义标签首次使用自动创建。
 - `--high/--medium/--low` 互斥（对应独立 priority 字段）；`--clear-priority` 清除。
 - 标题里的内联 token 同样生效：`@tag` `~time` `*rrule` `!high|!medium|!low` → 见 [syntax.md](syntax.md)。
+- `--clip` 从系统剪贴板直接读取内容创建任务（短文本为标题，长文本前 30 字为标题 + 完整内容存入备注）。
 - `--json` 输出新建任务的 JSON。
 
 实测行为：`~今天` 会把任务直接置为 `scheduled`（设排程起点）；只有 RRULE 没有时间时
@@ -61,6 +63,19 @@ horae show <id> --json
 ```
 
 时间线按本地时间展示事件类型（captured/clarified/completed/tag_added/scheduled…）。
+
+### modify（别名 m / mod / edit）
+
+```sh
+horae modify 501acf51 "新标题 @work ~明天 10:00 !high" # 支持一句话 quick-add 语法修改
+horae modify <id> --title "重构代码" --due +3d       # 精细 flag 修改
+horae modify <id> --notes "详细方案..."               # 更新备注
+horae modify <id> --edit-notes                       # 调起系统 $EDITOR 交互式编辑长备注
+horae modify <id> --tag urgent --untag temp          # 增删标签
+horae modify <id> --clear-due --clear-priority       # 清理字段（或传 none）
+```
+
+支持全面修改已有任务的标题、标签、优先级、截止时间、排程、循环规则、状态和备注。
 
 ### 状态流转
 
