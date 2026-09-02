@@ -416,7 +416,7 @@ fn parse_day_codes(body: &str) -> Option<Vec<&'static str>> {
 }
 
 /// Parse a comma-separated month list (numbers 1-12 or names) into RRULE
-/// BYMONTH numbers, deduplicated in first-appearance order. Invalid entries → None.
+/// BYMONTH numbers, deduplicated and sorted in ascending order. Invalid entries → None.
 fn parse_month_codes(body: &str) -> Option<Vec<i32>> {
     if body.trim().is_empty() {
         return None;
@@ -428,6 +428,7 @@ fn parse_month_codes(body: &str) -> Option<Vec<i32>> {
             out.push(n);
         }
     }
+    out.sort_unstable();
     Some(out)
 }
 
@@ -659,5 +660,21 @@ mod tests {
         assert_eq!(q4.title, "交房租");
         assert_eq!(q4.rrule.as_deref(), Some("FREQ=MONTHLY;BYMONTHDAY=1,15"));
         assert_eq!(q4.tags, vec!["home"]);
+    }
+
+    #[test]
+    fn rrule_yearly_bymonth_sorts_and_dedups() {
+        assert_eq!(
+            parse_rrule_shorthand("y[12,1]"),
+            "FREQ=YEARLY;BYMONTH=1,12"
+        );
+        assert_eq!(
+            parse_rrule_shorthand("y[dec,jul,jan,dec]"),
+            "FREQ=YEARLY;BYMONTH=1,7,12"
+        );
+        assert_eq!(
+            parse_rrule_shorthand("2y[10,2]"),
+            "FREQ=YEARLY;INTERVAL=2;BYMONTH=2,10"
+        );
     }
 }

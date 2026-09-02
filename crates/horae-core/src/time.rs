@@ -255,8 +255,18 @@ pub fn parse_time(s: &str) -> Result<i64> {
         return local_to_utc_ms(day.and_time(t));
     }
 
-    // 星期几：周X / 星期X / 下周X（X ∈ 一~日, 可带 HH:MM）
+    // 星期几（中文）：周X / 星期X / 下周X（X ∈ 一~日, 可带 HH:MM）
     if let Some((wd, time_part, next_week)) = parse_cn_weekday(s) {
+        let t = parse_optional_time(time_part, midnight)?;
+        let today = now.date_naive();
+        let delta = (wd.num_days_from_monday() + 7 - today.weekday().num_days_from_monday()) % 7;
+        let off = (delta as i64) + if next_week { 7 } else { 0 };
+        let day = today + Duration::days(off);
+        return local_to_utc_ms(day.and_time(t));
+    }
+
+    // 星期几（英文）：mon / monday / next friday（可带 HH:MM）
+    if let Some((wd, time_part, next_week)) = parse_en_weekday(s) {
         let t = parse_optional_time(time_part, midnight)?;
         let today = now.date_naive();
         let delta = (wd.num_days_from_monday() + 7 - today.weekday().num_days_from_monday()) % 7;
@@ -353,6 +363,41 @@ fn parse_cn_weekday(s: &str) -> Option<(chrono::Weekday, &str, bool)> {
         }
     }
     None
+}
+
+/// 解析英文星期词，返回 (星期几, 剩余时刻串, 是否下周)。
+/// 支持 mon / monday / tue / tuesday / ... / sun / sunday 及前缀 next。
+fn parse_en_weekday(s: &str) -> Option<(chrono::Weekday, &str, bool)> {
+    let lower = s.to_lowercase();
+    let (prefix_len, next_week) = if lower.starts_with("next ") {
+        (5, true)
+    } else if lower.starts_with("next") {
+        (4, true)
+    } else {
+        (0, false)
+    };
+    let rest = s[prefix_len..].trim_start();
+    let rest_lower = &lower[s.len() - rest.len()..];
+
+    let word_len = rest_lower
+        .find(|c: char| c.is_whitespace() || c.is_ascii_digit() || c == ':')
+        .unwrap_or(rest_lower.len());
+
+    let day_part = &rest_lower[..word_len];
+    let time_part = rest[word_len..].trim();
+
+    use chrono::Weekday;
+    let wd = match day_part {
+        "mon" | "monday" => Weekday::Mon,
+        "tue" | "tues" | "tuesday" => Weekday::Tue,
+        "wed" | "wednesday" => Weekday::Wed,
+        "thu" | "thur" | "thurs" | "thursday" => Weekday::Thu,
+        "fri" | "friday" => Weekday::Fri,
+        "sat" | "saturday" => Weekday::Sat,
+        "sun" | "sunday" => Weekday::Sun,
+        _ => return None,
+    };
+    Some((wd, time_part, next_week))
 }
 
 /// 把 "日期 [HH:MM]" 拆成 (日期部分, 时刻部分)，时刻部分可能为空串。
@@ -473,6 +518,29 @@ mod tests {
         );
         assert!(parse_time("周日 10:00").is_ok());
         assert!(parse_time("星期天 10:00").is_ok());
+    }
+
+    #[test]
+    fn parse_english_weekday() {
+        let today = Local::now().date_naive();
+        let wd = today.weekday();
+        let fri = chrono::Weekday::Fri;
+        let delta = (fri.num_days_from_monday() + 7 - wd.num_days_from_monday()) % 7;
+        let target = today + Duration::days(delta as i64 + 7);
+        assert_eq!(
+            parse_time("next friday 15:00").unwrap(),
+            local_ms(target, NaiveTime::from_hms_opt(15, 0, 0).unwrap())
+        );
+        let wed = chrono::Weekday::Wed;
+        let delta = (wed.num_days_from_monday() + 7 - wd.num_days_from_monday()) % 7;
+        let target = today + Duration::days(delta as i64);
+        assert_eq!(parse_time("wed").unwrap(), local_ms(target, midnight()));
+        assert_eq!(
+            parse_time("wednesday 10:00").unwrap(),
+            local_ms(target, NaiveTime::from_hms_opt(10, 0, 0).unwrap())
+        );
+        assert!(parse_time("mon 09:30").is_ok());
+        assert!(parse_time("next sun 18:00").is_ok());
     }
 
     #[test]

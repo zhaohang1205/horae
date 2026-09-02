@@ -941,7 +941,7 @@ fn quotes_feature_toggle_and_shortcut() {
     // F7 启用 + 持久化
     app.handle_key(kc(KeyCode::F(7))).unwrap(); // open popup
     for _ in 0..5 {
-        app.handle_key(kc(KeyCode::Up)).unwrap(); // move from 0 to 5 (0->9->8->7->6->5)
+        app.handle_key(kc(KeyCode::Down)).unwrap(); // move from 0 to 5 (Quotes)
     }
     app.handle_key(key(' ')).unwrap(); // space toggles 5 (Quotes)
     app.handle_key(kc(KeyCode::Esc)).unwrap(); // close popup
@@ -1046,7 +1046,7 @@ fn quotes_feature_toggle_and_shortcut() {
     app.handle_key(key('0')).unwrap();
     app.handle_key(kc(KeyCode::F(7))).unwrap();
     for _ in 0..5 {
-        app.handle_key(kc(KeyCode::Up)).unwrap(); // move to index 5 (0->9->8->7->6->5)
+        app.handle_key(kc(KeyCode::Down)).unwrap(); // move to index 5 (Quotes)
     }
     app.handle_key(key(' ')).unwrap();
     app.handle_key(kc(KeyCode::Esc)).unwrap();
@@ -2314,12 +2314,12 @@ fn module_toggle_popup_navigates_and_persists() {
     let reloaded = horae_core::repo::modules::ModuleVisibility::load(app.conn);
     assert!(!reloaded.splash);
 
-    // j 向下循环导航（0 → 1），k 反向且在 0 处回绕到 9（最后一项：启动即快速录入）
+    // j 向下循环导航（0 → 1），k 反向且在 0 处回绕到 10（最后一项：补全风格）
     app.handle_key(key('j')).unwrap();
     assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(1)));
     app.popup = Some(crate::tui::app::Popup::ModuleToggles(0));
     app.handle_key(key('k')).unwrap();
-    assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(9)));
+    assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(10)));
 
     // Esc 关闭弹层
     app.handle_key(kc(KeyCode::Esc)).unwrap();
@@ -3002,4 +3002,128 @@ fn workflow_view_content_scrolling_and_bilingual() {
     app.set_view(View::Inbox);
     assert_eq!(app.workflow_scroll, 0);
     assert_eq!(app.workflow_side_scroll, 0);
+}
+
+#[test]
+fn completion_style_toggle_and_rendering() {
+    use crate::tui::app::completion::CompletionStyle;
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    seed(&conn);
+    let mut app = app_normal(&conn);
+
+    // 默认是 Reference (语法参考模式)
+    assert_eq!(app.completion_style, CompletionStyle::Reference);
+
+    // 渲染测试：Reference 模式下输入 * 弹出语法速查卡
+    app.handle_key(key('a')).unwrap();
+    app.handle_key(key('*')).unwrap();
+    assert!(app.completion_active());
+
+    let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let s = norm(&snap(&term));
+    assert!(s.contains("语法速查"), "Reference 模式标题包含语法速查: {}", s);
+    assert!(s.contains("范式:"), "Reference 模式包含范式提示: {}", s);
+
+    // 通过 F7 弹层切换到 Speed 模式
+    app.handle_key(kc(KeyCode::Esc)).unwrap(); // 取消补全
+    app.handle_key(kc(KeyCode::Esc)).unwrap(); // 退出 capture
+    app.handle_key(kc(KeyCode::F(7))).unwrap(); // 打开 F7
+    for _ in 0..10 {
+        app.handle_key(key('j')).unwrap(); // 导航到第 10 项 (补全风格)
+    }
+    app.handle_key(key(' ')).unwrap(); // 切换
+    app.handle_key(kc(KeyCode::Esc)).unwrap(); // 关闭 F7
+    assert_eq!(app.completion_style, CompletionStyle::Speed);
+    assert_eq!(
+        horae_core::repo::settings::get(&conn, "completion_style")
+            .unwrap()
+            .as_deref(),
+        Some("speed")
+    );
+
+    // 渲染测试：Speed 模式下输入 * 弹出极速补全
+    app.handle_key(key('a')).unwrap();
+    app.handle_key(key('*')).unwrap();
+    assert!(app.completion_active());
+
+    term.clear().unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let s2 = norm(&snap(&term));
+    assert!(s2.contains("极速补全"), "Speed 模式标题包含极速补全: {}", s2);
+}
+
+#[test]
+fn bilingual_completion_candidates_and_parsing() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    seed(&conn);
+    let mut app = app_normal(&conn);
+
+    // 1. 中文模式下：~ 包含常用英文词与中文星期，且去除了与 today/tomorrow 重复的今天/明天/后天候选
+    app.lang = horae_core::i18n::Lang::Zh;
+    app.mode = Mode::Capturing;
+    app.input_insert_char('~');
+    assert!(app.completion_active());
+    assert!(
+        app.completion_candidates.contains(&"today".to_string()),
+        "中文模式保留 'today'"
+    );
+    assert!(
+        app.completion_candidates.contains(&"tomorrow".to_string()),
+        "中文模式保留 'tomorrow'"
+    );
+    assert!(
+        app.completion_candidates.contains(&"周五".to_string()),
+        "中文模式包含 '周五'"
+    );
+    assert!(
+        !app.completion_candidates.contains(&"今天".to_string()),
+        "中文模式去除了与 today 重复的 '今天' 候选"
+    );
+    assert!(
+        !app.completion_candidates.contains(&"明天".to_string()),
+        "中文模式去除了与 tomorrow 重复的 '明天' 候选"
+    );
+    assert!(
+        !app.completion_candidates.contains(&"后天".to_string()),
+        "中文模式去除了 '后天' 候选"
+    );
+
+    // 2. 解析端仍完整支持 今天/明天/后天
+    assert!(horae_core::time::parse_time("今天 15:00").is_ok());
+    assert!(horae_core::time::parse_time("明天 10:00").is_ok());
+    assert!(horae_core::time::parse_time("后天 09:00").is_ok());
+
+    // 3. 英文模式下：~ 绝不包含汉字，只包含英文词汇 (mon, tue, fri, today 等)
+    app.input_clear();
+    app.lang = horae_core::i18n::Lang::En;
+    app.input_insert_char('~');
+    assert!(app.completion_active());
+    for cand in &app.completion_candidates {
+        assert!(
+            cand.is_ascii(),
+            "英文模式下的时间候选必须全部为纯 ASCII 英文词汇: {}",
+            cand
+        );
+    }
+    assert!(
+        app.completion_candidates.contains(&"mon".to_string()),
+        "英文模式应包含 'mon'"
+    );
+    assert!(
+        app.completion_candidates.contains(&"fri".to_string()),
+        "英文模式应包含 'fri'"
+    );
+    assert!(
+        app.completion_candidates.contains(&"tomorrow".to_string()),
+        "英文模式应包含 'tomorrow'"
+    );
+
+    // 4. 英文模式下输入 ~fri 10:00 可被正常解析
+    let ms = horae_core::time::parse_time("fri 10:00").unwrap();
+    assert!(ms > 0);
 }

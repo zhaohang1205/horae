@@ -224,27 +224,19 @@ impl<'a> App<'a> {
         f.set_cursor_position((cursor_x, cursor_y));
     }
 
-    /// 补全候选下拉层：紧贴输入框下方渲染，当前候选反色高亮。
-    /// 时间候选附解析结果、循环候选附展开 RRULE 作说明。
+    /// 补全候选下拉层：紧贴输入框下方渲染。
+    /// - 语法参考模式 (Reference)：提供丰富语义解释与语法范式 (Cheat-Sheet)。
+    /// - 极速补全模式 (Speed)：紧凑单列快速匹配。
     fn render_completion_dropdown(&mut self, f: &mut Frame, input_area: Rect) {
+        use crate::tui::app::completion::{completion_meta, CompletionStyle};
         let prefix = self.completion_prefix;
         let candidates = self.completion_candidates.clone();
         let idx = self.completion_index;
+        let is_reference = self.completion_style == CompletionStyle::Reference;
 
         let mut lines: Vec<Line> = Vec::new();
         for (i, c) in candidates.iter().enumerate() {
             let label = format!(" {}{} ", prefix, c);
-            let desc = match prefix {
-                '~' => time::parse_time(c)
-                    .ok()
-                    .map(|ms| time::format_local(Some(ms)))
-                    .unwrap_or_default(),
-                '*' => horae_core::parser::parse_rrule_shorthand(c),
-                '!' => crate::tui::ui::priority_label(c)
-                    .map(|(zh, en)| self.lang.tr(zh, en).to_string())
-                    .unwrap_or_default(),
-                _ => String::new(),
-            };
             let is_sel = i == idx;
             let key_style = if is_sel {
                 Style::default()
@@ -254,21 +246,72 @@ impl<'a> App<'a> {
             } else {
                 Style::default().fg(self.theme.fg)
             };
-            let mut spans = vec![Span::styled(
-                if is_sel {
-                    format!("❯{} ", label)
+
+            if is_reference {
+                let (desc, pattern) = completion_meta(prefix, c, self.lang);
+                let label_text = if is_sel {
+                    format!("❯{:<14}", label)
                 } else {
-                    format!("  {} ", label)
-                },
-                key_style,
-            )];
-            if !desc.is_empty() {
-                spans.push(Span::styled(desc, Style::default().fg(self.theme.text_dim)));
+                    format!(" {:<14}", label)
+                };
+                let mut spans = vec![
+                    Span::styled(label_text, key_style),
+                    Span::styled(
+                        format!(" {:<20} ", desc),
+                        if is_sel {
+                            Style::default()
+                                .fg(self.theme.hl_fg)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(self.theme.fg)
+                        },
+                    ),
+                ];
+                if !pattern.is_empty() {
+                    spans.push(Span::styled(
+                        format!(" {}", pattern),
+                        Style::default().fg(self.theme.text_dim),
+                    ));
+                }
+                lines.push(Line::from(spans));
+            } else {
+                let desc = match prefix {
+                    '~' => time::parse_time(c)
+                        .ok()
+                        .map(|ms| time::format_local(Some(ms)))
+                        .unwrap_or_default(),
+                    '*' => horae_core::parser::parse_rrule_shorthand(c),
+                    '!' => crate::tui::ui::priority_label(c)
+                        .map(|(zh, en)| self.lang.tr(zh, en).to_string())
+                        .unwrap_or_default(),
+                    _ => String::new(),
+                };
+                let mut spans = vec![Span::styled(
+                    if is_sel {
+                        format!("❯{} ", label)
+                    } else {
+                        format!("  {} ", label)
+                    },
+                    key_style,
+                )];
+                if !desc.is_empty() {
+                    spans.push(Span::styled(desc, Style::default().fg(self.theme.text_dim)));
+                }
+                lines.push(Line::from(spans));
             }
-            lines.push(Line::from(spans));
         }
 
-        let width = input_area.width.max(30);
+        let width = if is_reference {
+            input_area
+                .width
+                .max(64)
+                .min(f.area().width.saturating_sub(4))
+        } else {
+            input_area
+                .width
+                .max(32)
+                .min(f.area().width.saturating_sub(4))
+        };
         let height = lines.len() as u16 + 2;
         let x = input_area.x;
         let y = input_area.y + input_area.height;
@@ -282,16 +325,25 @@ impl<'a> App<'a> {
             return; // 底部空间不足则不渲染，避免越界
         }
         f.render_widget(ratatui::widgets::Clear, dd);
+        let block_title = if is_reference {
+            tr!(
+                self.lang,
+                " 语法速查 (↑↓ 浏览 · Tab 采纳 · Esc 关闭) ",
+                " Syntax Guide (↑↓ browse · Tab apply · Esc close) "
+            )
+        } else {
+            tr!(
+                self.lang,
+                " 极速补全 (↑↓ 切换 · Tab 补全 · Esc 取消) ",
+                " Quick Complete (↑↓ pick · Tab complete · Esc cancel) "
+            )
+        };
         let block = Block::default()
             .borders(Borders::ALL)
             .border_set(border::ROUNDED)
             .padding(ratatui::widgets::Padding::horizontal(1))
             .border_style(Style::default().fg(self.theme.accent))
-            .title(tr!(
-                self.lang,
-                " 补全 (↑↓/Tab 选择 · Enter 选中 · Esc 取消) ",
-                " Complete (↑↓/Tab pick · Enter select · Esc cancel) "
-            ));
+            .title(block_title);
         f.render_widget(Paragraph::new(lines).block(block), dd);
     }
 

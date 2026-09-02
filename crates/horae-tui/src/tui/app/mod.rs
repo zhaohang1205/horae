@@ -8,7 +8,7 @@ use horae_core::model::tag::Tag;
 use horae_core::model::task::Task;
 use horae_core::repo::tasks::{self, ListFilter};
 
-mod completion;
+pub(crate) mod completion;
 mod data;
 mod ops;
 mod profiles;
@@ -255,6 +255,8 @@ pub(crate) struct App<'a> {
     pub(crate) checklist_cursor: Option<usize>,
     /// 启动即进入快速录入（settings 键 `start_capture`，默认开启）。
     pub(crate) start_in_capture: bool,
+    /// 自动补全模式：语法参考（Reference，默认）vs 极速补全（Speed）。
+    pub(crate) completion_style: crate::tui::app::completion::CompletionStyle,
 }
 
 impl<'a> App<'a> {
@@ -287,6 +289,11 @@ impl<'a> App<'a> {
                 .as_deref(),
             Some("0")
         );
+        let completion_style = horae_core::repo::settings::get(conn, "completion_style")
+            .ok()
+            .flatten()
+            .map(|s| crate::tui::app::completion::CompletionStyle::from_key(&s))
+            .unwrap_or_default();
         let mut app = App {
             conn,
             view: View::Inbox,
@@ -294,13 +301,16 @@ impl<'a> App<'a> {
             selected: 0,
             list_state: ListState::default(),
             detail: None,
-            mode: Mode::Normal,
-            pane: Pane::Left,
+            mode: if start_in_capture {
+                Mode::Capturing
+            } else {
+                Mode::Normal
+            },
+            pane: Pane::Center,
             input: String::new(),
             input_cursor: 0,
             organizing_id: None,
-            status_message: tr!(lang, "按 '?' 或 F1 查看帮助", "Press '?' or F1 for help")
-                .to_string(),
+            status_message: String::new(),
             lang,
             show_help: false,
             show_syntax: false,
@@ -338,6 +348,7 @@ impl<'a> App<'a> {
             pending_profile_delete: None,
             checklist_cursor: None,
             start_in_capture,
+            completion_style,
         };
         app.refresh()?;
 

@@ -96,7 +96,7 @@ impl<'a> App<'a> {
         let Some(ref popup) = self.popup else { return };
         match popup {
             crate::tui::app::Popup::ModuleToggles(idx) => {
-                let area = self.centered_rect(40, 18, size);
+                let area = self.centered_rect(44, 19, size);
                 f.render_widget(ratatui::widgets::Clear, area);
                 let block = Block::default()
                     .title(tr!(self.lang, " 模块显示设置 ", " Module Visibility "))
@@ -111,6 +111,11 @@ impl<'a> App<'a> {
                 } else {
                     tr!(self.lang, "图标 (ASCII 回退)", "Icons (ASCII fallback)")
                 };
+                let is_ref = matches!(
+                    self.completion_style,
+                    crate::tui::app::completion::CompletionStyle::Reference
+                );
+                let completion_label = self.completion_style.label(self.lang);
                 let opts = [
                     (self.modules.splash, "开屏页 (Splash)"),
                     (self.modules.reference, "6 参考资料 (Reference)"),
@@ -129,6 +134,7 @@ impl<'a> App<'a> {
                             "Start in capture mode"
                         ),
                     ),
+                    (is_ref, completion_label),
                 ];
                 for (i, (enabled, name)) in opts.iter().enumerate() {
                     let checkbox = if *enabled { "[x]" } else { "[ ]" };

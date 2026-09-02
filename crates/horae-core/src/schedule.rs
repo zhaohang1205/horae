@@ -138,6 +138,8 @@ fn rrule_occurrences(rrule: &str, anchor_ms: i64, limit: usize) -> Result<Vec<i6
         }
     }
 
+    bymonth.sort_unstable();
+
     let mut out = Vec::new();
     let mut cur = anchor;
     let max_iter = (count as usize).min(limit);
@@ -455,6 +457,23 @@ mod tests {
         let anchor = local_ms(NaiveDate::from_ymd_opt(2026, 2, 28).unwrap(), midnight());
         let occs = rrule_occurrences("FREQ=YEARLY;BYMONTH=2,6", anchor, 2).unwrap();
         let expect = ["2026-02-28 00:00", "2026-06-28 00:00"];
+        for (i, e) in expect.iter().enumerate() {
+            assert_eq!(crate::time::format_local(Some(occs[i])), *e, "{}", i);
+        }
+    }
+
+    #[test]
+    fn rrule_yearly_unsorted_bymonth_yields_chronological_occurrences() {
+        let anchor = local_ms(NaiveDate::from_ymd_opt(2026, 1, 15).unwrap(), midnight());
+        // 故意传入倒序的 BYMONTH=12,6，验证生成的时间戳仍严格单调递增
+        let occs = rrule_occurrences("FREQ=YEARLY;BYMONTH=12,6", anchor, 4).unwrap();
+        let expect = [
+            "2026-06-15 00:00",
+            "2026-12-15 00:00",
+            "2027-06-15 00:00",
+            "2027-12-15 00:00",
+        ];
+        assert_eq!(occs.len(), expect.len());
         for (i, e) in expect.iter().enumerate() {
             assert_eq!(crate::time::format_local(Some(occs[i])), *e, "{}", i);
         }

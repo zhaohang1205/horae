@@ -41,11 +41,11 @@ impl<'a> AppHandlers for App<'a> {
                             // close, implicitly handled because popup is taken and not put back
                         }
                         KeyCode::Char('j') | KeyCode::Down => {
-                            idx = (idx + 1) % 10;
+                            idx = (idx + 1) % 11;
                             self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
                         }
                         KeyCode::Char('k') | KeyCode::Up => {
-                            idx = idx.checked_sub(1).unwrap_or(9);
+                            idx = idx.checked_sub(1).unwrap_or(10);
                             self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
                         }
                         KeyCode::Char(' ') => {
@@ -127,6 +127,19 @@ impl<'a> AppHandlers for App<'a> {
                                         self.conn,
                                         "start_capture",
                                         if self.start_in_capture { "1" } else { "0" },
+                                    );
+                                }
+                                10 => {
+                                    // 补全模式切换：语法参考 (Reference) <-> 极速补全 (Speed)。
+                                    use crate::tui::app::completion::CompletionStyle;
+                                    self.completion_style = match self.completion_style {
+                                        CompletionStyle::Reference => CompletionStyle::Speed,
+                                        CompletionStyle::Speed => CompletionStyle::Reference,
+                                    };
+                                    let _ = horae_core::repo::settings::set(
+                                        self.conn,
+                                        "completion_style",
+                                        self.completion_style.key(),
                                     );
                                 }
                                 _ => {}
