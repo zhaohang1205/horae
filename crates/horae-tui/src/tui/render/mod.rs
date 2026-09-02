@@ -433,20 +433,26 @@ impl<'a> AppRender for App<'a> {
         };
         let title = tr!(
             self.lang,
-            " GTD 决策树与工作流 ",
-            " GTD Decision Tree & Workflow "
+            " GTD 工作流 · 决策树与五步闭环 ",
+            " GTD Workflow · Decision Tree & 5 Steps "
         );
+        let lines = self.workflow_lines();
+        let content_h = area.height.saturating_sub(2) as usize;
+        let top_pad = if content_h > lines.len() {
+            ((content_h - lines.len()) / 3).min(3) as u16
+        } else {
+            0
+        };
         let block = Block::default()
             .borders(Borders::ALL)
             .border_set(border::ROUNDED)
-            .padding(ratatui::widgets::Padding::horizontal(1))
+            .padding(ratatui::widgets::Padding::new(1, 1, top_pad, 0))
             .border_style(Style::default().fg(border_color))
             .title(title);
-        let lines = self.workflow_lines();
-        let content_h = area.height.saturating_sub(2) as usize;
+        let usable_h = content_h.saturating_sub(top_pad as usize);
         let scroll = self
             .workflow_scroll
-            .min(lines.len().saturating_sub(content_h));
+            .min(lines.len().saturating_sub(usable_h));
         f.render_widget(
             Paragraph::new(lines)
                 .block(block)
@@ -459,16 +465,16 @@ impl<'a> AppRender for App<'a> {
     /// GTD 决策树与五步闭环说明文本（中英双语，精炼版）。
     fn workflow_lines(&self) -> Vec<Line<'static>> {
         use Icon::*;
-        let s_title = Style::default()
-            .fg(self.theme.accent)
-            .add_modifier(Modifier::BOLD);
         let s_step = Style::default()
-            .fg(self.theme.text_success)
+            .fg(self.theme.accent)
             .add_modifier(Modifier::BOLD);
         let s_dim = Style::default().fg(self.theme.text_dim);
         let s_map = Style::default().fg(self.theme.hl_fg);
         let s_urgent = Style::default()
             .fg(self.theme.text_urgent)
+            .add_modifier(Modifier::BOLD);
+        let s_success = Style::default()
+            .fg(self.theme.text_success)
             .add_modifier(Modifier::BOLD);
         let s_bold = Style::default().add_modifier(Modifier::BOLD);
 
@@ -479,21 +485,13 @@ impl<'a> AppRender for App<'a> {
 
         let mut lines: Vec<Line> = Vec::new();
 
-        lines.push(Line::from(Span::styled(
-            tr!(
-                self.lang,
-                "GTD 工作流 · 决策树与五步闭环",
-                "GTD Workflow · Decision Tree & 5-Step System"
-            ),
-            s_title,
-        )));
-        lines.push(Line::from(""));
-
         // 1. 收集
         lines.push(Line::from(vec![
-            Span::styled(format!("{} ", self.icon(Inbox)), s_bold),
+            Span::styled(format!("{} ", self.icon(Inbox)), s_step),
             step(tr!(self.lang, "1. 收集 (Capture)", "1. Capture")),
-            dim("："),
+        ]));
+        lines.push(Line::from(vec![
+            dim("   "),
             Span::styled(
                 tr!(
                     self.lang,
@@ -504,45 +502,50 @@ impl<'a> AppRender for App<'a> {
             ),
             map(tr!(self.lang, "1 / a", "1 / a")),
             Span::styled(
-                tr!(self.lang, ")，清空大脑不留杂念。", "). Free your mind."),
+                tr!(self.lang, ")，清空大脑，不留杂念。", "). Free your mind."),
                 s_dim,
             ),
         ]));
+        lines.push(Line::from(""));
 
         // 2. 厘清与决策树
         lines.push(Line::from(vec![
-            Span::styled(format!("{} ", self.icon(Next)), s_bold),
+            Span::styled(format!("{} ", self.icon(Next)), s_step),
             step(tr!(self.lang, "2. 厘清 (Clarify)", "2. Clarify")),
-            dim("："),
+            dim("  ──  "),
             Span::styled(
-                tr!(self.lang, "逐条判定是否可行动？", "Is it actionable?"),
+                tr!(self.lang, "逐条判定：是否可行动？", "Is it actionable?"),
                 s_bold,
             ),
         ]));
         // 不可行动
         lines.push(Line::from(vec![
-            dim("   ├─ 否 → "),
+            dim(tr!(self.lang, "   ├── 否 (No)  ──→ ", "   ├── No → ")),
             urgent(tr!(self.lang, "🗑 归档", "🗑 Archive")),
-            dim(tr!(self.lang, " (8/A) · ", " (8/A) · ")),
+            dim(tr!(self.lang, " (8/A)  ·  ", " (8/A)  ·  ")),
             map(tr!(self.lang, "💡 将来也许", "💡 Someday")),
-            dim(tr!(self.lang, " (5/s) · ", " (5/s) · ")),
+            dim(tr!(self.lang, " (5/s)  ·  ", " (5/s)  ·  ")),
             map(tr!(self.lang, "📚 参考资料", "📚 Reference")),
             dim(tr!(self.lang, " (6/0)", " (6/0)")),
         ]));
         // 可行动
         lines.push(Line::from(vec![
-            dim("   └─ 是 → "),
+            dim(tr!(self.lang, "   └── 是 (Yes) ──→ ", "   └── Yes → ")),
             Span::styled(
                 tr!(
                     self.lang,
                     "多步骤立项目 (Shift+C 检查单)",
                     "Multi-step? Project + Checklist (Shift+C)"
                 ),
-                s_dim,
+                s_success,
             ),
         ]));
         lines.push(Line::from(vec![
-            dim("       ├─ 耗时 < 2分钟 → ⚡ "),
+            dim(tr!(
+                self.lang,
+                "       ├── 耗时 < 2分钟 → ⚡ ",
+                "       ├── < 2 min → ⚡ "
+            )),
             urgent(tr!(
                 self.lang,
                 "立即做完 (两分钟原则)",
@@ -550,12 +553,24 @@ impl<'a> AppRender for App<'a> {
             )),
         ]));
         lines.push(Line::from(vec![
-            dim("       ├─ 别人做 → 👥 "),
+            dim(tr!(
+                self.lang,
+                "       ├── 委派他人 → 👥 ",
+                "       ├── Delegate → 👥 "
+            )),
             map(tr!(self.lang, "等待中 (3/w)", "Waiting For (3/w)")),
         ]));
-        lines.push(Line::from(vec![dim("       └─ 我来做：")]));
+        lines.push(Line::from(vec![dim(tr!(
+            self.lang,
+            "       └── 延迟/我来做 (Defer/Do):",
+            "       └── Defer/Do:"
+        ))]));
         lines.push(Line::from(vec![
-            dim("           ├─ 固定时间 → 📅 "),
+            dim(tr!(
+                self.lang,
+                "           ├── 固定时间 → 📅 ",
+                "           ├── Specific time → 📅 "
+            )),
             map(tr!(
                 self.lang,
                 "已排程 (4/~/* 习惯循环)",
@@ -563,64 +578,77 @@ impl<'a> AppRender for App<'a> {
             )),
         ]));
         lines.push(Line::from(vec![
-            dim("           └─ 尽快执行 → 🎯 "),
+            dim(tr!(
+                self.lang,
+                "           └── 尽快执行 → 🎯 ",
+                "           └── ASAP → 🎯 "
+            )),
             map(tr!(
                 self.lang,
                 "下一步行动 (2/Enter)",
                 "Next Actions (2/Enter)"
             )),
         ]));
+        lines.push(Line::from(""));
 
         // 3. 组织
         lines.push(Line::from(vec![
-            Span::styled(format!("{} ", self.icon(Scheduled)), s_bold),
+            Span::styled(format!("{} ", self.icon(Scheduled)), s_step),
             step(tr!(self.lang, "3. 组织 (Organize)", "3. Organize")),
-            dim("："),
+        ]));
+        lines.push(Line::from(vec![
+            dim("   "),
             Span::styled(
                 tr!(
                     self.lang,
-                    "情境标签 (@work/@focus) 与优先级 (!a/!b/!c)。",
-                    "Context tags (@work/@focus) & priority (!a/!b/!c)."
+                    "情境标签 (@work/@focus) 与 任务优先级 (!high/!medium/!low 或 !1/!2/!3)。",
+                    "Context tags (@work/@focus) & task priority (!high/!medium/!low or !1/!2/!3)."
                 ),
                 s_dim,
             ),
         ]));
+        lines.push(Line::from(""));
 
         // 4. 回顾
         lines.push(Line::from(vec![
-            Span::styled(format!("{} ", self.icon(Review)), s_bold),
+            Span::styled(format!("{} ", self.icon(Review)), s_step),
             step(tr!(self.lang, "4. 回顾 (Reflect)", "4. Reflect")),
-            dim("："),
+        ]));
+        lines.push(Line::from(vec![
+            dim("   "),
             Span::styled(
                 tr!(
                     self.lang,
-                    "晨间 horae do 智能聚焦 · 晚间清零 · 周末按 r 周回顾。",
-                    "Morning horae do · Evening Inbox Zero · Weekly review (r)."
+                    "晨间 horae do 智能聚焦  ·  晚间清零 (Inbox Zero)  ·  周末按 r 周回顾。",
+                    "Morning horae do  ·  Evening Inbox Zero  ·  Weekly review (r)."
                 ),
                 s_dim,
             ),
         ]));
+        lines.push(Line::from(""));
 
         // 5. 执行
         lines.push(Line::from(vec![
-            Span::styled(format!("{} ", self.icon(Done)), s_bold),
+            Span::styled(format!("{} ", self.icon(Done)), s_step),
             step(tr!(self.lang, "5. 执行 (Engage)", "5. Engage")),
-            dim("："),
+        ]));
+        lines.push(Line::from(vec![
+            dim("   "),
             Span::styled(
                 tr!(
                     self.lang,
-                    "四维选事 (情境/时间/精力/优先级) · 按 P 起番茄钟。",
-                    "Pick actions by context & energy · Press P for Pomodoro."
+                    "四维选事法则 (情境 / 时间 / 精力 / 优先级)  ·  按 P 开启番茄专注钟。",
+                    "Pick actions by 4-criteria (Context/Time/Energy/Priority)  ·  P for Pomodoro."
                 ),
                 s_dim,
             ),
         ]));
-
         lines.push(Line::from(""));
+
         lines.push(Line::from(Span::styled(
             tr!(
                 self.lang,
-                "提示：按 h/l 切换面板，按 j/k 滚动，按 g/G 置顶/置底。",
+                "💡 提示：按 h/l 切换面板，按 j/k 滚动，按 g/G 置顶/置底。",
                 "Tip: press h/l to switch panels, j/k to scroll, g/G for top/bottom."
             ),
             s_dim,
@@ -638,20 +666,26 @@ impl<'a> AppRender for App<'a> {
         };
         let title = tr!(
             self.lang,
-            " David Allen · GTD 哲学 ",
+            " David Allen · GTD 核心哲学 ",
             " David Allen · GTD Philosophy "
         );
+        let lines = self.workflow_side_lines();
+        let content_h = area.height.saturating_sub(2) as usize;
+        let top_pad = if content_h > lines.len() {
+            ((content_h - lines.len()) / 3).min(3) as u16
+        } else {
+            0
+        };
         let block = Block::default()
             .borders(Borders::ALL)
             .border_set(border::ROUNDED)
-            .padding(ratatui::widgets::Padding::horizontal(1))
+            .padding(ratatui::widgets::Padding::new(1, 1, top_pad, 0))
             .border_style(Style::default().fg(border_color))
             .title(title);
-        let lines = self.workflow_side_lines();
-        let content_h = area.height.saturating_sub(2) as usize;
+        let usable_h = content_h.saturating_sub(top_pad as usize);
         let scroll = self
             .workflow_side_scroll
-            .min(lines.len().saturating_sub(content_h));
+            .min(lines.len().saturating_sub(usable_h));
         f.render_widget(
             Paragraph::new(lines)
                 .block(block)
@@ -664,31 +698,25 @@ impl<'a> AppRender for App<'a> {
     /// David Allen 介绍与 GTD 核心哲学文本（中英双语，100 字精炼版）。
     #[allow(clippy::vec_init_then_push)]
     fn workflow_side_lines(&self) -> Vec<Line<'static>> {
-        let s_title = Style::default()
+        let s_sec = Style::default()
             .fg(self.theme.accent)
             .add_modifier(Modifier::BOLD);
-        let s_sec = Style::default()
+        let s_quote_title = Style::default()
             .fg(self.theme.rrule_fg)
             .add_modifier(Modifier::BOLD);
-        let s_quote = Style::default()
+        let s_quote_text = Style::default()
             .fg(self.theme.text_urgent)
-            .add_modifier(Modifier::BOLD);
+            .add_modifier(Modifier::ITALIC);
         let s_dim = Style::default().fg(self.theme.text_dim);
         let s_bold = Style::default().add_modifier(Modifier::BOLD);
 
         let mut lines: Vec<Line> = Vec::new();
 
+        // 导师简介
         lines.push(Line::from(Span::styled(
-            tr!(
-                self.lang,
-                "David Allen · GTD 核心哲学",
-                "David Allen · GTD Philosophy"
-            ),
-            s_title,
+            tr!(self.lang, "◆ 导师简介 (About)", "◆ About David Allen"),
+            s_sec,
         )));
-        lines.push(Line::from(""));
-
-        // 人物简介
         lines.push(Line::from(vec![
             Span::styled(
                 tr!(
@@ -711,9 +739,14 @@ impl<'a> AppRender for App<'a> {
 
         // 核心哲学
         lines.push(Line::from(Span::styled(
-            tr!(self.lang, "核心心法：", "Core Principles:"),
+            tr!(
+                self.lang,
+                "◆ 核心心法 (Core Principles)",
+                "◆ Core Principles"
+            ),
             s_sec,
         )));
+        lines.push(Line::from(""));
 
         // 心法 1：大脑是 CPU 不是硬盘
         lines.push(Line::from(vec![
@@ -724,17 +757,31 @@ impl<'a> AppRender for App<'a> {
                     "大脑是 CPU，不是硬盘",
                     "Mind for ideas, not holding them"
                 ),
-                s_quote,
+                s_quote_title,
             ),
         ]));
-        lines.push(Line::from(Span::styled(
-            tr!(
-                self.lang,
-                "“Your mind is for having ideas, not holding them.” 将一切杂事 100% 外部化到系统，清空大脑工作记忆与认知负荷。",
-                "“Your mind is for having ideas, not holding them.” Externalize all loops to free mental bandwidth."
+        lines.push(Line::from(vec![
+            Span::raw("   "),
+            Span::styled(
+                tr!(
+                    self.lang,
+                    "“Your mind is for having ideas, not holding them.”",
+                    "“Your mind is for having ideas, not holding them.”"
+                ),
+                s_quote_text,
             ),
-            s_dim,
-        )));
+        ]));
+        lines.push(Line::from(vec![
+            Span::raw("   "),
+            Span::styled(
+                tr!(
+                    self.lang,
+                    "将一切杂事 100% 外部化到系统，彻底清空工作记忆与认知负荷。",
+                    "Externalize all loops to system to free mental bandwidth and stress."
+                ),
+                s_dim,
+            ),
+        ]));
         lines.push(Line::from(""));
 
         // 心法 2：心如止水
@@ -742,35 +789,91 @@ impl<'a> AppRender for App<'a> {
             Span::styled("🌊 ", s_bold),
             Span::styled(
                 tr!(self.lang, "心如止水 (Mind Like Water)", "Mind Like Water"),
-                s_quote,
+                s_quote_title,
             ),
         ]));
-        lines.push(Line::from(Span::styled(
-            tr!(
-                self.lang,
-                "对纷至沓来的事务恰如其分地反应，事毕即复归平静专注。",
-                "Respond appropriately to incoming inputs, then immediately return to calm."
+        lines.push(Line::from(vec![
+            Span::raw("   "),
+            Span::styled(
+                tr!(
+                    self.lang,
+                    "对纷至沓来的事务恰如其分地反应，事毕即复归平静与深度专注。",
+                    "Respond appropriately to input, then return to calm and deep focus."
+                ),
+                s_dim,
             ),
-            s_dim,
-        )));
+        ]));
         lines.push(Line::from(""));
 
         // 心法 3：两分钟原则
         lines.push(Line::from(vec![
             Span::styled("⚡ ", s_bold),
             Span::styled(
-                tr!(self.lang, "两分钟原则 (2-Minute Rule)", "The 2-Minute Rule"),
-                s_quote,
+                tr!(self.lang, "两分钟原则 (2-Minute Rule)", "2-Minute Rule"),
+                s_quote_title,
             ),
         ]));
-        lines.push(Line::from(Span::styled(
-            tr!(
-                self.lang,
-                "耗时 < 2 分钟的事立即动手做完，不留任何推迟与记录开销。",
-                "If an action takes < 2 minutes, do it immediately."
+        lines.push(Line::from(vec![
+            Span::raw("   "),
+            Span::styled(
+                tr!(
+                    self.lang,
+                    "耗时 < 2 分钟的事立即动手做完，不留任何推迟、排程与记录开销。",
+                    "If an action takes less than 2 minutes, do it immediately."
+                ),
+                s_dim,
             ),
-            s_dim,
-        )));
+        ]));
+        lines.push(Line::from(""));
+
+        // 心法 4：聚焦物理下一步
+        lines.push(Line::from(vec![
+            Span::styled("🎯 ", s_bold),
+            Span::styled(
+                tr!(
+                    self.lang,
+                    "明确物理下一步 (Next Physical Action)",
+                    "Next Physical Action"
+                ),
+                s_quote_title,
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::raw("   "),
+            Span::styled(
+                tr!(
+                    self.lang,
+                    "拖延往往源于步骤模糊。将复杂任务拆解为无需思考即可执行的第一步。",
+                    "Clarify the immediate next visible physical activity to eliminate friction."
+                ),
+                s_dim,
+            ),
+        ]));
+        lines.push(Line::from(""));
+
+        // 心法 5：多维高度俯瞰
+        lines.push(Line::from(vec![
+            Span::styled("🔭 ", s_bold),
+            Span::styled(
+                tr!(
+                    self.lang,
+                    "多维专注高度 (Horizons of Focus)",
+                    "Horizons of Focus"
+                ),
+                s_quote_title,
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::raw("   "),
+            Span::styled(
+                tr!(
+                    self.lang,
+                    "5万英尺(愿景与人生目标) → 跑道(日常微行动)，自上而下对齐，自下而上掌控。",
+                    "50,000 ft (Vision) to Runway (Actions) — align top-down, control bottom-up."
+                ),
+                s_dim,
+            ),
+        ]));
 
         lines
     }

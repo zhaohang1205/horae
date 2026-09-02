@@ -30,9 +30,9 @@ pub struct QuickAddToken {
 /// to treating the word as a normal title.
 pub fn priority_value(token: &str) -> Option<&'static str> {
     match token.to_ascii_lowercase().as_str() {
-        "high" => Some("high"),
-        "medium" => Some("medium"),
-        "low" => Some("low"),
+        "high" | "h" | "1" | "p1" | "高" => Some("high"),
+        "medium" | "med" | "m" | "2" | "p2" | "中" => Some("medium"),
+        "low" | "l" | "3" | "p3" | "低" => Some("low"),
         _ => None,
     }
 }
@@ -459,8 +459,20 @@ mod tests {
     #[test]
     fn priority_value_maps_to_canonical() {
         assert_eq!(priority_value("high"), Some("high"));
+        assert_eq!(priority_value("h"), Some("high"));
+        assert_eq!(priority_value("1"), Some("high"));
+        assert_eq!(priority_value("p1"), Some("high"));
+        assert_eq!(priority_value("高"), Some("high"));
         assert_eq!(priority_value("Medium"), Some("medium"));
+        assert_eq!(priority_value("med"), Some("medium"));
+        assert_eq!(priority_value("m"), Some("medium"));
+        assert_eq!(priority_value("2"), Some("medium"));
+        assert_eq!(priority_value("中"), Some("medium"));
         assert_eq!(priority_value("LOW"), Some("low"));
+        assert_eq!(priority_value("l"), Some("low"));
+        assert_eq!(priority_value("3"), Some("low"));
+        assert_eq!(priority_value("p3"), Some("low"));
+        assert_eq!(priority_value("低"), Some("low"));
         assert_eq!(priority_value("x"), None);
     }
 
@@ -471,6 +483,13 @@ mod tests {
         assert_eq!(q.tags, vec!["work"]);
         assert_eq!(q.priority.as_deref(), Some("high"));
         assert_eq!(q.time_str.as_deref(), Some("+3d"));
+
+        let q2 = parse_quick_add("极速任务 @work !h");
+        assert_eq!(q2.priority.as_deref(), Some("high"));
+        let q3 = parse_quick_add("次要任务 @work !3");
+        assert_eq!(q3.priority.as_deref(), Some("low"));
+        let q4 = parse_quick_add("中文标记 !高");
+        assert_eq!(q4.priority.as_deref(), Some("high"));
     }
 
     #[test]

@@ -1385,20 +1385,53 @@ fn key_table_respects_view_selection_and_mode() {
     let rm_q = quotes_view.iter().find(|(k, _)| *k == "\"").unwrap();
     assert_eq!(rm_q.1, "移出金句");
 
-    // 状态栏全局条：含压缩后的 hjkl 与捕获/退出，不含低频键 g/G 与视图键
+    // 状态栏快捷键条：含 hjkl, a, x, s, /, w, f, F1, P, F5, F6, F7, Ctrl+P
     let strip = status_strip(Lang::Zh);
-    assert!(strip.iter().any(|(k, _)| *k == "hjkl"), "全局条含 hjkl");
-    assert!(strip.iter().any(|(k, _)| *k == "q"), "全局条含 q");
-    assert!(!strip.iter().any(|(k, _)| *k == "g/G"), "全局条不含 g/G");
-    assert!(!strip.iter().any(|(k, _)| *k == "0-9"), "全局条不含视图键");
-    assert!(
-        strip.iter().any(|(k, _)| *k == "F7"),
-        "全局条含 F7 功能开关"
+    assert_eq!(
+        strip,
+        vec![
+            ("hjkl", "方向键"),
+            ("a", "捕获"),
+            ("x", "完成"),
+            ("s", "将来"),
+            ("/", "搜索"),
+            ("w", "等待"),
+            ("f", "过滤"),
+            ("F1", "帮助"),
+            ("P", "专注/续杯"),
+            ("F5", "主题"),
+            ("F6", "语言"),
+            ("F7", "功能开关"),
+            ("Ctrl+P", "语法"),
+        ]
     );
-    // 状态栏全局条按热度降序
+    let strip_en = status_strip(Lang::En);
+    assert_eq!(
+        strip_en,
+        vec![
+            ("hjkl", "arrows"),
+            ("a", "capture"),
+            ("x", "done"),
+            ("s", "someday"),
+            ("/", "search"),
+            ("w", "waiting"),
+            ("f", "filter"),
+            ("F1", "help"),
+            ("P", "focus/continue"),
+            ("F5", "theme"),
+            ("F6", "lang"),
+            ("F7", "toggles"),
+            ("Ctrl+P", "syntax"),
+        ]
+    );
+    assert!(strip.iter().any(|(k, _)| *k == "hjkl"), "状态栏含 hjkl");
+    assert!(!strip.iter().any(|(k, _)| *k == "q"), "状态栏不含 q");
+    assert!(!strip.iter().any(|(k, _)| *k == "g/G"), "状态栏不含 g/G");
+    assert!(!strip.iter().any(|(k, _)| *k == "0-9"), "状态栏不含视图键");
+    // 状态栏快捷键条按热度降序
     assert!(
         heats(&strip).windows(2).all(|w| w[0] >= w[1]),
-        "全局条按热度降序: {:?}",
+        "状态栏按热度降序: {:?}",
         strip
     );
 
@@ -3043,6 +3076,20 @@ fn workflow_view_content_scrolling_and_bilingual() {
         "英文模式应包含 David Allen 与 Mind Like Water: {}",
         frame_en
     );
+    assert!(
+        frame_en.contains("Isitactionable?")
+            && frame_en.contains("No→")
+            && frame_en.contains("Yes→"),
+        "英文模式决策树应为纯英文: {}",
+        frame_en
+    );
+    assert!(
+        frame_en.contains("Delegate→")
+            && frame_en.contains("Defer/Do:")
+            && frame_en.contains("ASAP→"),
+        "英文模式决策树分支应为纯英文: {}",
+        frame_en
+    );
 
     // 6. 切换视图重置滚动偏移
     app.workflow_scroll = 5;
@@ -3182,4 +3229,215 @@ fn bilingual_completion_candidates_and_parsing() {
     // 4. 英文模式下输入 ~fri 10:00 可被正常解析
     let ms = horae_core::time::parse_time("fri 10:00").unwrap();
     assert!(ms > 0);
+}
+
+#[test]
+fn universal_zero_config_completion_and_editing_shortcuts() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    seed(&conn);
+    let mut app = app_normal(&conn);
+
+    // 1. Vim 风格快捷键：Ctrl+N/P 切换, Ctrl+Y 采纳, Ctrl+E 取消
+    app.handle_key(key('a')).unwrap();
+    app.handle_key(key('@')).unwrap();
+    app.handle_key(key('h')).unwrap();
+    assert!(app.completion_active());
+    assert_eq!(app.completion_candidates[0], "home");
+
+    // Ctrl+N / Ctrl+P
+    app.handle_key(ctrl('n')).unwrap();
+    assert_eq!(app.completion_index, 0); // home 是唯一以 h 开头的默认标签，index 循环为 0
+                                         // Ctrl+Y 采纳
+    app.handle_key(ctrl('y')).unwrap();
+    assert!(!app.completion_active());
+    assert_eq!(app.input, "@home ");
+
+    // 输入 @ 激活，按 Ctrl+E 取消
+    app.handle_key(key('@')).unwrap();
+    assert!(app.completion_active());
+    app.handle_key(ctrl('e')).unwrap();
+    assert!(!app.completion_active(), "Ctrl+E 取消补全候选");
+    assert_eq!(app.input, "@home @");
+
+    // 2. Ctrl+J / Ctrl+K 切换补全候选项
+    app.input_clear();
+    app.input_insert_char('*');
+    app.input_insert_char('w');
+    assert!(app.completion_active());
+    assert_eq!(app.completion_index, 0); // "w"
+    app.handle_key(ctrl('j')).unwrap(); // Ctrl+J 向下
+    assert_eq!(app.completion_index, 1); // "weekday"
+    app.handle_key(ctrl('k')).unwrap(); // Ctrl+K 向上
+    assert_eq!(app.completion_index, 0); // "w"
+    app.handle_key(kc(KeyCode::Tab)).unwrap(); // Tab 采纳
+    assert!(!app.completion_active());
+    assert_eq!(app.input, "*w ");
+
+    // 3. 词与行编辑快捷键：Ctrl+W / Ctrl+U / Ctrl+K / Ctrl+A / Ctrl+E
+    // Ctrl+W 删词
+    app.handle_key(ctrl('w')).unwrap();
+    assert_eq!(app.input, "");
+
+    // 插入文本并用 Ctrl+U / Ctrl+K / Ctrl+A / Ctrl+E 编辑
+    app.input_insert_str("hello world test");
+    app.handle_key(ctrl('a')).unwrap(); // Home
+    assert_eq!(app.input_cursor, 0);
+    app.handle_key(ctrl('e')).unwrap(); // End (非补全状态下)
+    assert_eq!(app.input_cursor, 16);
+    app.handle_key(ctrl('w')).unwrap(); // 删词
+    assert_eq!(app.input, "hello world ");
+    app.handle_key(ctrl('u')).unwrap(); // 删到行首
+    assert_eq!(app.input, "");
+    app.input_insert_str("keep this delete after");
+    app.input_cursor = 9; // 光标在 "keep this" 之后
+    app.handle_key(ctrl('k')).unwrap(); // 非补全时 Ctrl+K 删到行尾
+    assert_eq!(app.input, "keep this");
+
+    // 4. VSCode 模式快捷键：Alt+[ / Alt+] 切换
+    app.input_clear();
+    app.input_insert_char('~');
+    app.input_insert_char('t');
+    assert!(app.completion_active());
+    assert_eq!(app.completion_index, 0);
+    app.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::ALT))
+        .unwrap();
+    assert_eq!(app.completion_index, 1);
+    app.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::ALT))
+        .unwrap();
+    assert_eq!(app.completion_index, 0);
+    app.handle_key(kc(KeyCode::Tab)).unwrap();
+    assert!(!app.completion_active());
+    assert_eq!(app.input, "~today ");
+
+    // 5. Emacs 快捷键：Alt+N / Alt+P 切换, Ctrl+G 取消
+    app.input_clear();
+    app.input_insert_char('*');
+    app.input_insert_char('w');
+    assert!(app.completion_active());
+    app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::ALT))
+        .unwrap();
+    assert_eq!(app.completion_index, 1);
+    app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT))
+        .unwrap();
+    assert_eq!(app.completion_index, 0);
+
+    // Ctrl+G 取消补全
+    app.handle_key(ctrl('g')).unwrap(); // Ctrl+G 取消候选
+    assert!(!app.completion_active());
+    assert_eq!(app.input, "*w");
+    app.handle_key(ctrl('g')).unwrap(); // 再次 Ctrl+G 退出输入模式
+    assert_eq!(app.mode, Mode::Normal);
+
+    // 6. BackTab (Shift+Tab) 倒序切换
+    app.handle_key(key('a')).unwrap();
+    app.input_insert_char('~');
+    assert!(app.completion_active());
+    app.handle_key(kc(KeyCode::Down)).unwrap();
+    assert_eq!(app.completion_index, 1);
+    app.handle_key(kc(KeyCode::BackTab)).unwrap();
+    assert_eq!(app.completion_index, 0);
+}
+
+#[test]
+fn smart_autocomplete_matching_and_quick_pick() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    // 1. 中文星期拼音首字母匹配：~zy -> 周一, ~ze -> 周二
+    app.handle_key(key('a')).unwrap();
+    for c in "~zy".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    assert!(app.completion_active());
+    assert_eq!(app.completion_candidates[0], "周一");
+    app.handle_key(kc(KeyCode::Tab)).unwrap();
+    assert_eq!(app.input, "~周一 ");
+
+    // 2. 英文星期与别名匹配：~mon -> 周一 (在中文模式)
+    app.input_clear();
+    for c in "~mon".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    assert!(app.completion_active());
+    assert_eq!(app.completion_candidates[0], "周一");
+
+    // 3. 大小写不敏感匹配：!H -> high, !M -> medium
+    app.input_clear();
+    for c in "!H".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    assert!(app.completion_active());
+    assert_eq!(app.completion_candidates[0], "high");
+    app.handle_key(kc(KeyCode::Tab)).unwrap();
+    assert_eq!(app.input, "!high ");
+
+    // 4. Alt+1..9 快捷直选
+    app.input_clear();
+    app.handle_key(key('!')).unwrap();
+    assert!(app.completion_active());
+    assert!(app.completion_candidates.len() >= 3);
+    // Alt+2 直选第 2 项 ("medium")
+    app.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::ALT))
+        .unwrap();
+    assert!(!app.completion_active());
+    assert_eq!(app.input, "!medium ");
+
+    // 5. 动态循环简写推导：*2 -> 2d, 2w, 2m, 2y
+    app.input_clear();
+    for c in "*2".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    assert!(app.completion_active());
+    assert!(app.completion_candidates.contains(&"2d".to_string()));
+    assert!(app.completion_candidates.contains(&"2w".to_string()));
+    assert!(app.completion_candidates.contains(&"2m".to_string()));
+
+    // 6. 标签按频次排序
+    let t1 = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "Task 1".to_string(),
+            tag_names: vec!["custom-rare".to_string()],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let _t2 = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "Task 2".to_string(),
+            tag_names: vec!["custom-hot".to_string()],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let _t3 = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "Task 3".to_string(),
+            tag_names: vec!["custom-hot".to_string()],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let _ = t1;
+
+    app.input_clear();
+    app.handle_key(key('@')).unwrap();
+    assert!(app.completion_active());
+    let hot_pos = app
+        .completion_candidates
+        .iter()
+        .position(|c| c == "custom-hot")
+        .unwrap();
+    let rare_pos = app
+        .completion_candidates
+        .iter()
+        .position(|c| c == "custom-rare")
+        .unwrap();
+    assert!(hot_pos < rare_pos, "高频使用的标签应排在低频标签前面");
 }

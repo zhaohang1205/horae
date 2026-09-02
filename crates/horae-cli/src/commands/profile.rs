@@ -146,17 +146,19 @@ mod tests {
 
     #[test]
     fn db_path_keeps_profile_file() {
-        let mut config = Config::default();
-        config.upsert_profile(
-            "p",
-            Profile {
-                db: "profiles/p.db".to_string(),
-                cloud: None,
-                ntfy: None,
-            },
-        );
-        let path = config.db_path(config.profile("p").unwrap());
-        assert!(path.to_string_lossy().ends_with("horae/profiles/p.db"));
+        horae_core::testutil::with_no_config_dir(|| {
+            let mut config = Config::default();
+            config.upsert_profile(
+                "p",
+                Profile {
+                    db: "profiles/p.db".to_string(),
+                    cloud: None,
+                    ntfy: None,
+                },
+            );
+            let path = config.db_path(config.profile("p").unwrap());
+            assert!(path.to_string_lossy().ends_with("horae/profiles/p.db"));
+        });
     }
 
     #[test]

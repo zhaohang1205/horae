@@ -10,282 +10,349 @@ use ratatui::{
 impl<'a> App<'a> {
     /// 语法说明面板的行内容。
     pub(super) fn syntax_lines(&self) -> Vec<Line<'static>> {
+        let s_hdr = Style::default()
+            .fg(self.theme.accent)
+            .add_modifier(Modifier::BOLD);
+        let s_tok = Style::default()
+            .fg(self.theme.text_success)
+            .add_modifier(Modifier::BOLD);
+        let s_dim = Style::default().fg(self.theme.text_dim);
+        let s_hl = Style::default().fg(self.theme.hl_fg);
+        let s_rrule = Style::default().fg(self.theme.rrule_fg);
+        let s_urgent = Style::default()
+            .fg(self.theme.text_urgent)
+            .add_modifier(Modifier::BOLD);
+
         vec![
+            // ── 1. 快速录入 ──
             Line::from(Span::styled(
                 tr!(
                     self.lang,
-                    "快速录入语法 (按 a 捕获)",
-                    "Quick capture syntax (press a)"
+                    "◈ 1. 快速录入核心语法 (按 a 录入 · 空格分词 · 顺序任意)",
+                    "◈ 1. Quick Capture Syntax (Press a · Space-separated · Any order)"
                 ),
-                Style::default()
-                    .fg(self.theme.accent)
-                    .add_modifier(Modifier::BOLD),
+                s_hdr,
             )),
             Line::from(vec![
                 Span::raw("  "),
-                Span::styled(
-                    tr!(self.lang, "@标签", "@tag"),
-                    Style::default().fg(self.theme.text_success),
-                ),
+                Span::styled(format!("{:<10}", tr!(self.lang, "@标签", "@tag")), s_tok),
                 Span::raw(tr!(
                     self.lang,
-                    "    添加情境, 如 ",
-                    "    add context, e.g. "
+                    "情境分类, 首次自动建档 (如 ",
+                    "Context tag, auto-created (e.g. "
                 )),
-                Span::styled("@work", Style::default().fg(self.theme.accent)),
-                Span::raw(tr!(self.lang, " (支持 Tab 补全)", " (Tab to complete)")),
+                Span::styled("@work", s_hl),
+                Span::raw(" · "),
+                Span::styled("@home", s_hl),
+                Span::raw(" · "),
+                Span::styled("@focus", s_hl),
+                Span::raw(tr!(
+                    self.lang,
+                    " · Tab 补全高频优先)",
+                    " · Tab completes hot tags first)"
+                )),
             ]),
             Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
-                    tr!(self.lang, "!优先级", "!priority"),
-                    Style::default().fg(self.theme.text_success),
+                    format!("{:<10}", tr!(self.lang, "!优先级", "!priority")),
+                    s_tok,
                 ),
-                Span::raw(tr!(self.lang, "    设置优先级: ", "    set priority: ")),
-                Span::styled("!a", Style::default().fg(self.theme.text_urgent)),
-                Span::raw(tr!(self.lang, "(高) / ", "(high) / ")),
-                Span::styled("!b", Style::default().fg(Color::Rgb(249, 226, 175))),
-                Span::raw(tr!(self.lang, "(中) / ", "(medium) / ")),
-                Span::styled("!c", Style::default().fg(Color::Rgb(137, 180, 250))),
-                Span::raw(tr!(self.lang, "(低)", "(low)")),
+                Span::raw(tr!(self.lang, "任务权重: ", "Task weight: ")),
+                Span::styled("!high/!h/!1/!高", s_urgent),
+                Span::raw(" · "),
+                Span::styled(
+                    "!medium/!m/!2/!中",
+                    Style::default().fg(Color::Rgb(249, 226, 175)),
+                ),
+                Span::raw(" · "),
+                Span::styled(
+                    "!low/!l/!3/!低",
+                    Style::default().fg(Color::Rgb(137, 180, 250)),
+                ),
             ]),
             Line::from(vec![
                 Span::raw("  "),
-                Span::styled(
-                    tr!(self.lang, "~时间", "~time"),
-                    Style::default().fg(self.theme.text_success),
-                ),
+                Span::styled(format!("{:<10}", tr!(self.lang, "~时间", "~time")), s_tok),
                 Span::raw(tr!(
                     self.lang,
-                    "    设置截止时间, 见下方时间语法",
-                    "    set due time, see below"
+                    "排程起点 (进入已排程状态 · 软截止用 --due)",
+                    "Scheduled start (enters Scheduled · soft deadline via --due)"
                 )),
             ]),
             Line::from(vec![
-                Span::raw(tr!(self.lang, "  例: ", "  examples: ")),
-                Span::styled(
-                    "a买牛奶 @home ~tomorrow",
-                    Style::default().fg(self.theme.accent),
-                ),
-                Span::raw(" / "),
-                Span::styled(
-                    "a写周报 @work !a ~+3d",
-                    Style::default().fg(self.theme.accent),
-                ),
+                Span::raw("  "),
+                Span::styled(format!("{:<10}", tr!(self.lang, "*循环", "*rrule")), s_tok),
+                Span::raw(tr!(
+                    self.lang,
+                    "习惯与周期 (如 *2w[1,3] / *m[-1] / *weekday / *2d 等)",
+                    "Recurrence (*2w[1,3] / *m[-1] / *weekday / *2d etc.)"
+                )),
+            ]),
+            Line::from(vec![
+                Span::styled(tr!(self.lang, "  示例: ", "  Examples: "), s_dim),
+                Span::styled("买牛奶 @home ~tomorrow 18:00 !1", s_hl),
+                Span::raw("  ·  "),
+                Span::styled("站会 @work *weekday ~09:30 !h", s_hl),
             ]),
             Line::from(""),
+            // ── 2. 时间排程 ──
             Line::from(Span::styled(
                 tr!(
                     self.lang,
-                    "时间语法 (~ 排程起点；日期搜索用 MMDD，如 0829)",
-                    "Time syntax (~ schedule start; date search uses MMDD, e.g. 0829)"
+                    "◈ 2. 时间排程语法 (~ 排程起点 · 支持自然语言与拼音别名)",
+                    "◈ 2. Time Syntax (~ Schedule start · Natural language & Aliases)"
                 ),
-                Style::default()
-                    .fg(self.theme.accent)
-                    .add_modifier(Modifier::BOLD),
+                s_hdr,
             )),
             Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
-                    "now / +2h +30m +1d +1w",
-                    Style::default().fg(self.theme.text_success),
+                    format!("{:<42}", "now / +15m / +30m / +1h / +1d / +1w"),
+                    s_tok,
                 ),
-                Span::raw(tr!(self.lang, "    相对时间偏移", "    relative offsets")),
+                Span::styled(tr!(self.lang, "相对时间偏移", "Relative offsets"), s_dim),
+            ]),
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(format!("{:<42}", "+3d 15:30 / +1w 09:00"), s_tok),
+                Span::styled(
+                    tr!(self.lang, "相对偏移 + 指定时刻", "Relative offset + clock"),
+                    s_dim,
+                ),
             ]),
             Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
-                    "today / tomorrow [HH:MM]",
-                    Style::default().fg(self.theme.text_success),
+                    format!("{:<42}", "today / tomorrow / 今天 / 明天 [HH:MM]"),
+                    s_tok,
                 ),
-                Span::raw(tr!(
-                    self.lang,
-                    "  今天/明天指定时刻",
-                    "  today/tomorrow at a time"
-                )),
-            ]),
-            Line::from(vec![
-                Span::raw("  "),
-                Span::styled("HH:MM", Style::default().fg(self.theme.text_success)),
-                Span::raw(tr!(
-                    self.lang,
-                    "                     当天指定时刻, 如 18:00",
-                    "                     same-day time, e.g. 18:00"
-                )),
+                Span::styled(
+                    tr!(
+                        self.lang,
+                        "常用天词 (拼音 ~td/~tm 可补全)",
+                        "Day words (~td/~tm to complete)"
+                    ),
+                    s_dim,
+                ),
             ]),
             Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
-                    "YYYY-MM-DD [HH:MM]",
-                    Style::default().fg(self.theme.text_success),
+                    format!("{:<42}", "周一~周日 / 下周五 / mon~sun [HH:MM]"),
+                    s_tok,
                 ),
-                Span::raw(tr!(
-                    self.lang,
-                    "        绝对日期与时间",
-                    "        absolute date & time"
-                )),
+                Span::styled(
+                    tr!(
+                        self.lang,
+                        "星期词汇 (拼音 ~zy/~mon 映射周一)",
+                        "Weekdays (~zy/~mon maps Mon)"
+                    ),
+                    s_dim,
+                ),
+            ]),
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(format!("{:<42}", "09:00 / 18:00 / HH:MM"), s_tok),
+                Span::styled(
+                    tr!(
+                        self.lang,
+                        "当日时刻 (已过则顺延至明日)",
+                        "Same-day clock (next day if passed)"
+                    ),
+                    s_dim,
+                ),
+            ]),
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(
+                    format!("{:<42}", "8/20 15:30 · 2026.8.20 · YYYY-MM-DD"),
+                    s_tok,
+                ),
+                Span::styled(
+                    tr!(
+                        self.lang,
+                        "灵活日期与绝对时刻",
+                        "Flexible dates & absolute clock"
+                    ),
+                    s_dim,
+                ),
             ]),
             Line::from(""),
+            // ── 3. 周期规则 ──
             Line::from(Span::styled(
                 tr!(
                     self.lang,
-                    "周期 / 循环任务 (Habit / RRULE)",
-                    "Recurring / habit tasks (RRULE)"
+                    "◈ 3. 周期任务与循环规则 (Habit / RRULE · 支持数字动态推导)",
+                    "◈ 3. Recurrence & Habit (RRULE · Dynamic inference)"
                 ),
-                Style::default()
-                    .fg(self.theme.accent)
-                    .add_modifier(Modifier::BOLD),
+                s_hdr,
             )),
             Line::from(vec![
-                Span::raw(tr!(self.lang, "  一句话排程: ", "  one-line schedule: ")),
-                Span::styled("~明天 15:30", Style::default().fg(self.theme.accent)),
-                Span::raw(tr!(
-                    self.lang,
-                    " 即可设排程起点, 循环任务再补 *rrule",
-                    " sets the start time; append *rrule for habits"
-                )),
-            ]),
-            Line::from(vec![
-                Span::raw(tr!(self.lang, "  快速录入简写: ", "  quick shorthand: ")),
-                Span::styled("*2w[1,3]", Style::default().fg(self.theme.rrule_fg)),
-                Span::raw(tr!(
-                    self.lang,
-                    " = 每2周周一、周三  (星期用 1-7, 0=周日; 也可写 *mo,we)",
-                    " = every 2 weeks Mon,Wed  (days 1-7, 0=Sun; or *mo,we)"
-                )),
-            ]),
-            Line::from(vec![
                 Span::raw("  "),
-                Span::styled("*y[jan,jul]", Style::default().fg(self.theme.rrule_fg)),
-                Span::raw(tr!(
-                    self.lang,
-                    " = 每年 1 月与 7 月 (用月份名或 1-12，可加间隔 *2y[6])",
-                    " = yearly in Jan & Jul  (month names or 1-12, interval *2y[6])"
-                )),
-            ]),
-            Line::from(vec![
-                Span::raw("  "),
+                Span::styled(format!("{:<38}", "*d / *w / *m / *y"), s_rrule),
                 Span::styled(
-                    "FREQ=DAILY|WEEKLY|MONTHLY|YEARLY",
-                    Style::default().fg(self.theme.text_success),
+                    tr!(
+                        self.lang,
+                        "基础周期: 每天 / 每周 / 每月 / 每年",
+                        "Basic: daily / weekly / monthly / yearly"
+                    ),
+                    s_dim,
                 ),
-                Span::raw(tr!(self.lang, "   循环频率", "   frequency")),
             ]),
             Line::from(vec![
                 Span::raw("  "),
-                Span::styled("INTERVAL=2", Style::default().fg(self.theme.text_success)),
-                Span::raw(tr!(
-                    self.lang,
-                    "                  循环间隔 (如每 2 周)",
-                    "                  interval (e.g. every 2 weeks)"
-                )),
-            ]),
-            Line::from(vec![
-                Span::raw("  "),
-                Span::styled("BYDAY=SA,SU", Style::default().fg(self.theme.text_success)),
-                Span::raw(tr!(
-                    self.lang,
-                    "                 指定周几 (MO TU WE TH FR SA SU)",
-                    "                 days of week (MO TU WE TH FR SA SU)"
-                )),
-            ]),
-            Line::from(vec![
-                Span::raw("  "),
+                Span::styled(format!("{:<38}", "*weekday / *weekend"), s_rrule),
                 Span::styled(
-                    "COUNT=10 / UNTIL=YYYY-MM-DD",
-                    Style::default().fg(self.theme.text_success),
+                    tr!(
+                        self.lang,
+                        "工作日 (周一至五) / 周末 (周六周日)",
+                        "Workdays (Mon-Fri) / Weekend (Sat-Sun)"
+                    ),
+                    s_dim,
                 ),
-                Span::raw(tr!(self.lang, " 终止条件", " end conditions")),
             ]),
             Line::from(vec![
-                Span::raw(tr!(self.lang, "  例: ", "  examples: ")),
+                Span::raw("  "),
+                Span::styled(format!("{:<38}", "*2w[1,3] / *1w[mo,we]"), s_rrule),
                 Span::styled(
-                    ";FREQ=WEEKLY;BYDAY=SA,SU",
-                    Style::default().fg(self.theme.rrule_fg),
+                    tr!(
+                        self.lang,
+                        "每 2 周周一与周三 (1-7=周一至日, 0=周日)",
+                        "Every 2 weeks Mon & Wed (1-7=Mon-Sun)"
+                    ),
+                    s_dim,
                 ),
-                Span::raw("    "),
+            ]),
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(format!("{:<38}", "*m[1,15] / *m[1,-1] / *m[-1]"), s_rrule),
                 Span::styled(
-                    ";FREQ=DAILY;COUNT=30",
-                    Style::default().fg(self.theme.rrule_fg),
+                    tr!(
+                        self.lang,
+                        "每月 1、15 号 / 每月 1 号与月末 / 月末最后一天",
+                        "1st & 15th / 1st & last day / last day"
+                    ),
+                    s_dim,
+                ),
+            ]),
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(format!("{:<38}", "*y[jan,jul] / *2y[6]"), s_rrule),
+                Span::styled(
+                    tr!(
+                        self.lang,
+                        "每年 1 月与 7 月 / 每两年 6 月",
+                        "Yearly Jan & Jul / every 2 years in June"
+                    ),
+                    s_dim,
+                ),
+            ]),
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(format!("{:<38}", "*2 / *3 动态推导"), s_rrule),
+                Span::styled(
+                    tr!(
+                        self.lang,
+                        "输入数字动态推导对应周期 (*2d, *2w, *2m...)",
+                        "Type number to infer *2d, *2w, *2m..."
+                    ),
+                    s_dim,
                 ),
             ]),
             Line::from(""),
+            // ── 4. 实时补全 ──
             Line::from(Span::styled(
-                tr!(self.lang, "其他操作说明", "Other tips"),
-                Style::default()
-                    .fg(self.theme.accent)
-                    .add_modifier(Modifier::BOLD),
+                tr!(
+                    self.lang,
+                    "◈ 4. 自动补全与极速盲打 (Tab · Alt+1~9 · 智能槽位引导)",
+                    "◈ 4. Autocomplete & Fast Typing (Tab · Alt+1~9 · Slot hints)"
+                ),
+                s_hdr,
             )),
             Line::from(vec![
-                Span::raw(tr!(self.lang, "  等待 ", "  waiting ")),
-                Span::styled(
-                    "w",
-                    Style::default()
-                        .fg(self.theme.accent)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                Span::raw("  "),
+                Span::styled(format!("{:<22}", "触发弹层"), s_tok),
                 Span::raw(tr!(
                     self.lang,
-                    " 后可填写 [谁/何时], 如 ",
-                    " then set [who/when], e.g. "
-                )),
-                Span::styled("w → Alice → +1d", Style::default().fg(self.theme.accent)),
-            ]),
-            Line::from(vec![
-                Span::raw(tr!(self.lang, "  检查单 ", "  checklist ")),
-                Span::styled(
-                    "C",
-                    Style::default()
-                        .fg(self.theme.accent)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(tr!(self.lang, " 新增; ", " add; ")),
-                Span::styled(
-                    "Tab",
-                    Style::default()
-                        .fg(self.theme.accent)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(tr!(
-                    self.lang,
-                    " 逐项管理: j/k 移动, Space 勾选, d 删除, J/K 排序, e 改名",
-                    " manage: j/k move, Space tick, d delete, J/K reorder, e rename"
+                    "键入 @ / ~ / * / ! 自动唤出候选浮层 (大小写无关 & 拼音检索)",
+                    "Type @ / ~ / * / ! to pop dropdown (case-insensitive & pinyin)"
                 )),
             ]),
             Line::from(vec![
+                Span::raw("  "),
+                Span::styled(format!("{:<22}", "Alt+1 ~ Alt+9"), s_tok),
                 Span::raw(tr!(
                     self.lang,
-                    "  标签库 (视图9): 按 ",
-                    "  Tags (view 9): press "
+                    "快捷直选 1~9 号候选并立即采纳上屏",
+                    "Quick pick candidate 1~9 directly"
                 )),
-                Span::styled(
-                    "a",
-                    Style::default()
-                        .fg(self.theme.accent)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(tr!(self.lang, " 动态新增, 按 ", " to add, ")),
-                Span::styled(
-                    "D",
-                    Style::default()
-                        .fg(self.theme.accent)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(tr!(self.lang, " 删除", " to delete")),
             ]),
             Line::from(vec![
-                Span::raw(tr!(self.lang, "  按 ", "  press ")),
-                Span::styled(
-                    "Ctrl+P",
-                    Style::default()
-                        .fg(self.theme.accent)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                Span::raw("  "),
+                Span::styled(format!("{:<22}", "↓/↑ · Ctrl+N/P · Tab"), s_tok),
                 Span::raw(tr!(
                     self.lang,
-                    " 弹出/关闭本语法说明指南",
-                    " to toggle this guide"
+                    "上下循环切换候选；Tab / Ctrl+Y 采纳；Esc 取消",
+                    "Cycle items; Tab to apply; Esc to dismiss"
                 )),
+            ]),
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(format!("{:<22}", "F7 风格切换"), s_tok),
+                Span::raw(tr!(
+                    self.lang,
+                    "切换「语法参考模式」(丰富范式) 与「极速补全模式」(紧凑单列)",
+                    "Toggle Reference Guide / Speed completion"
+                )),
+            ]),
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(format!("{:<22}", "智能槽位引导"), s_tok),
+                Span::raw(tr!(
+                    self.lang,
+                    "输入标题后按空格，行末淡色显示未填写的 ",
+                    "Type title + space to see ghost "
+                )),
+                Span::styled("[@标签] [~时间] [*周期] [!优先级]", s_dim),
+            ]),
+            Line::from(""),
+            // ── 5. GTD 核心操作 ──
+            Line::from(Span::styled(
+                tr!(
+                    self.lang,
+                    "◈ 5. GTD 核心操作快捷键",
+                    "◈ 5. GTD Core Actions & Keys"
+                ),
+                s_hdr,
+            )),
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled("w", s_tok),
+                Span::raw(tr!(self.lang, " 等待谁/何时  ·  ", " waiting for  ·  ")),
+                Span::styled("C / Tab", s_tok),
+                Span::raw(tr!(self.lang, " 检查单管理  ·  ", " checklist  ·  ")),
+                Span::styled("/", s_tok),
+                Span::raw(tr!(
+                    self.lang,
+                    " 搜索 (支持 4位日期如 0829)  ·  ",
+                    " search (4-digit date e.g. 0829)  ·  "
+                )),
+                Span::styled("W", s_tok),
+                Span::raw(tr!(self.lang, " GTD 决策树", " GTD workflow")),
+            ]),
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled("1~9", s_tok),
+                Span::raw(tr!(self.lang, " 视图直达  ·  ", " views  ·  ")),
+                Span::styled("J / K", s_tok),
+                Span::raw(tr!(self.lang, " 今日/明日  ·  ", " today/tomorrow  ·  ")),
+                Span::styled("r", s_tok),
+                Span::raw(tr!(self.lang, " 周回顾  ·  ", " review  ·  ")),
+                Span::styled("P", s_tok),
+                Span::raw(tr!(self.lang, " 番茄专注  ·  ", " pomodoro  ·  ")),
+                Span::styled("Ctrl+P", s_tok),
+                Span::raw(tr!(self.lang, " 关闭本指南", " close guide")),
             ]),
         ]
     }

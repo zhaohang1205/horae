@@ -25,6 +25,23 @@ pub fn list_tags(conn: &Connection) -> Result<Vec<Tag>> {
     Ok(out)
 }
 
+/// Query tags ordered by usage frequency (count in task_tags) descending, then by name.
+pub fn list_tags_by_frequency(conn: &Connection) -> Result<Vec<Tag>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.name, t.category, t.is_system, t.color, t.icon, t.description, t.created_at \
+         FROM tags t \
+         LEFT JOIN task_tags tt ON t.id = tt.tag_id \
+         GROUP BY t.id \
+         ORDER BY COUNT(tt.task_id) DESC, t.name ASC",
+    )?;
+    let rows = stmt.query_map([], row_to_tag)?;
+    let mut out = Vec::new();
+    for t in rows {
+        out.push(t?);
+    }
+    Ok(out)
+}
+
 pub fn get_tag_by_name(conn: &Connection, name: &str) -> Result<Option<Tag>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, category, is_system, color, icon, description, created_at \
@@ -384,5 +401,23 @@ mod tests {
             &vec!["home".to_string()],
             "第 501 个 id 落入第二批，不应丢失"
         );
+    }
+
+    #[test]
+    fn list_tags_by_frequency_orders_most_used_first() {
+        let (_dir, conn) = test_conn();
+        let a = mk_task(&conn, "A", &[]);
+        let b = mk_task(&conn, "B", &[]);
+        let c = mk_task(&conn, "C", &[]);
+
+        // tag 'rare' used once, 'frequent' used three times
+        add_tag_to_task(&conn, &a.id, "rare").unwrap();
+        add_tag_to_task(&conn, &a.id, "frequent").unwrap();
+        add_tag_to_task(&conn, &b.id, "frequent").unwrap();
+        add_tag_to_task(&conn, &c.id, "frequent").unwrap();
+
+        let tags = list_tags_by_frequency(&conn).unwrap();
+        assert!(!tags.is_empty());
+        assert_eq!(tags[0].name, "frequent");
     }
 }

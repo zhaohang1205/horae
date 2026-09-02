@@ -156,7 +156,7 @@ impl<'a> App<'a> {
                     self.theme.text_success
                 };
                 content_spans.push(Span::styled(
-                    format!("{:<3} {}", k, d),
+                    format!("{} {}", k, d),
                     Style::default()
                         .fg(key_color)
                         .bg(self.theme.status_bg)

@@ -236,22 +236,79 @@ impl<'a> AppHandlers for App<'a> {
         if self.mode == Mode::ConfirmProfileDelete {
             return self.handle_confirm_profile_delete(key);
         }
-        match key.code {
-            KeyCode::Esc => {
-                if self.completion_active() {
-                    // 候选列表打开：Esc 关闭并保留当前输入。
+        if self.completion_active() {
+            match key.code {
+                // 采纳补全：Tab (通用) / Ctrl+Y (Vim)
+                KeyCode::Tab => {
+                    self.accept_completion();
+                    return Ok(());
+                }
+                KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.accept_completion();
+                    return Ok(());
+                }
+                // 取消候选列表：Esc / Ctrl+E (Vim) / Ctrl+G (Emacs)
+                KeyCode::Esc => {
                     self.cancel_completion();
                     return Ok(());
                 }
+                KeyCode::Char('e' | 'g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.cancel_completion();
+                    return Ok(());
+                }
+                // 下一项：Down / Ctrl+N / Ctrl+J / Alt+] / Alt+N / PageDown
+                KeyCode::Down | KeyCode::PageDown => {
+                    self.completion_down();
+                    return Ok(());
+                }
+                KeyCode::Char('n' | 'j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.completion_down();
+                    return Ok(());
+                }
+                KeyCode::Char(']' | 'n') if key.modifiers.contains(KeyModifiers::ALT) => {
+                    self.completion_down();
+                    return Ok(());
+                }
+                // 上一项：Up / BackTab (Shift+Tab) / Ctrl+P / Ctrl+K / Alt+[ / Alt+P / PageUp
+                KeyCode::Up | KeyCode::PageUp | KeyCode::BackTab => {
+                    self.completion_up();
+                    return Ok(());
+                }
+                KeyCode::Char('p' | 'k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.completion_up();
+                    return Ok(());
+                }
+                KeyCode::Char('[' | 'p') if key.modifiers.contains(KeyModifiers::ALT) => {
+                    self.completion_up();
+                    return Ok(());
+                }
+                // 快捷直选：Alt+1 ~ Alt+9
+                KeyCode::Char(d)
+                    if key.modifiers.contains(KeyModifiers::ALT) && ('1'..='9').contains(&d) =>
+                {
+                    let pick_idx = (d as usize) - ('1' as usize);
+                    if pick_idx < self.completion_candidates.len() {
+                        self.completion_index = pick_idx;
+                        self.accept_completion();
+                        return Ok(());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        match key.code {
+            KeyCode::Esc => {
                 self.organizing_id = None;
                 self.set_mode(Mode::Normal);
                 self.input_clear();
                 self.reload()?;
             }
-            KeyCode::Tab if self.completion_active() => {
-                // 候选激活：Tab 采纳补全（补齐 token，留在编辑）。
-                self.accept_completion();
-                return Ok(());
+            KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.organizing_id = None;
+                self.set_mode(Mode::Normal);
+                self.input_clear();
+                self.reload()?;
             }
             KeyCode::Enter => {
                 // 候选激活时先补齐当前候选，再提交（提交的是补全后的完整输入）。
@@ -274,6 +331,9 @@ impl<'a> AppHandlers for App<'a> {
             KeyCode::Tab => {
                 self.handle_tab_completion();
             }
+            KeyCode::BackTab => {
+                self.completion_up();
+            }
             KeyCode::Up => self.completion_up(),
             KeyCode::Down => self.completion_down(),
             KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -281,6 +341,33 @@ impl<'a> AppHandlers for App<'a> {
             }
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.completion_up();
+            }
+            KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.input_delete_word_backward();
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.input_kill_to_start();
+            }
+            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.input_kill_to_end();
+            }
+            KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.input_home();
+            }
+            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.input_end();
+            }
+            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.input_move_left();
+            }
+            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.input_move_right();
+            }
+            KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.input_backspace();
+            }
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.input_delete();
             }
             KeyCode::Backspace => self.input_backspace(),
             KeyCode::Delete => self.input_delete(),

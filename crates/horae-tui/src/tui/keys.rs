@@ -1,7 +1,7 @@
-//! 快捷键单一数据源：F1 快捷键面板、状态栏全局键条、引导栏动态任务键都从这里渲染。
+//! 快捷键单一数据源：F1 快捷键面板、状态栏快捷键条、引导栏动态任务键都从这里渲染。
 //!
 //! 设计要点：
-//! - 分为两层：**全局键**（状态栏常驻、压缩显示）与**任务操作键**（引导栏 [Keys] 上下文驱动）。
+//! - 分为两层：**状态栏快捷键条**（常驻展示 a/x/s/w/f/F1/F7）与**任务操作键**（引导栏 [Keys] 上下文驱动）。
 //! - 每一条 `KeyDef` 描述一个按键在某个上下文里的含义（含视图/选择/周回顾/番茄钟约束）。
 //! - 同一个物理键可有多个 `KeyDef`（如 `a` 在 Tags 视图=新增标签，其余=捕获任务）。
 //! - `hjkl` 压缩为一条，等价于上下左右方向键。
@@ -11,7 +11,7 @@ use super::app::{Mode, View};
 use horae_core::i18n::Lang;
 use horae_core::model::task::Status;
 
-/// 快捷键分区：`Global` 显示在状态栏（或仅 F1 参考），`Task` 显示在引导栏动态条。
+/// 快捷键分区：`Global` 用于全局操作，`Task` 用于任务操作（F1 按此分区展示）。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum KeyGroup {
     Global,
@@ -59,16 +59,16 @@ pub(crate) enum When {
 /// 非任务视图：行不是任务，任务操作键不适用。
 pub(crate) const NON_TASK_VIEWS: &[View] = &[View::Tags, View::Archived, View::Settings];
 
-/// `~` 时间补全候选（中文模式：包含常用英文词与中文星期，去除与 today/tomorrow 重复的今天/明天/后天）。
+/// `~` 时间补全候选（中文模式：包含常用英文词与中文星期、相对偏移与常用整点）。
 pub(crate) const TIME_CANDIDATES_ZH: &[&str] = &[
-    "now", "today", "tomorrow", "+1h", "+2h", "+3h", "+1d", "+2d", "+1w", "周一", "周二", "周三",
-    "周四", "周五", "周六", "周日",
+    "now", "today", "tomorrow", "+15m", "+30m", "+1h", "+2h", "+3h", "+4h", "+1d", "+2d", "+3d",
+    "+1w", "周一", "周二", "周三", "周四", "周五", "周六", "周日", "周末", "09:00", "18:00",
 ];
 
 /// `~` 时间补全候选（英文模式：纯英文词汇，符合英文用户习惯）。
 pub(crate) const TIME_CANDIDATES_EN: &[&str] = &[
-    "now", "today", "tomorrow", "+1h", "+2h", "+3h", "+1d", "+2d", "+1w", "mon", "tue", "wed",
-    "thu", "fri", "sat", "sun",
+    "now", "today", "tomorrow", "+15m", "+30m", "+1h", "+2h", "+3h", "+4h", "+1d", "+2d", "+3d",
+    "+1w", "mon", "tue", "wed", "thu", "fri", "sat", "sun", "weekend", "09:00", "18:00",
 ];
 
 pub(crate) fn time_candidates(lang: Lang) -> &'static [&'static str] {
@@ -82,14 +82,15 @@ pub(crate) fn time_candidates(lang: Lang) -> &'static [&'static str] {
 pub(crate) const RRULE_CANDIDATES: &[&str] = &[
     "d",
     "w",
-    "m",
-    "y",
+    "2w[1,3]",
+    "m[1,-1]",
+    "y[jan,jul]",
     "weekday",
     "weekend",
-    "2w[1,3]",
+    "m",
+    "y",
     "m[1,2,-2,-1]",
     "1w[mo,we]",
-    "y[jan,jul]",
 ];
 
 /// `!` 优先级补全候选（输入即弹，按前缀过滤）。
@@ -100,7 +101,7 @@ pub(crate) struct KeyDef {
     pub zh: &'static str,
     pub en: &'static str,
     pub group: KeyGroup,
-    /// 是否显示在状态栏全局键条（视图切换键已由侧栏展示，不重复进条）。
+    /// 是否显示在底部状态栏快捷键条。
     pub status: bool,
     pub when: When,
     /// 预设热度（越大越常用），引导栏 / 状态栏 / F1 面板均按热度降序展示。
@@ -193,7 +194,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         zh: "多选",
         en: "multi",
         group: KeyGroup::Global,
-        status: true,
+        status: false,
         when: When::Always,
         heat: 96,
     },
@@ -265,12 +266,12 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         zh: "取消",
         en: "cancel",
         group: KeyGroup::Global,
-        status: true,
+        status: false,
         when: When::Always,
         heat: 88,
     },
     KeyDef {
-        keys: "F1/?",
+        keys: "F1",
         zh: "帮助",
         en: "help",
         group: KeyGroup::Global,
@@ -292,7 +293,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         zh: "语法",
         en: "syntax",
         group: KeyGroup::Global,
-        status: false,
+        status: true,
         when: When::Always,
         heat: 45,
     },
@@ -346,7 +347,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         zh: "退出",
         en: "quit",
         group: KeyGroup::Global,
-        status: true,
+        status: false,
         when: When::Always,
         heat: 82,
     },
@@ -402,27 +403,27 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         zh: "完成",
         en: "done",
         group: KeyGroup::Task,
-        status: false,
+        status: true,
         when: When::StatusNot(&[Status::Done]),
         heat: 98,
-    },
-    KeyDef {
-        keys: "w",
-        zh: "等待",
-        en: "waiting",
-        group: KeyGroup::Task,
-        status: false,
-        when: When::StatusNot(&[Status::Waiting, Status::Done]),
-        heat: 84,
     },
     KeyDef {
         keys: "s",
         zh: "将来",
         en: "someday",
         group: KeyGroup::Task,
-        status: false,
+        status: true,
         when: When::StatusNot(&[Status::Someday, Status::Done]),
-        heat: 80,
+        heat: 96,
+    },
+    KeyDef {
+        keys: "w",
+        zh: "等待",
+        en: "waiting",
+        group: KeyGroup::Task,
+        status: true,
+        when: When::StatusNot(&[Status::Waiting, Status::Done]),
+        heat: 94,
     },
     KeyDef {
         keys: "T",
@@ -467,7 +468,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         group: KeyGroup::Task,
         status: false,
         when: When::SelectionNot(NON_TASK_VIEWS),
-        heat: 72,
+        heat: 88,
     },
     KeyDef {
         keys: "u",
@@ -564,7 +565,7 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         zh: "专注/续杯",
         en: "focus/continue",
         group: KeyGroup::Task,
-        status: false,
+        status: true,
         when: When::SelectionNot(NON_TASK_VIEWS),
         heat: 66,
     },
@@ -606,11 +607,11 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
     },
 ];
 
-/// 状态栏全局键条：Global 且 `status=true` 的条目，压缩展示，按热度降序。
+/// 状态栏快捷键条：`status=true` 的条目，压缩展示，按热度降序。
 pub(crate) fn status_strip(lang: Lang) -> Vec<(&'static str, &'static str)> {
     let mut v: Vec<(&KeyDef, u8)> = KEY_TABLE
         .iter()
-        .filter(|k| k.group == KeyGroup::Global && k.status)
+        .filter(|k| k.status)
         .map(|k| (k, k.heat))
         .collect();
     v.sort_by_key(|b| std::cmp::Reverse(b.1));

@@ -145,18 +145,18 @@ Icons default to Nerd Font glyphs. On startup horae auto-detects support (via `f
 ## Time & recurrence syntax
 
 ```
-now  +2h  +30m  +1d  +1w          relative offsets
-+3d 15:30                         offset + clock
-today / tomorrow [HH:MM]          day words
-mon / tue / next-fri [HH:MM]      weekdays (supports next prefix)
-8/20 15:30 · 2026.8.20            slash & dot dates
-HH:MM                             same-day time (past → tomorrow)
-2026-07-24 [HH:MM]                absolute date & time
+now  +15m  +30m  +1h  +2h  +4h  +1d  +3d  +1w   relative offsets
++3d 15:30 · +1w 09:00                           offset + clock
+today / tomorrow [HH:MM]                        day words (~td / ~tm to complete)
+mon / tue / next fri [HH:MM]                    weekdays (supports next prefix)
+09:00 · 18:00 · HH:MM                           same-day time (past → tomorrow)
+8/20 15:30 · 2026.8.20                          slash & dot dates
+2026-07-24 [HH:MM]                              absolute date & time
 ```
 
 `~time` in a quick-add line sets the **schedule start** (`scheduled_start_at`, status becomes Scheduled; start only, no end); `--due` sets a soft deadline (`due_at`).
 
-Recurrence RRULE (`*` shorthand in a quick-add line): `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`, `INTERVAL=2`, `BYDAY=SA,SU`, `BYMONTHDAY=1,-1` (-1 = last day of month), `BYMONTH=1,7` (months by number or name, e.g. `jan,jul`), `COUNT=10` / `UNTIL=YYYY-MM-DD`. Shorthands: `*d`/`*w`/`*m` (daily/weekly/monthly), `*2w[1,3]` (every two weeks on Mon & Wed; 1-7 = Mon-Sun, 0 = Sun), `*m[1,-1]` (the 1st and last day of each month), `*m[1,15]` (the 1st and 15th), `*y` (yearly), `*2y[6]` (every two years in June), `*y[jan,jul]` (yearly in Jan & Jul). Priority `!high`/`!medium`/`!low` (case-insensitive).
+Recurrence RRULE (`*` shorthand in a quick-add line): `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`, `INTERVAL=2`, `BYDAY=SA,SU`, `BYMONTHDAY=1,-1` (-1 = last day of month), `BYMONTH=1,7` (months by number or name, e.g. `jan,jul`), `COUNT=10` / `UNTIL=YYYY-MM-DD`. Shorthands: `*d`/`*w`/`*m`/`*y` (daily/weekly/monthly/yearly), `*weekday`/`*weekend` (workdays/weekends), `*2w[1,3]` (every two weeks on Mon & Wed; 1-7 = Mon-Sun, 0 = Sun), `*m[1,-1]` (the 1st and last day of each month), `*m[1,15]` (the 1st and 15th), `*y[jan,jul]` (yearly in Jan & Jul), `*2y[6]` (every two years in June), dynamic inference (`*2` → `*2d`/`*2w`). Priority supports `!high`/`!h`/`!1`, `!medium`/`!m`/`!2`, `!low`/`!l`/`!3` (case-insensitive). Autocomplete features `Alt+1`~`Alt+9` quick selection and slot ghost hints.
 
 ## Backup
 

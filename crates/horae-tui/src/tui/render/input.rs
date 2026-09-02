@@ -1,4 +1,3 @@
-use super::AppRender;
 use crate::tui::app::{App, Mode, Pane, View};
 use horae_core::parser::{
     parse_quick_add, parse_rrule_shorthand, priority_value, tokenize_quick_add, QuickAddKind,
@@ -151,6 +150,34 @@ impl<'a> App<'a> {
                     ));
                 }
             }
+        } else if self.mode == Mode::Capturing
+            && self.input_cursor == self.input.len()
+            && self.input.ends_with(' ')
+        {
+            let tokens = tokenize_quick_add(&self.input);
+            let has_tag = tokens.iter().any(|t| t.kind == QuickAddKind::Tag);
+            let has_time = tokens.iter().any(|t| t.kind == QuickAddKind::Time);
+            let has_rrule = tokens.iter().any(|t| t.kind == QuickAddKind::Rrule);
+            let has_prio = tokens.iter().any(|t| t.kind == QuickAddKind::Priority);
+            let mut slots = Vec::new();
+            if !has_tag {
+                slots.push(tr!(self.lang, "@标签", "@tag"));
+            }
+            if !has_time {
+                slots.push(tr!(self.lang, "~时间", "~time"));
+            }
+            if !has_rrule {
+                slots.push(tr!(self.lang, "*周期", "*rrule"));
+            }
+            if !has_prio {
+                slots.push(tr!(self.lang, "!优先级", "!priority"));
+            }
+            if !slots.is_empty() {
+                let hint = format!("[{}]", slots.join("] ["));
+                input_line_display
+                    .spans
+                    .push(Span::styled(hint, Style::default().fg(self.theme.text_dim)));
+            }
         }
 
         if self.mode == Mode::Capturing {
@@ -170,7 +197,7 @@ impl<'a> App<'a> {
 
         let height = text_lines.len() as u16 + 2;
 
-        // 输入框区域：show_syntax 时居左靠上，否则居中。
+        // 输入框区域：show_syntax 时居左靠上，否则居中靠上（快速录入上移，留足下方候选空间）。
         let area = if self.show_syntax {
             Rect {
                 x: size.width / 20,
@@ -179,7 +206,16 @@ impl<'a> App<'a> {
                 height,
             }
         } else {
-            self.centered_rect(width, height, size)
+            let w = (size.width * width / 100).min(size.width.saturating_sub(4));
+            let x = (size.width.saturating_sub(w)) / 2;
+            let top_offset = (size.height * 15 / 100).max(2);
+            let y = top_offset.min(size.height.saturating_sub(height));
+            Rect {
+                x,
+                y,
+                width: w,
+                height,
+            }
         };
 
         // 输入区可用宽度：框宽 - 左右边框 - 左右内边距。
@@ -213,7 +249,7 @@ impl<'a> App<'a> {
             area,
         );
 
-        // 补全候选下拉层：独立渲染在输入框下方，不抬高输入框本身。
+        // 补全候选下拉层：独立渲染在输入框下方或上方（自适应翻转），不抬高输入框本身。
         if self.completion_active() {
             self.render_completion_dropdown(f, area);
         }
@@ -224,20 +260,67 @@ impl<'a> App<'a> {
         f.set_cursor_position((cursor_x, cursor_y));
     }
 
-    /// 补全候选下拉层：紧贴输入框下方渲染。
+    /// 补全候选下拉层：自适应输入框下方/上方渲染，支持视口保护与滚动窗口。
     /// - 语法参考模式 (Reference)：提供丰富语义解释与语法范式 (Cheat-Sheet)。
-    /// - 极速补全模式 (Speed)：紧凑单列快速匹配。
+    /// - 极速补全模式 (Speed)：紧凑单列快速匹配，带 Alt+1~9 快捷直选序号。
     fn render_completion_dropdown(&mut self, f: &mut Frame, input_area: Rect) {
         use crate::tui::app::completion::{completion_meta, CompletionStyle};
         let prefix = self.completion_prefix;
         let candidates = self.completion_candidates.clone();
-        let idx = self.completion_index;
+        let total = candidates.len();
+        if total == 0 {
+            return;
+        }
+        let idx = self.completion_index.min(total - 1);
         let is_reference = self.completion_style == CompletionStyle::Reference;
 
+        let width = if is_reference {
+            input_area
+                .width
+                .max(64)
+                .min(f.area().width.saturating_sub(4))
+        } else {
+            input_area
+                .width
+                .max(36)
+                .min(f.area().width.saturating_sub(4))
+        };
+
+        let screen_h = f.area().height;
+        let space_below = screen_h.saturating_sub(input_area.y + input_area.height);
+        let space_above = input_area.y;
+
+        // 最大可见内容行数（9 行，支持 Alt+1~9 快捷直选）
+        let max_content_lines = 9usize;
+        let ideal_height = (total.min(max_content_lines) as u16) + 2;
+
+        let (y, height) = if space_below >= ideal_height {
+            (input_area.y + input_area.height, ideal_height)
+        } else if space_above >= ideal_height {
+            (input_area.y.saturating_sub(ideal_height), ideal_height)
+        } else if space_below >= space_above {
+            (input_area.y + input_area.height, space_below.max(3))
+        } else {
+            (0, space_above.max(3))
+        };
+
+        if height <= 2 || width <= 4 {
+            return;
+        }
+
+        let visible_capacity = (height.saturating_sub(2) as usize).max(1);
+        let scroll_start = if idx >= visible_capacity {
+            idx + 1 - visible_capacity
+        } else {
+            0
+        };
+        let scroll_end = (scroll_start + visible_capacity).min(total);
+
         let mut lines: Vec<Line> = Vec::new();
-        for (i, c) in candidates.iter().enumerate() {
+        for (i, c) in candidates[scroll_start..scroll_end].iter().enumerate() {
+            let actual_idx = scroll_start + i;
+            let is_sel = actual_idx == idx;
             let label = format!(" {}{} ", prefix, c);
-            let is_sel = i == idx;
             let key_style = if is_sel {
                 Style::default()
                     .fg(self.theme.bg)
@@ -245,6 +328,12 @@ impl<'a> App<'a> {
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(self.theme.fg)
+            };
+
+            let num_badge = if !is_reference && actual_idx < 9 {
+                format!("{}. ", actual_idx + 1)
+            } else {
+                String::new()
             };
 
             if is_reference {
@@ -288,54 +377,45 @@ impl<'a> App<'a> {
                 };
                 let mut spans = vec![Span::styled(
                     if is_sel {
-                        format!("❯{} ", label)
+                        format!("❯{}{}", num_badge, label)
                     } else {
-                        format!("  {} ", label)
+                        format!("  {}{}", num_badge, label)
                     },
                     key_style,
                 )];
                 if !desc.is_empty() {
-                    spans.push(Span::styled(desc, Style::default().fg(self.theme.text_dim)));
+                    spans.push(Span::styled(
+                        format!(" {}", desc),
+                        Style::default().fg(self.theme.text_dim),
+                    ));
                 }
                 lines.push(Line::from(spans));
             }
         }
 
-        let width = if is_reference {
-            input_area
-                .width
-                .max(64)
-                .min(f.area().width.saturating_sub(4))
-        } else {
-            input_area
-                .width
-                .max(32)
-                .min(f.area().width.saturating_sub(4))
-        };
-        let height = lines.len() as u16 + 2;
-        let x = input_area.x;
-        let y = input_area.y + input_area.height;
         let dd = Rect {
-            x,
+            x: input_area.x,
             y,
             width,
             height,
         };
-        if dd.y + dd.height > f.area().height {
-            return; // 底部空间不足则不渲染，避免越界
-        }
+
         f.render_widget(ratatui::widgets::Clear, dd);
         let block_title = if is_reference {
             tr!(
                 self.lang,
-                " 语法速查 (↑↓ 浏览 · Tab 采纳 · Esc 关闭) ",
-                " Syntax Guide (↑↓ browse · Tab apply · Esc close) "
+                " 语法速查 ({}/{}) · ↑↓ 切换 · Tab 采纳 · Esc 关闭 ",
+                " Syntax Guide ({}/{}) · ↑↓ cycle · Tab apply · Esc close ",
+                idx + 1,
+                total
             )
         } else {
             tr!(
                 self.lang,
-                " 极速补全 (↑↓ 切换 · Tab 补全 · Esc 取消) ",
-                " Quick Complete (↑↓ pick · Tab complete · Esc cancel) "
+                " 极速补全 ({}/{}) · Alt+1~9 直选 · Tab 补全 ",
+                " Quick Complete ({}/{}) · Alt+1~9 pick · Tab complete ",
+                idx + 1,
+                total
             )
         };
         let block = Block::default()

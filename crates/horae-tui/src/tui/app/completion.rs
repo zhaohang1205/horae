@@ -83,6 +83,42 @@ impl<'a> App<'a> {
         self.clear_completion();
     }
 
+    /// 删除光标前的一个词（Ctrl+W）。
+    pub(crate) fn input_delete_word_backward(&mut self) {
+        if self.input_cursor == 0 {
+            return;
+        }
+        let s = &self.input[..self.input_cursor];
+        let trimmed = s.trim_end();
+        let target_len = if let Some(last_space) = trimmed.rfind(' ') {
+            last_space + 1
+        } else {
+            0
+        };
+        self.input.drain(target_len..self.input_cursor);
+        self.input_cursor = target_len;
+        self.refresh_completion();
+    }
+
+    /// 清除光标到行首的内容（Ctrl+U）。
+    pub(crate) fn input_kill_to_start(&mut self) {
+        if self.input_cursor == 0 {
+            return;
+        }
+        self.input.drain(..self.input_cursor);
+        self.input_cursor = 0;
+        self.refresh_completion();
+    }
+
+    /// 清除光标到行尾的内容（Ctrl+K）。
+    pub(crate) fn input_kill_to_end(&mut self) {
+        if self.input_cursor >= self.input.len() {
+            return;
+        }
+        self.input.truncate(self.input_cursor);
+        self.refresh_completion();
+    }
+
     /// 清空输入并复位光标。
     pub(crate) fn input_clear(&mut self) {
         self.input.clear();
@@ -151,21 +187,24 @@ impl<'a> App<'a> {
         };
         let candidates = match prefix {
             '@' => self.tag_candidates(token),
-            '~' => crate::tui::keys::time_candidates(self.lang)
-                .iter()
-                .filter(|c| c.starts_with(token))
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>(),
-            '*' => crate::tui::keys::RRULE_CANDIDATES
-                .iter()
-                .filter(|c| c.starts_with(token))
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>(),
-            '!' => crate::tui::keys::PRIORITY_CANDIDATES
-                .iter()
-                .filter(|c| c.starts_with(token))
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>(),
+            '~' => {
+                let base: Vec<String> = crate::tui::keys::time_candidates(self.lang)
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                filter_and_sort_candidates('~', &base, token, self.lang)
+            }
+            '*' => {
+                let base = rrule_candidates_for(token);
+                filter_and_sort_candidates('*', &base, token, self.lang)
+            }
+            '!' => {
+                let base: Vec<String> = crate::tui::keys::PRIORITY_CANDIDATES
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                filter_and_sort_candidates('!', &base, token, self.lang)
+            }
             _ => Vec::new(),
         };
         if candidates.is_empty() {
@@ -203,10 +242,16 @@ impl<'a> App<'a> {
         }
         let candidate = self.completion_candidates.get(self.completion_index)?;
         let typed = self.completion_typed()?;
-        let ghost = candidate
-            .strip_prefix(typed)
-            .map(|s| s.to_string())
-            .unwrap_or_default();
+        let ghost = if let Some(stripped) = candidate.strip_prefix(typed) {
+            stripped.to_string()
+        } else if candidate.to_lowercase().starts_with(&typed.to_lowercase()) {
+            candidate
+                .chars()
+                .skip(typed.chars().count())
+                .collect::<String>()
+        } else {
+            String::new()
+        };
         Some((self.completion_prefix, typed.to_string(), ghost))
     }
 
@@ -238,21 +283,208 @@ impl<'a> App<'a> {
         self.completion_range = Some((start, self.input_cursor));
     }
 
-    /// 标签候选：预设 + DB 全部标签（含自定义）。
+    /// 标签候选：预设 + DB 全部标签（按使用频次加权降序）。
     fn tag_candidates(&self, token: &str) -> Vec<String> {
         let default_tags = ["home", "work", "errands", "quick", "focus"];
-        let mut names: Vec<String> = default_tags.iter().map(|s| s.to_string()).collect();
-        if let Ok(db_tags) = horae_core::repo::tags::list_tags(self.conn) {
+        let mut names: Vec<String> = Vec::new();
+        if let Ok(db_tags) = horae_core::repo::tags::list_tags_by_frequency(self.conn) {
             for t in db_tags {
                 if !names.contains(&t.name) {
                     names.push(t.name);
                 }
             }
         }
-        // 前缀精确匹配的候选排最前（先按前缀，再按预设优先）。
-        names.sort_by_key(|n| !n.starts_with(token));
-        names.into_iter().filter(|n| n.starts_with(token)).collect()
+        for d in default_tags {
+            let s = d.to_string();
+            if !names.contains(&s) {
+                names.push(s);
+            }
+        }
+        filter_and_sort_candidates('@', &names, token, self.lang)
     }
+}
+
+/// 动态推导循环候选（支持输入数字如 *2/*3 时动态生成对应间隔的周期候选）。
+pub(crate) fn rrule_candidates_for(token: &str) -> Vec<String> {
+    let mut list: Vec<String> = crate::tui::keys::RRULE_CANDIDATES
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    let trimmed = token.trim();
+    if let Some(first) = trimmed.chars().next() {
+        if first.is_ascii_digit() {
+            let num: String = trimmed.chars().take_while(|c| c.is_ascii_digit()).collect();
+            list.push(format!("{}d", num));
+            list.push(format!("{}w", num));
+            list.push(format!("{}m", num));
+            list.push(format!("{}y", num));
+            list.push(format!("{}w[1,3]", num));
+            list.push(format!("{}w[1..5]", num));
+        }
+    } else if trimmed.starts_with("m[") {
+        list.push("m[1,15]".to_string());
+        list.push("m[1,-1]".to_string());
+        list.push("m[-1]".to_string());
+    } else if trimmed.starts_with("w[") {
+        list.push("w[1,3]".to_string());
+        list.push("w[1..5]".to_string());
+    } else if trimmed.starts_with("y[") {
+        list.push("y[jan,jul]".to_string());
+        list.push("y[1,7]".to_string());
+    }
+
+    list
+}
+
+/// 计算候选匹配得分（支持前缀匹配、大小写不敏感、中英文拼音首字母/别名映射、模糊子串包含）。
+/// 返回 Some(score)（分值越高越优先），不匹配返回 None。
+pub(crate) fn candidate_match_score(
+    prefix: char,
+    candidate: &str,
+    token: &str,
+    _lang: horae_core::i18n::Lang,
+) -> Option<i32> {
+    if token.is_empty() {
+        return Some(100);
+    }
+    let cand_lower = candidate.to_lowercase();
+    let token_lower = token.to_lowercase();
+
+    // 1. 完全匹配（大小写无关）
+    if cand_lower == token_lower {
+        return Some(1000);
+    }
+
+    // 2. 前缀匹配（大小写无关）
+    if cand_lower.starts_with(&token_lower) {
+        let diff = (cand_lower.len().saturating_sub(token_lower.len())) as i32;
+        return Some(800 - diff.min(300));
+    }
+
+    // 3. 语义与拼音/别名映射
+    match prefix {
+        '~' => {
+            let matched_alias = match candidate {
+                "周一" => matches!(
+                    token_lower.as_str(),
+                    "zy" | "zhouyi" | "mon" | "monday" | "1" | "周" | "周一"
+                ),
+                "周二" => matches!(
+                    token_lower.as_str(),
+                    "ze" | "zhouer" | "tue" | "tuesday" | "2" | "周" | "周二"
+                ),
+                "周三" => matches!(
+                    token_lower.as_str(),
+                    "zs" | "zhousan" | "wed" | "wednesday" | "3" | "周" | "周三"
+                ),
+                "周四" => matches!(
+                    token_lower.as_str(),
+                    "zsi" | "zs4" | "zhousi" | "thu" | "thursday" | "4" | "周" | "周四"
+                ),
+                "周五" => matches!(
+                    token_lower.as_str(),
+                    "zw" | "zhouwu" | "fri" | "friday" | "5" | "周" | "周五"
+                ),
+                "周六" => matches!(
+                    token_lower.as_str(),
+                    "zl" | "zhouliu" | "sat" | "saturday" | "6" | "周" | "周六"
+                ),
+                "周日" => matches!(
+                    token_lower.as_str(),
+                    "zr" | "zhouri"
+                        | "zt"
+                        | "zhoutian"
+                        | "sun"
+                        | "sunday"
+                        | "7"
+                        | "0"
+                        | "周"
+                        | "周日"
+                ),
+                "周末" => matches!(
+                    token_lower.as_str(),
+                    "zm" | "zhoumo" | "weekend" | "wknd" | "周" | "周末"
+                ),
+                "today" => matches!(
+                    token_lower.as_str(),
+                    "td" | "jt" | "jintian" | "今天" | "今"
+                ),
+                "tomorrow" => matches!(
+                    token_lower.as_str(),
+                    "tm" | "tmrw" | "mt" | "mingtian" | "明天" | "明"
+                ),
+                "后天" => matches!(token_lower.as_str(), "ht" | "houtian" | "in2d" | "后"),
+                "now" => matches!(token_lower.as_str(), "xz" | "xianzai" | "当前" | "现"),
+                _ => false,
+            };
+            if matched_alias {
+                return Some(650);
+            }
+        }
+        '!' => {
+            let matched_alias = match candidate {
+                "high" => matches!(token_lower.as_str(), "h" | "1" | "p1" | "g" | "gao" | "高"),
+                "medium" => matches!(
+                    token_lower.as_str(),
+                    "m" | "med" | "2" | "p2" | "z" | "zhong" | "中"
+                ),
+                "low" => matches!(token_lower.as_str(), "l" | "3" | "p3" | "d" | "di" | "低"),
+                _ => false,
+            };
+            if matched_alias {
+                return Some(650);
+            }
+        }
+        '*' => {
+            let matched_alias = match candidate {
+                "weekday" => matches!(
+                    token_lower.as_str(),
+                    "wd" | "workday" | "gzr" | "gongzuori" | "工作日" | "工"
+                ),
+                "weekend" => matches!(
+                    token_lower.as_str(),
+                    "we" | "wknd" | "zm" | "zhoumo" | "周末"
+                ),
+                _ => false,
+            };
+            if matched_alias {
+                return Some(650);
+            }
+        }
+        _ => {}
+    }
+
+    // 4. 子串包含（仅在输入长度 >= 2 时启用，避免单字符误匹配过多项）
+    if token.len() >= 2 && cand_lower.contains(&token_lower) {
+        return Some(300);
+    }
+
+    None
+}
+
+/// 过滤并打分排序候选列表。
+pub(crate) fn filter_and_sort_candidates(
+    prefix: char,
+    candidates: &[String],
+    token: &str,
+    lang: horae_core::i18n::Lang,
+) -> Vec<String> {
+    let mut scored: Vec<(String, i32, usize)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for (idx, c) in candidates.iter().enumerate() {
+        if !seen.insert(c.clone()) {
+            continue;
+        }
+        if let Some(score) = candidate_match_score(prefix, c, token, lang) {
+            scored.push((c.clone(), score, idx));
+        }
+    }
+
+    // 按得分降序，同分保持原始出现顺序
+    scored.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.2.cmp(&b.2)));
+    scored.into_iter().map(|(c, _, _)| c).collect()
 }
 
 /// 自动补全模式：语法参考模式（丰富语义与范式，适合辅助学习）vs 极速补全模式（紧凑极速，适合盲打流）。
@@ -281,10 +513,10 @@ impl CompletionStyle {
     pub(crate) fn label(self, lang: horae_core::i18n::Lang) -> &'static str {
         match self {
             CompletionStyle::Reference => {
-                lang.tr("补全风格 (语法参考模式)", "Completion (Cheat-Sheet Guide)")
+                lang.tr("补全风格 (语法参考模式)", "Completion Style (Reference)")
             }
             CompletionStyle::Speed => {
-                lang.tr("补全风格 (极速补全模式)", "Completion (Speed & Compact)")
+                lang.tr("补全风格 (极速补全模式)", "Completion Style (Speed)")
             }
         }
     }
@@ -370,6 +602,14 @@ pub(crate) fn completion_meta(
                 lang.tr("后天 (两日后)", "In 2 days").into(),
                 lang.tr("两日后截止", "Due in 2 days").into(),
             ),
+            "+15m" => (
+                lang.tr("15 分钟后", "In 15 mins").into(),
+                lang.tr("相对分钟: +Nm", "Relative: +Nm").into(),
+            ),
+            "+30m" => (
+                lang.tr("30 分钟后", "In 30 mins").into(),
+                lang.tr("相对分钟: +Nm", "Relative: +Nm").into(),
+            ),
             "+1h" => (
                 lang.tr("1 小时后", "In 1 hour").into(),
                 lang.tr("相对小时: +Nh", "Relative: +Nh").into(),
@@ -382,12 +622,20 @@ pub(crate) fn completion_meta(
                 lang.tr("3 小时后", "In 3 hours").into(),
                 lang.tr("相对小时: +Nh", "Relative: +Nh").into(),
             ),
+            "+4h" => (
+                lang.tr("4 小时后", "In 4 hours").into(),
+                lang.tr("相对小时: +Nh", "Relative: +Nh").into(),
+            ),
             "+1d" => (
                 lang.tr("1 天后", "In 1 day").into(),
                 lang.tr("相对天数: +Nd", "Relative: +Nd").into(),
             ),
             "+2d" => (
                 lang.tr("2 天后", "In 2 days").into(),
+                lang.tr("相对天数: +Nd", "Relative: +Nd").into(),
+            ),
+            "+3d" => (
+                lang.tr("3 天后", "In 3 days").into(),
                 lang.tr("相对天数: +Nd", "Relative: +Nd").into(),
             ),
             "+1w" => (
@@ -421,6 +669,18 @@ pub(crate) fn completion_meta(
             "周日" => (
                 lang.tr("本周日 / 下周日", "This/Next Sunday").into(),
                 lang.tr("星期词: 周一~周日", "Weekday: Mon-Sun").into(),
+            ),
+            "周末" => (
+                lang.tr("周末 (周六)", "Weekend (Sat)").into(),
+                lang.tr("本周六零点", "Upcoming Saturday").into(),
+            ),
+            "09:00" => (
+                lang.tr("上午 9 点", "09:00 AM").into(),
+                lang.tr("工作起点", "Work start").into(),
+            ),
+            "18:00" => (
+                lang.tr("下午 6 点", "06:00 PM").into(),
+                lang.tr("下班截止", "End of day").into(),
             ),
             "mon" => (
                 lang.tr("本周一 / 下周一", "This/Next Monday").into(),
