@@ -7,11 +7,73 @@ use crate::model::task::{self, Task};
 /// 对调用方隐藏 —— 展开是模块内部策略，调用方只需要「全部发生点」。
 const HORIZON: usize = 366;
 
+/// [`occurrences_since`] 前移展开基准的块数上限：每块推进约 [`HORIZON`] 个
+/// 发生点，64 块足以覆盖停摆数十年的习惯，同时给畸形规则兜底。
+const ROLL_LIMIT: usize = 64;
+
 /// 展开一个循环规则从锚点开始的全部发生点（inclusive anchor）。
 /// 支持 FREQ=DAILY|WEEKLY|MONTHLY|YEARLY 加 INTERVAL、COUNT、UNTIL、BYDAY、
 /// BYMONTHDAY、BYMONTH。视野上限为 [`HORIZON`]；COUNT/UNTIL 在其中收紧。
 pub fn occurrences(rrule: &str, anchor_ms: i64) -> Result<Vec<i64>> {
     rrule_occurrences(rrule, anchor_ms, HORIZON)
+}
+
+/// 展开一个循环规则，并**保证结果覆盖 `from_ms` 之后的一整段视野**。
+///
+/// 锚点早于 `from_ms` 时（典型：停摆数月的每日习惯，锚点停在几个月前），
+/// [`occurrences`] 的 366 上限会被锚点年龄吃掉，展开结果整体早于今天，任务
+/// 于是从今日/明日视图与逾期判定中消失。这里把展开基准前移到「不晚于 `from_ms`
+/// 的最后一次发生点」再展开一次，结果形如 `[最近一次已错过的发生点, ...]`。
+///
+/// 带 `COUNT` 的规则按原样展开：前移基准会越过规则终点，凭空造出发生点。
+pub fn occurrences_since(rrule: &str, anchor_ms: i64, from_ms: i64) -> Result<Vec<i64>> {
+    if has_count(rrule) || anchor_ms >= from_ms {
+        return occurrences(rrule, anchor_ms);
+    }
+    let mut pivot = anchor_ms;
+    for _ in 0..ROLL_LIMIT {
+        let chunk = rrule_occurrences(rrule, pivot, HORIZON)?;
+        if chunk.last().is_some_and(|last| *last >= from_ms) {
+            // 本块已跨过 from_ms：以块内最后一次不晚于 from_ms 的发生点为基准
+            // 重展一次，拿到完整视野并丢掉过时的前缀。
+            return match chunk.iter().rposition(|m| *m <= from_ms) {
+                Some(0) | None => Ok(chunk),
+                Some(i) => occurrences(rrule, chunk[i]),
+            };
+        }
+        // 整块都早于 from_ms：基准前移到块尾再来一轮（UNTIL 截断/无后续发生点
+        // 时块尾不再前进，原样返回）。
+        match chunk.last().copied() {
+            Some(last) if last > pivot => pivot = last,
+            _ => return Ok(chunk),
+        }
+    }
+    rrule_occurrences(rrule, pivot, HORIZON)
+}
+
+/// 规则是否用 `COUNT` 限定了总次数（这类规则不能前移展开基准）。
+fn has_count(rrule: &str) -> bool {
+    rrule.split(';').any(|part| {
+        matches!(
+            part.split_once('=')
+                .unwrap_or((part, ""))
+                .0
+                .trim()
+                .to_uppercase()
+                .as_str(),
+            "COUNT"
+        )
+    })
+}
+
+/// 任务的排程锚点：循环任务以排程起点为准（它是 RRULE 展开的基准时间），
+/// 普通任务以截止时间为准。全系统（日视图、闹钟、提醒、排序）共用这一个定义。
+pub fn anchor_ms(task: &Task) -> Option<i64> {
+    if task.rrule.is_some() {
+        task.scheduled_start_at.or(task.due_at)
+    } else {
+        task.due_at.or(task.scheduled_start_at)
+    }
 }
 
 /// 从已经展开的发生序列里挑出「最近一次已错过（逾期）的 slot，否则下一个」。
@@ -29,9 +91,8 @@ pub fn effective_due_from(occ: &[i64], now: i64) -> Option<i64> {
 /// 窗口、每日摘要与展示。`now` 用真实时钟。
 pub fn effective_due(task: &Task) -> Option<i64> {
     if let Some(rr) = &task.rrule {
-        let anchor = task.scheduled_start_at.or(task.due_at);
-        if let Some(start) = anchor {
-            if let Ok(occ) = occurrences(rr, start) {
+        if let Some(start) = anchor_ms(task) {
+            if let Ok(occ) = occurrences_since(rr, start, crate::time::now_ms()) {
                 if let Some(d) = effective_due_from(&occ, crate::time::now_ms()) {
                     return Some(d);
                 }
@@ -42,12 +103,16 @@ pub fn effective_due(task: &Task) -> Option<i64> {
     task.due_at.or(task.scheduled_start_at)
 }
 
-/// 把循环任务的排程窗口推进到下一次发生：给定规则、锚点与当前终点，
-/// 返回 (下一开始, 下一终点)。duration 保持 = end-or-anchor 的跨距；
+/// 把循环任务的排程窗口推进到下一次发生：给定规则、锚点、当前终点与当前时刻，
+/// 返回 (下一开始, 下一终点)。`duration` 保持 = end-or-anchor 的跨距；
 /// 无终点时 duration 为 0。`next_window` 是纯计算，数据库写入由调用方完成。
-pub fn next_window(rrule: &str, anchor: i64, end: Option<i64>) -> Option<(i64, i64)> {
-    let occ = occurrences(rrule, anchor).ok()?;
-    let next = occ.into_iter().find(|m| *m > anchor)?;
+///
+/// 从「锚点与 now 中较晚者」之后找第一次发生：漏打多期的习惯打卡后直接跳到
+/// `now` 之后的第一次发生，而不是只前进一步、继续留在逾期状态。
+pub fn next_window(rrule: &str, anchor: i64, end: Option<i64>, now: i64) -> Option<(i64, i64)> {
+    let base = anchor.max(now);
+    let occ = occurrences_since(rrule, anchor, base).ok()?;
+    let next = occ.into_iter().find(|m| *m > base)?;
     let duration = end.unwrap_or(anchor) - anchor;
     Some((next, next + duration))
 }
@@ -513,7 +578,8 @@ mod tests {
     fn next_window_advances_keeping_duration() {
         let anchor = 1000;
         let end = 2000;
-        let (next, next_end) = next_window("FREQ=DAILY", anchor, Some(end)).unwrap();
+        // now = 锚点：未过期，只前进一步
+        let (next, next_end) = next_window("FREQ=DAILY", anchor, Some(end), anchor).unwrap();
         assert_eq!(next, anchor + 86_400_000);
         assert_eq!(next_end, next + (end - anchor), "duration 保持不变");
     }
@@ -521,8 +587,67 @@ mod tests {
     #[test]
     fn next_window_no_end_zero_duration() {
         let anchor = 1000;
-        let (next, next_end) = next_window("FREQ=DAILY", anchor, None).unwrap();
+        let (next, next_end) = next_window("FREQ=DAILY", anchor, None, anchor).unwrap();
         assert_eq!(next_end, next, "无终点 → duration = 0");
+    }
+
+    #[test]
+    fn next_window_keeps_grid_for_just_passed_slot() {
+        let now = crate::time::now_ms();
+        let anchor = now - 60_000; // 1 分钟前的今日 slot
+        let (next, _) = next_window("FREQ=DAILY", anchor, None, now).unwrap();
+        assert_eq!(next, anchor + 86_400_000, "刚过期的 slot 只推进一步");
+    }
+
+    #[test]
+    fn next_window_skips_missed_periods() {
+        let now = crate::time::now_ms();
+        let anchor = now - 5 * 86_400_000; // 漏打 5 天
+        let (next, _) = next_window("FREQ=DAILY", anchor, None, now).unwrap();
+        assert!(next > now, "跳到 now 之后的第一次发生");
+        assert!(next <= now + 86_400_000, "不超过一个周期");
+    }
+
+    #[test]
+    fn occurrences_since_covers_stale_anchor() {
+        let now = crate::time::now_ms();
+        let anchor = now - 400 * 86_400_000; // 锚点年龄超过 HORIZON=366
+        let occ = occurrences_since("FREQ=DAILY", anchor, now).unwrap();
+        assert!(
+            occ.iter().any(|m| (*m - now).abs() <= 86_400_000),
+            "展开结果覆盖今天附近"
+        );
+        assert!(occ.len() > 1);
+        assert!(occ.windows(2).all(|w| w[0] < w[1]), "严格递增");
+        assert!(
+            occurrences("FREQ=DAILY", anchor).unwrap().last() < Some(&now),
+            "原样展开确实覆盖不到现在（这是要修的问题）"
+        );
+    }
+
+    #[test]
+    fn occurrences_since_keeps_last_missed_before_from() {
+        let now = crate::time::now_ms();
+        let anchor = now - 3 * 86_400_000;
+        let occ = occurrences_since("FREQ=WEEKLY", anchor, now).unwrap();
+        let missed = occ.iter().filter(|m| **m <= now).count();
+        assert_eq!(missed, 1, "只保留最近一次已错过的发生点");
+        assert!(occ.iter().any(|m| *m > now), "并给出下一次发生");
+    }
+
+    #[test]
+    fn occurrences_since_respects_count() {
+        let now = crate::time::now_ms();
+        let anchor = now - 400 * 86_400_000;
+        let occ = occurrences_since("FREQ=DAILY;COUNT=3", anchor, now).unwrap();
+        assert_eq!(occ.len(), 3, "COUNT 规则不前移基准，不凭空造发生点");
+    }
+
+    #[test]
+    fn occurrences_since_fresh_anchor_is_plain_expansion() {
+        let now = crate::time::now_ms();
+        let occ = occurrences_since("FREQ=WEEKLY;BYDAY=MO,WE,FR", now, now).unwrap();
+        assert_eq!(occ, occurrences("FREQ=WEEKLY;BYDAY=MO,WE,FR", now).unwrap());
     }
 
     #[test]

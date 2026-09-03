@@ -157,10 +157,8 @@ impl<'a> AppHandlers for App<'a> {
                     self.note(horae_core::pomo::start(self.conn, &id));
                     self.needs_clear = true;
                 }
+                // 其余按键（含 Esc）直接关闭到期提醒：popup 已被 take 走。
                 crate::tui::app::Popup::TaskDueNow(_, _) => {}
-                _ => {
-                    // other popups close on any key
-                }
             }
             return Ok(());
         }

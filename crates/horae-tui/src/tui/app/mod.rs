@@ -6,7 +6,6 @@ use horae_core::model::event::TaskEvent;
 use horae_core::model::pomodoro::PomoState;
 use horae_core::model::tag::Tag;
 use horae_core::model::task::Task;
-use horae_core::repo::tasks::{self, ListFilter};
 
 pub(crate) mod completion;
 mod data;
@@ -151,8 +150,6 @@ pub(crate) enum Pane {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) enum Popup {
-    /// Show today's tasks summary on startup
-    TodayTasks(Vec<String>),
     /// Prompt to enter Pomodoro mode for a scheduled task
     TaskDueNow(String, String), // task_id, task_title
     /// Feature toggles modal (current selected index)
@@ -407,38 +404,9 @@ impl<'a> App<'a> {
         };
         app.refresh()?;
 
-        // --- Startup Today Tasks Popup ---
-        let all_tasks = tasks::list(
-            conn,
-            &ListFilter {
-                status: None,
-                tags: vec![],
-                query: None,
-                review_stale: false,
-            },
-        )
-        .unwrap_or_default();
-
-        let (today_start_ms, today_end_ms) = horae_core::time::local_day_bounds(0);
-        let today_start = today_start_ms / 1000;
-        let today_end = today_end_ms / 1000;
-
-        let mut todays = Vec::new();
-        for t in &all_tasks {
-            if let Some(due) = t.due_at {
-                if due >= today_start && due <= today_end {
-                    todays.push(t.title.clone());
-                }
-            }
-        }
-
-        if !todays.is_empty() && !start_in_capture {
-            app.popup = Some(Popup::TodayTasks(todays));
-        }
-
         app.load_detail();
         if start_in_capture {
-            // 启动即快速录入：空输入，光标就位，并抑制今日弹层让输入框直达。
+            // 启动即快速录入：空输入，光标就位。
             app.input.clear();
             app.set_mode(Mode::Capturing);
             app.status_message = tr!(

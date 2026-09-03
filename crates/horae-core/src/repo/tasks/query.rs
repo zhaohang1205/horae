@@ -388,7 +388,7 @@ mod tests {
             &CaptureInput {
                 title: "Past Due".into(),
                 status: task::Status::Next,
-                due_at: Some(now - 3600_000),
+                due_at: Some(now - 3_600_000),
                 ..Default::default()
             },
         )
@@ -400,7 +400,7 @@ mod tests {
             &CaptureInput {
                 title: "Recurring".into(),
                 status: task::Status::Scheduled,
-                due_at: Some(now + 3600_000),
+                due_at: Some(now + 3_600_000),
                 rrule: Some("FREQ=DAILY".into()),
                 ..Default::default()
             },
@@ -413,7 +413,7 @@ mod tests {
             &CaptureInput {
                 title: "Future Task".into(),
                 status: task::Status::Next,
-                due_at: Some(now + 3600_000),
+                due_at: Some(now + 3_600_000),
                 ..Default::default()
             },
         )

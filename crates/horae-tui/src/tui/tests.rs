@@ -381,7 +381,6 @@ fn today_tomorrow_views() {
     .unwrap();
 
     let mut app = app_normal(&conn);
-    app.popup = None; // 关闭启动时的今日任务弹窗，避免吞掉按键
 
     let collect =
         |app: &App| -> Vec<String> { app.items.iter().map(|r| r.title.clone()).collect() };
@@ -407,10 +406,13 @@ fn today_tomorrow_views() {
         t.iter().any(|s| s == "daily-habit"),
         "明日视图含明日循环发生"
     );
-    assert!(t.iter().any(|s| s == "overdue"), "明日视图含逾期任务");
     assert!(
-        t.iter().any(|s| s == "due-today"),
-        "明日视图含今天到期但未完成的任务（结转）"
+        !t.iter().any(|s| s == "overdue"),
+        "明日视图不含逾期任务（逾期只归今日）"
+    );
+    assert!(
+        !t.iter().any(|s| s == "due-today"),
+        "明日视图不含今天到期但未完成的任务（不再结转）"
     );
 
     // 循环独立性：把今天这次循环标记完成后，明天的发生仍应显示在明日视图
@@ -424,7 +426,7 @@ fn today_tomorrow_views() {
 }
 
 #[test]
-fn checked_in_habit_stays_in_today_with_next_time() {
+fn checked_in_habit_moves_to_its_next_day() {
     horae_core::repo::state::set_test_override();
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
@@ -448,20 +450,27 @@ fn checked_in_habit_stays_in_today_with_next_time() {
     )
     .unwrap();
 
-    // 今日打卡 → 锚点推进到下次 occurrence
+    // 今日打卡 → 锚点推进到 now 之后的下一次发生（明日 09:00）
     tasks::transition(&conn, &rec.id, task::Status::Done).unwrap();
 
     let mut app = app_normal(&conn);
     app.popup = None;
     app.handle_key(key('J')).unwrap(); // 今日视图
+    assert!(
+        !app.items.iter().any(|r| r.title == "daily-habit"),
+        "今日已打卡、下次发生在明日的习惯不再占着今日视图"
+    );
+
+    app.handle_key(key('K')).unwrap(); // 明日视图
     let row = app
         .items
         .iter()
         .find(|r| r.title == "daily-habit")
-        .expect("已打卡习惯仍保留在今日视图");
-    assert!(row.checked_in_today, "标记为已打卡");
+        .expect("明日视图含下一次发生");
+    assert!(row.checked_in_today, "标记为今日已打卡");
     let next = row.due.expect("有下一次执行时间");
-    assert!(next > horae_core::time::now_ms(), "展示的是未来的下次时间");
+    let (t1s, t1e) = horae_core::time::local_day_bounds(1);
+    assert!(next >= t1s && next <= t1e, "下一次发生落在明日窗口内");
 
     // Scheduled 视图同样标记已打卡
     app.handle_key(key('4')).unwrap();
@@ -471,6 +480,162 @@ fn checked_in_habit_stays_in_today_with_next_time() {
         .find(|r| r.title == "daily-habit")
         .expect("Scheduled 视图含该习惯");
     assert!(row.checked_in_today, "Scheduled 视图也标记已打卡");
+}
+
+#[test]
+fn overdue_recurring_shows_in_today_view() {
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+
+    // 每周循环、锚点 3 天前：今天和明天都不是发生日，但上一次已错过 → 应算逾期
+    tasks::create_capture(
+        &conn,
+        &CaptureInput {
+            title: "weekly-missed".into(),
+            status: task::Status::Scheduled,
+            due_at: Some(horae_core::time::now_ms() - 3 * 24 * 3600 * 1000),
+            tag_names: vec![],
+            rrule: Some("FREQ=WEEKLY".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let mut app = app_normal(&conn);
+    app.popup = None;
+    app.handle_key(key('J')).unwrap(); // 今日视图
+    let row = app
+        .items
+        .iter()
+        .find(|r| r.title == "weekly-missed")
+        .expect("逾期循环任务出现在今日视图");
+    let due = row.due.expect("展示的是最近一次已错过的发生点");
+    assert!(due < horae_core::time::now_ms(), "该发生点已过期");
+    assert!(
+        horae_core::time::is_overdue(Some(due)),
+        "今日视图把它标为逾期"
+    );
+
+    app.handle_key(key('K')).unwrap(); // 明日视图
+    assert!(
+        !app.items.iter().any(|r| r.title == "weekly-missed"),
+        "明日没有发生 → 明日视图不含它"
+    );
+}
+
+#[test]
+fn stale_daily_habit_still_shows_in_today_view() {
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+
+    // 锚点停在 400 天前（超过 HORIZON=366）：展开视野不能从锚点起算，否则任务消失
+    tasks::create_capture(
+        &conn,
+        &CaptureInput {
+            title: "daily-stale".into(),
+            status: task::Status::Scheduled,
+            due_at: Some(horae_core::time::now_ms() - 400 * 24 * 3600 * 1000),
+            tag_names: vec![],
+            rrule: Some("FREQ=DAILY".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let mut app = app_normal(&conn);
+    app.popup = None;
+    app.handle_key(key('J')).unwrap(); // 今日视图
+    assert!(
+        app.items.iter().any(|r| r.title == "daily-stale"),
+        "停摆很久的每日习惯仍出现在今日视图"
+    );
+    app.handle_key(key('K')).unwrap(); // 明日视图
+    assert!(
+        app.items.iter().any(|r| r.title == "daily-stale"),
+        "也出现在明日视图"
+    );
+}
+
+#[test]
+fn startup_opens_no_popup() {
+    use horae_core::repo::tasks::CaptureInput;
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+
+    // 今日到期 + 逾期各一条：启动不应弹任何弹层（弹层会吞掉第一次按键）
+    for (title, due) in [
+        (
+            "today",
+            horae_core::time::parse_time("today 12:00").unwrap(),
+        ),
+        ("overdue", horae_core::time::now_ms() - 2 * 24 * 3600 * 1000),
+    ] {
+        tasks::create_capture(
+            &conn,
+            &CaptureInput {
+                title: title.into(),
+                status: task::Status::Next,
+                due_at: Some(due),
+                tag_names: vec![],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+
+    let app = app_normal(&conn);
+    assert!(app.popup.is_none(), "启动不弹今日概览");
+}
+
+#[test]
+fn day_views_only_include_actionable_statuses() {
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+
+    // 同一到期时间，7 种状态各一条（今日 / 明日各一组）
+    let statuses = [
+        task::Status::Inbox,
+        task::Status::Next,
+        task::Status::Waiting,
+        task::Status::Scheduled,
+        task::Status::Someday,
+        task::Status::Reference,
+        task::Status::Done,
+    ];
+    for when in ["today", "tomorrow"] {
+        for status in statuses.iter().copied() {
+            tasks::create_capture(
+                &conn,
+                &CaptureInput {
+                    title: format!("{}-{}", status, when),
+                    status,
+                    due_at: Some(horae_core::time::parse_time(&format!("{} 12:00", when)).unwrap()),
+                    tag_names: vec![],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+    }
+
+    // 日视图只收「今天能动手的」状态：下一步 / 已排程
+    let mut app = app_normal(&conn);
+    let collect =
+        |app: &App| -> Vec<String> { app.items.iter().map(|r| r.title.clone()).collect() };
+
+    app.handle_key(key('J')).unwrap(); // 今日视图
+    assert_eq!(collect(&app), vec!["next-today", "scheduled-today"]);
+    assert_eq!(app.context_count(View::Today), 2, "侧栏今日计数同步");
+
+    app.handle_key(key('K')).unwrap(); // 明日视图
+    assert_eq!(collect(&app), vec!["next-tomorrow", "scheduled-tomorrow"]);
+    assert_eq!(app.context_count(View::Tomorrow), 2, "侧栏明日计数同步");
+
+    // 被过滤掉的状态仍照常待在各自的状态视图
+    app.handle_key(key('1')).unwrap(); // Inbox
+    assert_eq!(collect(&app), vec!["inbox-today", "inbox-tomorrow"]);
+    app.handle_key(key('3')).unwrap(); // Waiting
+    assert_eq!(collect(&app), vec!["waiting-today", "waiting-tomorrow"]);
 }
 
 #[test]
@@ -1847,15 +2012,17 @@ fn biweekly_shorthand_reschedules_after_done() {
     )
     .unwrap();
 
-    // 完成后被重新排程到隔周的周一 (08-24), 而非结束
+    // 完成后被重新排程到 now 之后的下一次发生（隔周的周一/周三），而非结束。
+    // 期望值从展开结果里算，不写死日期：锚点早已过期，只前进一步会停在过去。
     let done = tasks::transition(&conn, &t.id, task::Status::Done).unwrap();
     assert_eq!(done.status, task::Status::Scheduled, "循环任务重新排程");
     assert_eq!(done.completed_at, None);
-    assert_eq!(
-        horae_core::time::format_local(done.due_at),
-        "2026-08-24 09:00",
-        "下一次发生 = 2 周后的周一"
-    );
+    let next = done.due_at.expect("有下一次发生");
+    let now = horae_core::time::now_ms();
+    assert!(next > now, "下一次发生在未来，而不是停在过去: {:?}", next);
+    let occ = horae_core::schedule::occurrences("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE", due).unwrap();
+    let expect = occ.into_iter().find(|m| *m > now).unwrap();
+    assert_eq!(next, expect, "跳到 now 之后的第一次发生");
 }
 
 #[test]

@@ -33,27 +33,31 @@ impl<'a> App<'a> {
     }
 
     /// 从已经一次性取出的 `all`（未归档、含标签/搜索过滤）里算出今日/明日列表。
-    /// 循环规则只展开一次，结果写入 `rrule_cache` 供本刷新周期内的列表行复用。
-    /// `checked_today` 是今日已打卡的循环任务 id 集合（由 `refresh` 一次性查询）。
-    fn day_lists_from(
-        &mut self,
-        all: &[Task],
-        checked_today: &std::collections::HashSet<String>,
-    ) -> (DayList, DayList) {
+    /// 循环规则只展开一次（覆盖今日窗口起的一整段视野），结果写入 `rrule_cache`
+    /// 供本刷新周期内的列表行复用。
+    ///
+    /// 语义（两个视图彼此独立，可以各入列一次）：
+    /// - **今日** = 今日窗口内的任务 **加上** 逾期任务。循环任务取今日的发生点，
+    ///   今日没有发生点时回落到最近一次已错过的发生点（逾期）。
+    /// - **明日** = **仅**明日窗口内的任务；逾期与今日未完成的任务不再结转。
+    /// - 两个视图都只收**今天能动手的**状态（`Next` / `Scheduled`）：等待中、将来
+    ///   也许、参考资料与未澄清的收件箱留在各自的状态视图里，逾期仍由每日摘要与
+    ///   周回顾覆盖。
+    fn day_lists_from(&mut self, all: &[Task]) -> (DayList, DayList) {
         let (t0s, t0e) = horae_core::time::local_day_bounds(0);
         let (t1s, t1e) = horae_core::time::local_day_bounds(1);
 
         let mut today = Vec::new();
         let mut tomorrow = Vec::new();
-        let now = horae_core::time::now_ms();
         for t in all {
-            if t.status == task::Status::Done {
+            if !matches!(t.status, task::Status::Next | task::Status::Scheduled) {
                 continue;
             }
-            let anchor = t.scheduled_start_at.or(t.due_at);
+            let anchor = horae_core::schedule::anchor_ms(t);
             let occs = match &t.rrule {
                 Some(rr) => {
-                    let occ = anchor.and_then(|a| horae_core::schedule::occurrences(rr, a).ok());
+                    let occ = anchor
+                        .and_then(|a| horae_core::schedule::occurrences_since(rr, a, t0s).ok());
                     if let Some(ref v) = occ {
                         self.rrule_cache.insert(t.id.clone(), v.clone());
                     }
@@ -61,32 +65,25 @@ impl<'a> App<'a> {
                 }
                 None => None,
             };
-            // 今日/明日命中 ⇔ 锚点时间落在该日结束之前（含逾期结转）。
-            let (d0, d1) = match &occs {
-                Some(occs) => (
-                    occs.iter().find(|m| **m >= t0s && **m <= t0e).copied(),
-                    occs.iter().find(|m| **m >= t1s && **m <= t1e).copied(),
-                ),
-                None => (anchor.filter(|d| *d <= t0e), anchor.filter(|d| *d <= t1e)),
+            // 今日：今日窗口内的发生点，否则最近一次已错过的发生点（逾期结转）。
+            let d0 = match occs.as_deref() {
+                Some(o) => o
+                    .iter()
+                    .find(|m| **m >= t0s && **m <= t0e)
+                    .or_else(|| o.iter().rev().find(|m| **m < t0s))
+                    .copied(),
+                None => anchor.filter(|d| *d <= t0e),
             };
-            // 今日已打卡的循环任务：若其下一次执行不在今日窗口内（d0 未命中），仍保留在
-            // 今日视图展示下一次执行时间；d0 命中时由下方 match 统一入列，避免重复。
-            if t.rrule.is_some() && checked_today.contains(&t.id) && d0.is_none() {
-                if let Some(first) = occs
-                    .as_ref()
-                    .and_then(|o| o.iter().find(|m| **m >= now).copied())
-                {
-                    today.push((t.clone(), first));
-                }
+            // 明日：严格落在明日窗口内 —— 逾期与今日任务不结转。
+            let d1 = match occs.as_deref() {
+                Some(o) => o.iter().find(|m| **m >= t1s && **m <= t1e).copied(),
+                None => anchor.filter(|d| *d >= t1s && *d <= t1e),
+            };
+            if let Some(a) = d0 {
+                today.push((t.clone(), a));
             }
-            match (d0, d1) {
-                (Some(a), Some(b)) => {
-                    today.push((t.clone(), a));
-                    tomorrow.push((t.clone(), b));
-                }
-                (Some(a), None) => today.push((t.clone(), a)),
-                (None, Some(b)) => tomorrow.push((t.clone(), b)),
-                (None, None) => {}
+            if let Some(b) = d1 {
+                tomorrow.push((t.clone(), b));
             }
         }
         (today, tomorrow)
@@ -143,7 +140,7 @@ impl<'a> App<'a> {
             });
         }
 
-        let (today, tomorrow) = self.day_lists_from(&all, &checked_today);
+        let (today, tomorrow) = self.day_lists_from(&all);
         self.counts.insert(View::Today, today.len());
         self.counts.insert(View::Tomorrow, tomorrow.len());
         self.refresh_counts()?;

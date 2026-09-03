@@ -91,7 +91,7 @@ impl<'a> App<'a> {
         f.render_widget(Paragraph::new(lines).block(block), area);
     }
 
-    /// 弹出框：今日任务概览 / 任务到期提醒。
+    /// 弹出框：模块开关 / 任务到期提醒。
     pub(super) fn render_popups(&mut self, f: &mut Frame, size: Rect) {
         let Some(ref popup) = self.popup else { return };
         match popup {
@@ -155,48 +155,6 @@ impl<'a> App<'a> {
 
                 let list = ratatui::widgets::List::new(items).block(block);
                 f.render_widget(list, area);
-            }
-            crate::tui::app::Popup::TodayTasks(tasks) => {
-                let mut lines = vec![Line::from(tr!(
-                    self.lang,
-                    "今日有以下任务需要完成:",
-                    "Tasks to complete today:"
-                ))];
-                lines.push(Line::from(""));
-                for t in tasks.iter().take(10) {
-                    lines.push(Line::from(format!(" - {}", t)));
-                }
-                if tasks.len() > 10 {
-                    lines.push(Line::from(tr!(
-                        self.lang,
-                        "   ... 等 {} 个任务",
-                        "   ... and {} more",
-                        tasks.len()
-                    )));
-                }
-                lines.push(Line::from(""));
-                lines.push(Line::from(Span::styled(
-                    tr!(
-                        self.lang,
-                        " [按 Enter 或 Esc 键关闭] ",
-                        " [Press Enter or Esc to close] "
-                    ),
-                    Style::default().fg(self.theme.text_dim),
-                )));
-
-                let area = self.centered_rect(50, 15, size);
-                f.render_widget(ratatui::widgets::Clear, area);
-                let block = Block::default()
-                    .title(tr!(self.lang, " 📅 今日任务概览 ", " 📅 Today's Tasks "))
-                    .borders(Borders::ALL)
-                    .border_set(border::ROUNDED)
-                    .border_style(Style::default().fg(self.theme.accent));
-                f.render_widget(
-                    Paragraph::new(lines)
-                        .block(block)
-                        .alignment(Alignment::Center),
-                    area,
-                );
             }
             crate::tui::app::Popup::TaskDueNow(_, title) => {
                 let mut lines = vec![Line::from(tr!(

@@ -119,6 +119,8 @@ Short aliases: `c`=capture, `l`=list, `s`=show, `m`=modify/edit, `d`=done, `rm`=
 | `F1` or `?` | shortcut help |
 | `q` | quit |
 
+**Today / Tomorrow views**: Today = tasks inside today's window (including today's occurrence of recurring tasks) *plus* overdue tasks (a recurring task with no occurrence today shows its most recent missed occurrence, marked overdue). Tomorrow = **only** tasks inside tomorrow's window (including tomorrow's occurrence of recurring tasks); overdue and unfinished-today tasks are not carried over. Both views only take **Next / Scheduled** statuses — waiting, someday, reference and dated inbox items stay in their own status views.
+
 ## Quotes
 
 Quotes is an **opt-in** feature (off by default; `F7` toggles it, persisted in `settings`). It's a notebook for quotes, inspirations and knowledge — not actionable tasks.

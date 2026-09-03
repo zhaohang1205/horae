@@ -422,7 +422,7 @@ pub fn transition(conn: &Connection, id: &str, to_status: task::Status) -> Resul
                 let anchor = t.scheduled_start_at.or(t.due_at);
                 if let Some(start) = anchor {
                     if let Some((next, next_end)) =
-                        crate::schedule::next_window(rrule, start, t.scheduled_end_at)
+                        crate::schedule::next_window(rrule, start, t.scheduled_end_at, now)
                     {
                         log_event(
                             tx,
