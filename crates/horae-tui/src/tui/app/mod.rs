@@ -251,6 +251,7 @@ pub(crate) struct App<'a> {
     pub(crate) lang: horae_core::i18n::Lang,
     pub(crate) show_help: bool,
     pub(crate) show_syntax: bool,
+    pub(crate) syntax_scroll: usize,
     pub(crate) show_shortcut_bar: bool,
     pub(crate) help_scroll: usize,
     /// GTD 工作流视图（中心决策树）滚动偏移。
@@ -306,6 +307,8 @@ pub(crate) struct App<'a> {
     pub(crate) start_in_capture: bool,
     /// 自动补全模式：语法参考（Reference，默认）vs 极速补全（Speed）。
     pub(crate) completion_style: crate::tui::app::completion::CompletionStyle,
+    /// 纯净录入无干扰（settings 键 `zen_capture`，默认开启）。
+    pub(crate) zen_capture: bool,
 }
 
 impl<'a> App<'a> {
@@ -343,6 +346,14 @@ impl<'a> App<'a> {
             .flatten()
             .map(|s| crate::tui::app::completion::CompletionStyle::from_key(&s))
             .unwrap_or_default();
+        // 纯净录入无干扰：缺省视为开启（settings 显式写 "0" 才关闭）。
+        let zen_capture = !matches!(
+            horae_core::repo::settings::get(conn, "zen_capture")
+                .ok()
+                .flatten()
+                .as_deref(),
+            Some("0")
+        );
         let mut app = App {
             conn,
             view: View::Inbox,
@@ -366,6 +377,7 @@ impl<'a> App<'a> {
             lang,
             show_help: false,
             show_syntax: false,
+            syntax_scroll: 0,
             show_shortcut_bar: true,
             help_scroll: 0,
             workflow_scroll: 0,
@@ -401,6 +413,7 @@ impl<'a> App<'a> {
             checklist_cursor: None,
             start_in_capture,
             completion_style,
+            zen_capture,
         };
         app.refresh()?;
 
@@ -418,6 +431,11 @@ impl<'a> App<'a> {
         }
         app.switch_to_english_ime();
         Ok(app)
+    }
+
+    /// 当前是否处于纯净无干扰快速录入模式（启用 zen_capture 且为全新录入，非编辑组织模式）。
+    pub(crate) fn is_zen_capturing(&self) -> bool {
+        self.zen_capture && self.mode == Mode::Capturing && self.organizing_id.is_none()
     }
 
     pub(crate) fn check_notifications(&mut self) {

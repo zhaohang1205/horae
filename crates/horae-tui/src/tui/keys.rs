@@ -59,16 +59,42 @@ pub(crate) enum When {
 /// 非任务视图：行不是任务，任务操作键不适用。
 pub(crate) const NON_TASK_VIEWS: &[View] = &[View::Tags, View::Archived, View::Settings];
 
-/// `~` 时间补全候选（中文模式：包含常用英文词与中文星期、相对偏移与常用整点）。
+/// `~` 时间补全候选（中文模式：首屏覆盖自然语言天词、常用英文词、相对偏移、星期词汇、跨周表达与整点时刻等多样表达）。
 pub(crate) const TIME_CANDIDATES_ZH: &[&str] = &[
-    "now", "today", "tomorrow", "+15m", "+30m", "+1h", "+2h", "+3h", "+4h", "+1d", "+2d", "+3d",
-    "+1w", "周一", "周二", "周三", "周四", "周五", "周六", "周日", "周末", "09:00", "18:00",
+    "today",
+    "tomorrow",
+    "今天",
+    "明天",
+    "+1h",
+    "+1d",
+    "周五",
+    "下周一",
+    "18:00",
+    "now",
+    "8/20",
+    "后天",
+    "+30m",
+    "+15m",
+    "+2h",
+    "+3h",
+    "+4h",
+    "+2d",
+    "+3d",
+    "+1w",
+    "周一",
+    "周二",
+    "周三",
+    "周四",
+    "周六",
+    "周日",
+    "周末",
+    "09:00",
 ];
 
-/// `~` 时间补全候选（英文模式：纯英文词汇，符合英文用户习惯）。
+/// `~` 时间补全候选（英文模式：纯英文词汇，首屏涵盖天词、相对偏移、星期、整点时刻等多样表达）。
 pub(crate) const TIME_CANDIDATES_EN: &[&str] = &[
-    "now", "today", "tomorrow", "+15m", "+30m", "+1h", "+2h", "+3h", "+4h", "+1d", "+2d", "+3d",
-    "+1w", "mon", "tue", "wed", "thu", "fri", "sat", "sun", "weekend", "09:00", "18:00",
+    "today", "tomorrow", "+1h", "+1d", "fri", "18:00", "now", "8/20", "+30m", "+15m", "+2h", "+3h",
+    "+4h", "+2d", "+3d", "+1w", "mon", "tue", "wed", "thu", "sat", "sun", "weekend", "09:00",
 ];
 
 pub(crate) fn time_candidates(lang: Lang) -> &'static [&'static str] {
@@ -78,19 +104,21 @@ pub(crate) fn time_candidates(lang: Lang) -> &'static [&'static str] {
     }
 }
 
-/// `*` 循环简写补全候选（Tab 补全用）。
+/// `*` 循环简写补全候选（全景覆盖基础周期、工作日/周末、复合周几、月末倒数、月首月末与年度月份）。
 pub(crate) const RRULE_CANDIDATES: &[&str] = &[
     "d",
     "w",
-    "2w[1,3]",
-    "m[1,-1]",
-    "y[jan,jul]",
-    "weekday",
-    "weekend",
     "m",
     "y",
-    "m[1,2,-2,-1]",
+    "weekday",
+    "weekend",
+    "2w[1,3]",
+    "m[-1]",
+    "m[1,-1]",
+    "y[jan,jul]",
     "1w[mo,we]",
+    "m[1,2,-2,-1]",
+    "2d",
 ];
 
 /// `!` 优先级补全候选（输入即弹，按前缀过滤）。

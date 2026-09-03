@@ -285,7 +285,7 @@ impl<'a> App<'a> {
 
     /// 标签候选：预设 + DB 全部标签（按使用频次加权降序）。
     fn tag_candidates(&self, token: &str) -> Vec<String> {
-        let default_tags = ["home", "work", "errands", "quick", "focus"];
+        let default_tags = ["work", "home", "errands", "quick", "focus", "quote"];
         let mut names: Vec<String> = Vec::new();
         if let Ok(db_tags) = horae_core::repo::tags::list_tags_by_frequency(self.conn) {
             for t in db_tags {
@@ -414,7 +414,23 @@ pub(crate) fn candidate_match_score(
                     token_lower.as_str(),
                     "tm" | "tmrw" | "mt" | "mingtian" | "明天" | "明"
                 ),
-                "后天" => matches!(token_lower.as_str(), "ht" | "houtian" | "in2d" | "后"),
+                "今天" => matches!(
+                    token_lower.as_str(),
+                    "jt" | "jintian" | "td" | "today" | "今" | "今天"
+                ),
+                "明天" => matches!(
+                    token_lower.as_str(),
+                    "mt" | "mingtian" | "tm" | "tomorrow" | "明" | "明天"
+                ),
+                "后天" => matches!(
+                    token_lower.as_str(),
+                    "ht" | "houtian" | "in2d" | "后" | "后天"
+                ),
+                "下周一" => matches!(
+                    token_lower.as_str(),
+                    "xzy" | "xiazhouyi" | "nextmon" | "下" | "下周" | "下周一"
+                ),
+                "8/20" => matches!(token_lower.as_str(), "8" | "8/" | "8/20" | "0820"),
                 "now" => matches!(token_lower.as_str(), "xz" | "xianzai" | "当前" | "现"),
                 _ => false,
             };
@@ -446,6 +462,8 @@ pub(crate) fn candidate_match_score(
                     token_lower.as_str(),
                     "we" | "wknd" | "zm" | "zhoumo" | "周末"
                 ),
+                "m[-1]" => matches!(token_lower.as_str(), "m" | "m[" | "m[-" | "m[-1" | "月末"),
+                "2d" => matches!(token_lower.as_str(), "2" | "2d" | "gd" | "geday"),
                 _ => false,
             };
             if matched_alias {
@@ -512,9 +530,10 @@ impl CompletionStyle {
 
     pub(crate) fn label(self, lang: horae_core::i18n::Lang) -> &'static str {
         match self {
-            CompletionStyle::Reference => {
-                lang.tr("补全风格 (语法参考模式)", "Completion Style (Reference)")
-            }
+            CompletionStyle::Reference => lang.tr(
+                "补全风格 (语法参考模式 · 启发多样表达)",
+                "Completion Style (Reference & Inspiration)",
+            ),
             CompletionStyle::Speed => {
                 lang.tr("补全风格 (极速补全模式)", "Completion Style (Speed)")
             }
@@ -531,52 +550,93 @@ pub(crate) fn completion_meta(
     match prefix {
         '*' => match token {
             "d" => (
-                lang.tr("每天", "Daily").into(),
-                lang.tr("基础周期", "Basic period").into(),
+                lang.tr("每天 (基础日周期)", "Daily").into(),
+                lang.tr(
+                    "范式: *d · 支持数字间隔 *2d/*3d",
+                    "Pattern: *d · numbers *2d/*3d",
+                )
+                .into(),
             ),
             "w" => (
-                lang.tr("每周", "Weekly").into(),
-                lang.tr("基础周期", "Basic period").into(),
+                lang.tr("每周 (基础周周期)", "Weekly").into(),
+                lang.tr(
+                    "范式: *w · 支持数字间隔 *2w/*3w",
+                    "Pattern: *w · numbers *2w/*3w",
+                )
+                .into(),
             ),
             "m" => (
-                lang.tr("每月", "Monthly").into(),
-                lang.tr("基础周期", "Basic period").into(),
+                lang.tr("每月 (基础月周期)", "Monthly").into(),
+                lang.tr(
+                    "范式: *m · 支持数字间隔 *2m/*3m",
+                    "Pattern: *m · numbers *2m/*3m",
+                )
+                .into(),
             ),
             "y" => (
-                lang.tr("每年", "Yearly").into(),
-                lang.tr("基础周期", "Basic period").into(),
+                lang.tr("每年 (基础年周期)", "Yearly").into(),
+                lang.tr("范式: *y · 支持数字间隔 *2y", "Pattern: *y · numbers *2y")
+                    .into(),
             ),
             "weekday" => (
                 lang.tr("工作日 (周一至周五)", "Weekdays (Mon-Fri)").into(),
-                lang.tr("别名: workday", "Alias: workday").into(),
+                lang.tr("别名: *workday · 拼音 *gzr", "Alias: *workday")
+                    .into(),
             ),
             "weekend" => (
                 lang.tr("周末 (周六日)", "Weekend (Sat-Sun)").into(),
-                lang.tr("周六与周日", "Sat & Sun").into(),
+                lang.tr("双休日 · 拼音 *zm", "Sat & Sun").into(),
             ),
             "2w[1,3]" => (
                 lang.tr("每两周 (周一、周三)", "Every 2 weeks (Mon, Wed)")
                     .into(),
-                lang.tr("范式: *Nw[1..7]", "Pattern: *Nw[1..7]").into(),
-            ),
-            "m[1,2,-2,-1]" => (
-                lang.tr("月初及月末各两日", "1st,2nd & last 2 days").into(),
-                lang.tr("范式: *Nm[1..31,-1]", "Pattern: *Nm[1..31,-1]")
+                lang.tr("范式: *Nw[1..7] (1-7=周一至日)", "Pattern: *Nw[1..7]")
                     .into(),
+            ),
+            "m[-1]" => (
+                lang.tr("月末最后一天", "Last day of month").into(),
+                lang.tr(
+                    "范式: *m[-1] (负数表示月末倒数)",
+                    "Pattern: *m[-1] (count backwards)",
+                )
+                .into(),
             ),
             "m[1,-1]" => (
                 lang.tr("每月 1 号与月末", "Monthly 1st & last day").into(),
-                lang.tr("范式: *Nm[1..31,-1]", "Pattern: *Nm[1..31,-1]")
+                lang.tr("范式: *Nm[1..31,-1] (月首与月末)", "Pattern: *Nm[1..31,-1]")
                     .into(),
             ),
             "y[jan,jul]" => (
                 lang.tr("每年 1 月与 7 月", "Yearly Jan & Jul").into(),
-                lang.tr("范式: *Ny[1..12/月名]", "Pattern: *Ny[1..12/name]")
-                    .into(),
+                lang.tr(
+                    "范式: *Ny[1..12/月名] (按月循环)",
+                    "Pattern: *Ny[1..12/name]",
+                )
+                .into(),
             ),
             "1w[mo,we]" => (
                 lang.tr("每周 (周一、周三)", "Weekly (Mon, Wed)").into(),
-                lang.tr("英文星期代码", "English weekday codes").into(),
+                lang.tr(
+                    "英文星期代码 (mo/tu/we/th/fr/sa/su)",
+                    "Weekday codes (mo..su)",
+                )
+                .into(),
+            ),
+            "m[1,2,-2,-1]" => (
+                lang.tr("月初及月末各两日", "1st,2nd & last 2 days").into(),
+                lang.tr(
+                    "范式: 多日组合 [1,2,-2,-1]",
+                    "Pattern: multi-day [1,2,-2,-1]",
+                )
+                .into(),
+            ),
+            "2d" => (
+                lang.tr("每两日 (隔日循环)", "Every 2 days").into(),
+                lang.tr(
+                    "范式: *Nd (动态数字推导)",
+                    "Pattern: *Nd (dynamic interval)",
+                )
+                .into(),
             ),
             _ => (
                 horae_core::parser::parse_rrule_shorthand(token),
@@ -585,34 +645,60 @@ pub(crate) fn completion_meta(
         },
         '~' => match token {
             "today" => (
-                lang.tr("今天", "Today").into(),
-                lang.tr("可接时刻: ~today 18:00", "With time: ~today 18:00")
-                    .into(),
+                lang.tr("今天 (今日排程)", "Today").into(),
+                lang.tr(
+                    "可接时刻: ~today 18:00 · 拼音 ~jt/~td",
+                    "With time: ~today 18:00 · alias ~td",
+                )
+                .into(),
             ),
             "tomorrow" => (
-                lang.tr("明天", "Tomorrow").into(),
-                lang.tr("可接时刻: ~tomorrow 10:00", "With time: ~tomorrow 10:00")
-                    .into(),
+                lang.tr("明天 (次日排程)", "Tomorrow").into(),
+                lang.tr(
+                    "可接时刻: ~tomorrow 10:00 · 拼音 ~mt/~tm",
+                    "With time: ~tomorrow 10:00 · alias ~tm",
+                )
+                .into(),
             ),
-            "now" => (
-                lang.tr("当前时刻", "Right now").into(),
-                lang.tr("设为排程起点", "Set start time").into(),
+            "今天" => (
+                lang.tr("今天 (自然语言天词)", "Today").into(),
+                lang.tr(
+                    "复合范式: 可接时刻 ~今天 18:00 · 拼音 ~jt",
+                    "With time: ~today 18:00",
+                )
+                .into(),
+            ),
+            "明天" => (
+                lang.tr("明天 (自然语言天词)", "Tomorrow").into(),
+                lang.tr(
+                    "复合范式: 可接时刻 ~明天 10:00 · 拼音 ~mt",
+                    "With time: ~tomorrow 10:00",
+                )
+                .into(),
             ),
             "后天" => (
                 lang.tr("后天 (两日后)", "In 2 days").into(),
-                lang.tr("两日后截止", "Due in 2 days").into(),
+                lang.tr(
+                    "两日后排程 · 可接时刻 ~后天 09:00 · 拼音 ~ht",
+                    "Due in 2 days · with time",
+                )
+                .into(),
             ),
-            "+15m" => (
-                lang.tr("15 分钟后", "In 15 mins").into(),
-                lang.tr("相对分钟: +Nm", "Relative: +Nm").into(),
-            ),
-            "+30m" => (
-                lang.tr("30 分钟后", "In 30 mins").into(),
-                lang.tr("相对分钟: +Nm", "Relative: +Nm").into(),
+            "now" => (
+                lang.tr("当前时刻 (即刻排程)", "Right now").into(),
+                lang.tr(
+                    "设为起点: 立即进入 Scheduled 状态",
+                    "Set start time (enters Scheduled)",
+                )
+                .into(),
             ),
             "+1h" => (
                 lang.tr("1 小时后", "In 1 hour").into(),
-                lang.tr("相对小时: +Nh", "Relative: +Nh").into(),
+                lang.tr(
+                    "相对小时: +Nh (+2h, +3h...) / +Nm (+30m)",
+                    "Relative: +Nh / +Nm",
+                )
+                .into(),
             ),
             "+2h" => (
                 lang.tr("2 小时后", "In 2 hours").into(),
@@ -627,8 +713,12 @@ pub(crate) fn completion_meta(
                 lang.tr("相对小时: +Nh", "Relative: +Nh").into(),
             ),
             "+1d" => (
-                lang.tr("1 天后", "In 1 day").into(),
-                lang.tr("相对天数: +Nd", "Relative: +Nd").into(),
+                lang.tr("1 天后 (明日排程)", "In 1 day").into(),
+                lang.tr(
+                    "相对天数: +Nd · 可接时刻 ~+1d 09:00",
+                    "Relative: +Nd · with time",
+                )
+                .into(),
             ),
             "+2d" => (
                 lang.tr("2 天后", "In 2 days").into(),
@@ -640,47 +730,97 @@ pub(crate) fn completion_meta(
             ),
             "+1w" => (
                 lang.tr("1 周后", "In 1 week").into(),
-                lang.tr("相对周数: +Nw", "Relative: +Nw").into(),
+                lang.tr(
+                    "相对周数: +Nw · 可接时刻 ~+1w 10:00",
+                    "Relative: +Nw · with time",
+                )
+                .into(),
             ),
-            "周一" => (
-                lang.tr("本周一 / 下周一", "This/Next Monday").into(),
-                lang.tr("星期词: 周一~周日", "Weekday: Mon-Sun").into(),
+            "+15m" => (
+                lang.tr("15 分钟后", "In 15 mins").into(),
+                lang.tr("相对分钟: +Nm (+30m, +45m...)", "Relative: +Nm")
+                    .into(),
             ),
-            "周二" => (
-                lang.tr("本周二 / 下周二", "This/Next Tuesday").into(),
-                lang.tr("星期词: 周一~周日", "Weekday: Mon-Sun").into(),
-            ),
-            "周三" => (
-                lang.tr("本周三 / 下周三", "This/Next Wednesday").into(),
-                lang.tr("星期词: 周一~周日", "Weekday: Mon-Sun").into(),
-            ),
-            "周四" => (
-                lang.tr("本周四 / 下周四", "This/Next Thursday").into(),
-                lang.tr("星期词: 周一~周日", "Weekday: Mon-Sun").into(),
+            "+30m" => (
+                lang.tr("30 分钟后", "In 30 mins").into(),
+                lang.tr("相对分钟: +Nm", "Relative: +Nm").into(),
             ),
             "周五" => (
                 lang.tr("本周五 / 下周五", "This/Next Friday").into(),
-                lang.tr("星期词: 周一~周日", "Weekday: Mon-Sun").into(),
+                lang.tr(
+                    "星期词汇: 周一~周日 · 拼音 ~zw · 英文 ~fri",
+                    "Weekday: Mon-Sun · alias ~fri",
+                )
+                .into(),
+            ),
+            "下周一" => (
+                lang.tr("下周一 (下周首日)", "Next Monday").into(),
+                lang.tr(
+                    "跨周范式: 下周X (支持 下周一~下周日)",
+                    "Next week: next Mon-Sun",
+                )
+                .into(),
+            ),
+            "周一" => (
+                lang.tr("本周一 / 下周一", "This/Next Monday").into(),
+                lang.tr("星期词: 周一~周日 · 拼音 ~zy", "Weekday: Mon-Sun")
+                    .into(),
+            ),
+            "周二" => (
+                lang.tr("本周二 / 下周二", "This/Next Tuesday").into(),
+                lang.tr("星期词: 周一~周日 · 拼音 ~ze", "Weekday: Mon-Sun")
+                    .into(),
+            ),
+            "周三" => (
+                lang.tr("本周三 / 下周三", "This/Next Wednesday").into(),
+                lang.tr("星期词: 周一~周日 · 拼音 ~zs", "Weekday: Mon-Sun")
+                    .into(),
+            ),
+            "周四" => (
+                lang.tr("本周四 / 下周四", "This/Next Thursday").into(),
+                lang.tr("星期词: 周一~周日 · 拼音 ~zsi", "Weekday: Mon-Sun")
+                    .into(),
             ),
             "周六" => (
                 lang.tr("本周六 / 下周六", "This/Next Saturday").into(),
-                lang.tr("星期词: 周一~周日", "Weekday: Mon-Sun").into(),
+                lang.tr("星期词: 周一~周日 · 拼音 ~zl", "Weekday: Mon-Sun")
+                    .into(),
             ),
             "周日" => (
                 lang.tr("本周日 / 下周日", "This/Next Sunday").into(),
-                lang.tr("星期词: 周一~周日", "Weekday: Mon-Sun").into(),
+                lang.tr("星期词: 周一~周日 · 拼音 ~zr/~zt", "Weekday: Mon-Sun")
+                    .into(),
             ),
             "周末" => (
                 lang.tr("周末 (周六)", "Weekend (Sat)").into(),
-                lang.tr("本周六零点", "Upcoming Saturday").into(),
-            ),
-            "09:00" => (
-                lang.tr("上午 9 点", "09:00 AM").into(),
-                lang.tr("工作起点", "Work start").into(),
+                lang.tr("本周六零点 · 拼音 ~zm", "Upcoming Saturday").into(),
             ),
             "18:00" => (
-                lang.tr("下午 6 点", "06:00 PM").into(),
-                lang.tr("下班截止", "End of day").into(),
+                lang.tr("下午 6 点 (下班截止)", "06:00 PM (End of day)")
+                    .into(),
+                lang.tr(
+                    "当日时刻: HH:MM (若已过则自动顺延至明日)",
+                    "Same-day clock (next day if passed)",
+                )
+                .into(),
+            ),
+            "09:00" => (
+                lang.tr("上午 9 点 (工作起点)", "09:00 AM (Work start)")
+                    .into(),
+                lang.tr(
+                    "当日时刻: HH:MM (晨间工作起点)",
+                    "Same-day clock (work start)",
+                )
+                .into(),
+            ),
+            "8/20" => (
+                lang.tr("8 月 20 日 (指定月日)", "Aug 20 (Flexible date)")
+                    .into(),
+                lang.tr(
+                    "日历范式: M/D · YYYY-MM-DD · 可接时刻",
+                    "Calendar: M/D · YYYY-MM-DD · with time",
+                )
+                .into(),
             ),
             "mon" => (
                 lang.tr("本周一 / 下周一", "This/Next Monday").into(),
@@ -720,46 +860,76 @@ pub(crate) fn completion_meta(
         },
         '!' => match token {
             "high" => (
-                lang.tr("高优先级", "High priority").into(),
-                lang.tr("统治级 (+10000 权重)", "Top priority (+10000 weight)")
+                lang.tr("高优先级 (统治级 +10000)", "High priority (+10000)")
                     .into(),
+                lang.tr(
+                    "启发别名: !1 · !h · !p1 · !高",
+                    "Aliases: !1 · !h · !p1 · !high",
+                )
+                .into(),
             ),
             "medium" => (
-                lang.tr("中优先级", "Medium priority").into(),
-                lang.tr("重要 (+5000 权重)", "Medium priority (+5000 weight)")
+                lang.tr("中优先级 (重要 +5000)", "Medium priority (+5000)")
                     .into(),
+                lang.tr(
+                    "启发别名: !2 · !med · !p2 · !中",
+                    "Aliases: !2 · !med · !p2 · !med",
+                )
+                .into(),
             ),
             "low" => (
-                lang.tr("低优先级", "Low priority").into(),
-                lang.tr("次要 (+1000 权重)", "Low priority (+1000 weight)")
+                lang.tr("低优先级 (次要 +1000)", "Low priority (+1000)")
                     .into(),
+                lang.tr(
+                    "启发别名: !3 · !l · !p3 · !低",
+                    "Aliases: !3 · !l · !p3 · !low",
+                )
+                .into(),
             ),
             _ => (String::new(), String::new()),
         },
         '@' => match token {
+            "work" => (
+                lang.tr("工作 / 职场情境", "Work / Professional").into(),
+                lang.tr("GTD情境: 办公室 / 业务开发", "GTD Context: work & office")
+                    .into(),
+            ),
             "home" => (
                 lang.tr("家庭生活 / 个人", "Home / Personal").into(),
-                lang.tr("情境标签", "Context tag").into(),
-            ),
-            "work" => (
-                lang.tr("工作 / 职场", "Work / Professional").into(),
-                lang.tr("情境标签", "Context tag").into(),
+                lang.tr(
+                    "GTD情境: 私人生活 / 家居杂务",
+                    "GTD Context: personal & home",
+                )
+                .into(),
             ),
             "errands" => (
                 lang.tr("外出跑腿 / 办事", "Errands / Outdoors").into(),
-                lang.tr("情境标签", "Context tag").into(),
+                lang.tr(
+                    "GTD情境: 采购 / 外勤 / 出门办事",
+                    "GTD Context: outdoor errands",
+                )
+                .into(),
             ),
             "quick" => (
                 lang.tr("5分钟快速清小事", "Quick task (<5m)").into(),
-                lang.tr("情境标签", "Context tag").into(),
+                lang.tr(
+                    "GTD情境: 碎片时间极速清空",
+                    "GTD Context: fast small actions",
+                )
+                .into(),
             ),
             "focus" => (
                 lang.tr("整块深度专注时间", "Deep Focus").into(),
-                lang.tr("情境标签", "Context tag").into(),
+                lang.tr("GTD情境: 高心智深度攻坚", "GTD Context: deep focus chunks")
+                    .into(),
             ),
             "quote" => (
                 lang.tr("灵感金句 (自动归档)", "Quote inspiration").into(),
-                lang.tr("金句标签", "Quote tag").into(),
+                lang.tr(
+                    "知识库标签: 自动归档至灵感看板",
+                    "Quote tag: auto-archived to Quotes",
+                )
+                .into(),
             ),
             _ => (
                 lang.tr("标签", "Tag").into(),

@@ -70,14 +70,18 @@ pub fn format_local(ms: Option<i64>) -> String {
     }
 }
 
-/// Format a UTC-ms timestamp as a single whitespace-free token for the quick-add
-/// grammar (`~YYYY-MM-DDTHH:MM`), so `parse_time` can round-trip it back exactly.
+/// 把时间戳格式化为 quick-add 语法友好且易读的字符串（日期或日期+时刻），
+/// 无需机器分隔符 `T`，且零点时不附带无意义的 `00:00`。
 pub fn format_quick_time(ms: i64) -> String {
     match Utc.timestamp_millis_opt(ms).single() {
-        Some(dt) => dt
-            .with_timezone(&Local)
-            .format("%Y-%m-%dT%H:%M")
-            .to_string(),
+        Some(dt) => {
+            let local = dt.with_timezone(&Local);
+            if local.time() == chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap() {
+                local.format("%Y-%m-%d").to_string()
+            } else {
+                local.format("%Y-%m-%d %H:%M").to_string()
+            }
+        }
         None => ms.to_string(),
     }
 }

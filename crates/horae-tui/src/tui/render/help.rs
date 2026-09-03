@@ -293,8 +293,8 @@ impl<'a> App<'a> {
                 Span::styled(format!("{:<22}", "F7 风格切换"), s_tok),
                 Span::raw(tr!(
                     self.lang,
-                    "切换「语法参考模式」(丰富范式) 与「极速补全模式」(紧凑单列)",
-                    "Toggle Reference Guide / Speed completion"
+                    "切换「语法参考模式」(表达多样性启发) 与「极速补全模式」(紧凑单列)",
+                    "Toggle Reference Guide (Diverse Inspiration) / Speed complete"
                 )),
             ]),
             Line::from(vec![

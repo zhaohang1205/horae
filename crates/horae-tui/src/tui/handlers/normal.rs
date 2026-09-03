@@ -31,6 +31,42 @@ impl<'a> App<'a> {
         }
     }
 
+    /// 语法速查抽屉打开时的滚动与关闭按键，命中则消费该按键。
+    pub(super) fn handle_syntax_navigation(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.syntax_scroll = self.syntax_scroll.saturating_add(2).min(20);
+                true
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.syntax_scroll = self.syntax_scroll.saturating_sub(2);
+                true
+            }
+            KeyCode::PageDown => {
+                self.syntax_scroll = self.syntax_scroll.saturating_add(4).min(20);
+                true
+            }
+            KeyCode::PageUp => {
+                self.syntax_scroll = self.syntax_scroll.saturating_sub(4);
+                true
+            }
+            KeyCode::Char('g') => {
+                self.syntax_scroll = 0;
+                true
+            }
+            KeyCode::Char('G') => {
+                self.syntax_scroll = 20;
+                true
+            }
+            KeyCode::Esc => {
+                self.show_syntax = false;
+                self.syntax_scroll = 0;
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub(super) fn handle_escape(&mut self, key: KeyEvent) -> Result<bool> {
         if key.code != KeyCode::Esc {
             return Ok(false);
@@ -137,6 +173,7 @@ impl<'a> App<'a> {
             }
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.show_syntax = !self.show_syntax;
+                self.syntax_scroll = 0;
             }
             KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.select_all();

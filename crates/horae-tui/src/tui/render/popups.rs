@@ -96,7 +96,7 @@ impl<'a> App<'a> {
         let Some(ref popup) = self.popup else { return };
         match popup {
             crate::tui::app::Popup::ModuleToggles(idx) => {
-                let area = self.centered_rect(44, 19, size);
+                let area = self.centered_rect(44, 20, size);
                 f.render_widget(ratatui::widgets::Clear, area);
                 let block = Block::default()
                     .title(tr!(self.lang, " 模块显示设置 ", " Module Visibility "))
@@ -135,6 +135,14 @@ impl<'a> App<'a> {
                         ),
                     ),
                     (is_ref, completion_label),
+                    (
+                        self.zen_capture,
+                        tr!(
+                            self.lang,
+                            "纯净录入无干扰 (Zen)",
+                            "Zen capture (no distractions)"
+                        ),
+                    ),
                 ];
                 for (i, (enabled, name)) in opts.iter().enumerate() {
                     let checkbox = if *enabled { "[x]" } else { "[ ]" };

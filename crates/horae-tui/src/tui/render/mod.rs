@@ -50,6 +50,85 @@ impl<'a> AppRender for App<'a> {
             }
         }
 
+        // ── 快速录入纯净专注模式：全屏接管，消除多栏与横幅等背景干扰 ──
+        if self.is_zen_capturing() {
+            f.render_widget(ratatui::widgets::Clear, size);
+            let bg_block = Block::default().style(Style::default().bg(self.theme.bg));
+            f.render_widget(bg_block, size);
+
+            // 屏幕最底部单行 Zen 快捷键指示
+            let hint_line = Line::from(vec![
+                Span::styled(
+                    " [Enter] ",
+                    Style::default()
+                        .fg(self.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    tr!(self.lang, "保存入库", "save"),
+                    Style::default().fg(self.theme.text_dim),
+                ),
+                Span::styled(
+                    "  •  [Tab] ",
+                    Style::default()
+                        .fg(self.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    tr!(self.lang, "智能补全", "complete"),
+                    Style::default().fg(self.theme.text_dim),
+                ),
+                Span::styled(
+                    "  •  [Ctrl+P] ",
+                    Style::default()
+                        .fg(self.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    if self.show_syntax {
+                        tr!(self.lang, "收起语法", "hide syntax")
+                    } else {
+                        tr!(self.lang, "语法速查", "syntax")
+                    },
+                    Style::default().fg(self.theme.text_dim),
+                ),
+                Span::styled(
+                    "  •  [Esc] ",
+                    Style::default()
+                        .fg(self.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    tr!(self.lang, "退出", "exit"),
+                    Style::default().fg(self.theme.text_dim),
+                ),
+            ]);
+            let hint_area = Rect {
+                x: 0,
+                y: size.height.saturating_sub(1),
+                width: size.width,
+                height: 1,
+            };
+            f.render_widget(
+                Paragraph::new(hint_line).alignment(Alignment::Center),
+                hint_area,
+            );
+
+            if self.show_syntax {
+                let (_, syntax_area_opt) = self.capture_layout_geometry(size);
+                if let Some(syntax_area) = syntax_area_opt {
+                    self.render_syntax_drawer(f, syntax_area);
+                }
+            }
+
+            self.render_input_overlay(f, size);
+
+            if self.popup.is_some() {
+                self.render_popups(f, size);
+            }
+            return;
+        }
+
         let main_area = self.render_banners(f, size);
 
         self.list_state.select(Some(self.selected));
@@ -74,27 +153,22 @@ impl<'a> AppRender for App<'a> {
 
         self.render_status_bar(f, chunks[1]);
 
+        if self.show_syntax {
+            let syntax_area = if self.mode.is_input() {
+                let (_, syntax_area_opt) = self.capture_layout_geometry(size);
+                syntax_area_opt.unwrap_or_else(|| self.centered_rect(76, 30, size))
+            } else {
+                self.centered_rect(76, 30, size)
+            };
+            self.render_syntax_drawer(f, syntax_area);
+        }
+
         match self.mode {
             Mode::ConfirmArchive | Mode::ConfirmPurge | Mode::ConfirmProfileDelete => {
                 self.render_confirm_overlay(f, size);
             }
             Mode::Normal | Mode::Visual | Mode::ChecklistFocus => {}
             _ => self.render_input_overlay(f, size),
-        }
-
-        if self.show_syntax {
-            // 当 show_syntax 为 true 时，如果处于输入/编辑模式，则将语法面板放右半屏实现“左右双开”；否则居中
-            let syntax_area = if self.mode.is_input() {
-                Rect {
-                    x: size.width * 50 / 100,
-                    y: size.height / 10,
-                    width: size.width * 46 / 100,
-                    height: (size.height * 80 / 100).min(30),
-                }
-            } else {
-                self.centered_rect(76, 30, size)
-            };
-            self.render_syntax_drawer(f, syntax_area);
         }
 
         if self.show_help {
@@ -392,19 +466,30 @@ impl<'a> AppRender for App<'a> {
 
     fn render_syntax_drawer(&self, f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
         f.render_widget(ratatui::widgets::Clear, area);
+        let scroll_hint = if self.syntax_scroll > 0 {
+            tr!(self.lang, " · PgUp/PgDn 翻卷", " · PgUp/PgDn")
+        } else {
+            ""
+        };
+        let title_str = format!(
+            "{}{}",
+            tr!(
+                self.lang,
+                " 语法说明指南 (Ctrl+P 收起) ",
+                " Syntax guide (Ctrl+P to close) "
+            ),
+            scroll_hint
+        );
         let syntax_block = Block::default()
             .borders(Borders::ALL)
             .border_set(border::ROUNDED)
             .padding(ratatui::widgets::Padding::horizontal(1))
             .border_style(Style::default().fg(self.theme.accent))
-            .title(tr!(
-                self.lang,
-                " 语法说明指南 (Ctrl+P) ",
-                " Syntax guide (Ctrl+P) "
-            ));
+            .title(title_str);
         let syntax = self.syntax_lines();
         let para = Paragraph::new(syntax)
             .block(syntax_block)
+            .scroll((self.syntax_scroll as u16, 0))
             .wrap(ratatui::widgets::Wrap { trim: false });
         f.render_widget(para, area);
     }

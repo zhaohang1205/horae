@@ -40,7 +40,9 @@ impl<'a> App<'a> {
         Ok(())
     }
 
-    /// 把任务序列化成 quick-add 一句话（标题 @标签 ~时间 *周期），可解析回原字段。
+    /// 把任务序列化成 quick-add 一句话（标题 @标签 ~时间 *周期 !优先级），
+    /// 严禁展开语法（周期使用简写如 *d / *2w[1,3]，时间使用自然日期与时刻），
+    /// 消除用户的认知负担和心理障碍。
     pub(crate) fn task_to_quick_add(&self, task: &Task) -> String {
         let row = crate::tui::row_from(task, 0, self.conn)
             .unwrap_or_else(|_| crate::tui::row_from_tags(task, 0, Vec::new()));
@@ -57,7 +59,12 @@ impl<'a> App<'a> {
         if let Some(rr) = &task.rrule {
             s.push(' ');
             s.push('*');
-            s.push_str(rr);
+            s.push_str(&horae_core::parser::rrule_to_shorthand(rr));
+        }
+        if let Some(ref p) = task.priority {
+            s.push(' ');
+            s.push('!');
+            s.push_str(p);
         }
         s
     }

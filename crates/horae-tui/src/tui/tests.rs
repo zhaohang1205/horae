@@ -2565,12 +2565,12 @@ fn module_toggle_popup_navigates_and_persists() {
     let reloaded = horae_core::repo::modules::ModuleVisibility::load(app.conn);
     assert!(!reloaded.splash);
 
-    // j 向下循环导航（0 → 1），k 反向且在 0 处回绕到 10（最后一项：补全风格）
+    // j 向下循环导航（0 → 1），k 反向且在 0 处回绕到 11（最后一项：纯净录入）
     app.handle_key(key('j')).unwrap();
     assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(1)));
     app.popup = Some(crate::tui::app::Popup::ModuleToggles(0));
     app.handle_key(key('k')).unwrap();
-    assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(10)));
+    assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(11)));
 
     // Esc 关闭弹层
     app.handle_key(kc(KeyCode::Esc)).unwrap();
@@ -3333,7 +3333,7 @@ fn bilingual_completion_candidates_and_parsing() {
     seed(&conn);
     let mut app = app_normal(&conn);
 
-    // 1. 中文模式下：~ 包含常用英文词与中文星期，且去除了与 today/tomorrow 重复的今天/明天/后天候选
+    // 1. 中文模式下：~ 首屏覆盖自然天词（今天/明天/后天）、常用英文词（today/tomorrow）与中文星期
     app.lang = horae_core::i18n::Lang::Zh;
     app.mode = Mode::Capturing;
     app.input_insert_char('~');
@@ -3351,16 +3351,16 @@ fn bilingual_completion_candidates_and_parsing() {
         "中文模式包含 '周五'"
     );
     assert!(
-        !app.completion_candidates.contains(&"今天".to_string()),
-        "中文模式去除了与 today 重复的 '今天' 候选"
+        app.completion_candidates.contains(&"今天".to_string()),
+        "中文模式包含 '今天' 候选"
     );
     assert!(
-        !app.completion_candidates.contains(&"明天".to_string()),
-        "中文模式去除了与 tomorrow 重复的 '明天' 候选"
+        app.completion_candidates.contains(&"明天".to_string()),
+        "中文模式包含 '明天' 候选"
     );
     assert!(
-        !app.completion_candidates.contains(&"后天".to_string()),
-        "中文模式去除了 '后天' 候选"
+        app.completion_candidates.contains(&"后天".to_string()),
+        "中文模式包含 '后天' 候选"
     );
 
     // 2. 解析端仍完整支持 今天/明天/后天
@@ -3787,4 +3787,534 @@ fn pomodoro_x_completes_focused_task_and_stops_pomo() {
     app.handle_key(key('u')).unwrap();
     let task_reverted = horae_core::repo::tasks::get(&conn, &t.id).unwrap();
     assert_eq!(task_reverted.status, task::Status::Next);
+}
+
+#[test]
+fn zen_capture_hides_background_panels() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    seed(&conn);
+    let mut app = app_normal(&conn);
+    app.popup = None;
+
+    let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
+
+    // 默认 zen_capture 为 true，按 a 进入快速录入
+    app.handle_key(key('a')).unwrap();
+    assert_eq!(app.mode, Mode::Capturing);
+    assert!(app.is_zen_capturing());
+
+    term.clear().unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let zen_snap = snap(&term);
+    assert_eq!(
+        zen_snap.matches('╭').count(),
+        1,
+        "纯净录入模式下应隐藏三栏背景，仅渲染输入卡片自身 1 个圆角框"
+    );
+    assert!(
+        norm(&zen_snap).contains("快速录入") || zen_snap.contains("QuickCapture"),
+        "录入标题应显示"
+    );
+
+    // 关闭 zen_capture 时，应渲染背景三栏 + 输入卡片共 4 个框
+    app.zen_capture = false;
+    assert!(!app.is_zen_capturing());
+    term.clear().unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let classic_snap = snap(&term);
+    assert_eq!(
+        classic_snap.matches('╭').count(),
+        4,
+        "关闭纯净录入后应展现底层三栏 + 输入卡片共 4 个框"
+    );
+}
+
+#[test]
+fn zen_capture_preserves_slot_hints_with_custom_order() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    app.handle_key(key('a')).unwrap();
+    assert_eq!(app.mode, Mode::Capturing);
+    assert!(app.is_zen_capturing());
+
+    let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+
+    // 输入标题并追加空格，检查槽位提示顺序：周期、时间、优先级、标签
+    for c in "买牛奶 ".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    term.clear().unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let s = norm(&snap(&term));
+    assert!(
+        s.contains("[*周期][~时间][!优先级][@标签]"),
+        "槽位提示顺序必须为：周期、时间、优先级、标签，实际渲染:\n{s}"
+    );
+    // 验证纯净模式下不包含冗长 200 字符语法常驻说明行
+    assert!(
+        !s.contains("日期搜索:MMDD"),
+        "纯净模式下不应显示底部常驻静态语法行"
+    );
+
+    // 追加周期后，槽位提示应只剩时间、优先级、标签
+    for c in "*d ".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    term.clear().unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let s2 = norm(&snap(&term));
+    assert!(
+        s2.contains("[~时间][!优先级][@标签]"),
+        "已输入周期后，槽位提示应顺次展示时间、优先级、标签，实际:\n{s2}"
+    );
+    assert!(s2.contains("循环:*d"), "实时解析行应清晰展现周期规则");
+}
+
+#[test]
+fn zen_capture_toggle_via_f7_persists() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    seed(&conn);
+    let mut app = app_normal(&conn);
+
+    assert!(app.zen_capture, "缺省开启纯净录入");
+
+    // 打开 F7 弹层并跳到第 12 项（下标 11：纯净录入开关）
+    app.handle_key(kc(KeyCode::F(7))).unwrap();
+    for _ in 0..11 {
+        app.handle_key(key('j')).unwrap();
+    }
+    assert_eq!(
+        app.popup,
+        Some(crate::tui::app::Popup::ModuleToggles(11)),
+        "应导航到纯净录入选项"
+    );
+
+    // 空格切换为关闭
+    app.handle_key(key(' ')).unwrap();
+    assert!(!app.zen_capture);
+    assert_eq!(
+        horae_core::repo::settings::get(&conn, "zen_capture")
+            .unwrap()
+            .as_deref(),
+        Some("0")
+    );
+
+    // 重新构造 App 验证持久化生效
+    let app2 = App::new(&conn).unwrap();
+    assert!(!app2.zen_capture, "重新加载后依然保持关闭");
+
+    // 再次空格切换为开启
+    app.handle_key(key(' ')).unwrap();
+    assert!(app.zen_capture);
+    assert_eq!(
+        horae_core::repo::settings::get(&conn, "zen_capture")
+            .unwrap()
+            .as_deref(),
+        Some("1")
+    );
+}
+
+#[test]
+fn organize_edit_does_not_expand_syntax_in_edit_area() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+
+    let start_time = horae_core::time::parse_time("2026-09-10 15:30").unwrap();
+    let rec = tasks::create_capture(
+        &conn,
+        &CaptureInput {
+            title: "定期复盘".into(),
+            status: task::Status::Scheduled,
+            tag_names: vec!["work".to_string()],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // 设置复杂循环与高优先级
+    tasks::schedule(
+        &conn,
+        &rec.id,
+        start_time,
+        None,
+        Some("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE".into()),
+    )
+    .unwrap();
+    tasks::set_priority(&conn, &rec.id, Some("high".into())).unwrap();
+
+    let mut app = app_normal(&conn);
+    app.handle_key(key('4')).unwrap(); // 切换到 Scheduled 视图
+
+    // 按 e 进入编辑模式
+    app.handle_key(key('e')).unwrap();
+    assert_eq!(app.mode, Mode::Capturing);
+    assert_eq!(app.organizing_id.as_deref(), Some(rec.id.as_str()));
+
+    // 严禁展开语法：编辑区必须保持精简友好的 *2w[1,3]，不能包含机器语法 FREQ=
+    assert!(
+        app.input.contains("*2w[1,3]"),
+        "循环必须还原为紧凑简写 *2w[1,3]，实际为: {}",
+        app.input
+    );
+    assert!(
+        !app.input.contains("FREQ="),
+        "编辑区绝对不得出现机器展开语法 FREQ=，实际为: {}",
+        app.input
+    );
+
+    // 时间无机器字符 T
+    assert!(
+        app.input.contains("~2026-09-10 15:30"),
+        "时间应为自然格式 ~2026-09-10 15:30，实际为: {}",
+        app.input
+    );
+    assert!(
+        !app.input.contains('T'),
+        "时间不得包含机器分隔符 T，实际为: {}",
+        app.input
+    );
+
+    // 优先级 !high 完整保留
+    assert!(
+        app.input.contains("!high"),
+        "优先级 !high 必须保留在编辑区，实际为: {}",
+        app.input
+    );
+
+    // 验证测试每日任务（纯日期 00:00）
+    let midnight_time = horae_core::time::parse_time("2026-09-10").unwrap();
+    let rec2 = tasks::create_capture(
+        &conn,
+        &CaptureInput {
+            title: "每日晨跑".into(),
+            status: task::Status::Scheduled,
+            tag_names: vec!["health".to_string()],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    tasks::schedule(
+        &conn,
+        &rec2.id,
+        midnight_time,
+        None,
+        Some("FREQ=DAILY".into()),
+    )
+    .unwrap();
+
+    app.handle_key(kc(KeyCode::Esc)).unwrap(); // 退出当前编辑
+    app.reload().unwrap();
+
+    // 选中每日晨跑任务
+    let idx = app
+        .items
+        .iter()
+        .position(|r| r.title == "每日晨跑")
+        .expect("找到每日晨跑");
+    app.selected = idx;
+    app.handle_key(key('e')).unwrap();
+
+    assert!(
+        app.input.contains("*d"),
+        "每日循环必须还原为 *d，实际为: {}",
+        app.input
+    );
+    assert!(
+        !app.input.contains("FREQ="),
+        "不得包含 FREQ=，实际为: {}",
+        app.input
+    );
+    assert!(
+        app.input.contains("~2026-09-10"),
+        "零点时间应简洁显示日期 ~2026-09-10，实际为: {}",
+        app.input
+    );
+    assert!(
+        !app.input.contains("00:00"),
+        "纯日期排程不应携带冗余 00:00，实际为: {}",
+        app.input
+    );
+
+    // 提交编辑，再次确认 round-trip 无损
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+    assert_eq!(app.mode, Mode::Normal);
+    let t = tasks::get(&conn, &rec2.id).unwrap();
+    assert_eq!(t.rrule.as_deref(), Some("FREQ=DAILY"));
+}
+
+#[test]
+fn task_to_quick_add_comprehensive_matrix() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let app = app_normal(&conn);
+
+    let cases = vec![
+        (
+            "纯标题任务",
+            vec![],
+            None,
+            None,
+            None,
+            vec!["纯标题任务"],
+            vec!["@", "~", "*", "!", "FREQ="],
+        ),
+        (
+            "多标签分类任务",
+            vec!["work", "rust"],
+            None,
+            None,
+            None,
+            vec!["@work", "@rust"],
+            vec!["~", "*", "!", "FREQ="],
+        ),
+        (
+            "纯日期排程任务",
+            vec!["life"],
+            Some("2026-09-10"),
+            None,
+            None,
+            vec!["~2026-09-10"],
+            vec!["00:00", "T", "*", "!"],
+        ),
+        (
+            "日期与时刻排程任务",
+            vec!["meeting"],
+            Some("2026-09-10 14:30"),
+            None,
+            None,
+            vec!["~2026-09-10 14:30"],
+            vec!["T", "*", "!"],
+        ),
+        (
+            "每日习惯任务",
+            vec!["habit"],
+            Some("2026-09-10"),
+            Some("FREQ=DAILY"),
+            Some("high"),
+            vec!["*d", "!high", "~2026-09-10"],
+            vec!["FREQ=", "00:00", "T"],
+        ),
+        (
+            "隔天循环任务",
+            vec![],
+            Some("2026-09-10 08:00"),
+            Some("FREQ=DAILY;INTERVAL=2"),
+            Some("medium"),
+            vec!["*2d", "!medium", "~2026-09-10 08:00"],
+            vec!["FREQ=", "T"],
+        ),
+        (
+            "工作日例会",
+            vec!["team"],
+            None,
+            Some("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"),
+            Some("low"),
+            vec!["*weekday", "!low"],
+            vec!["FREQ=", "BYDAY="],
+        ),
+        (
+            "周末大扫除",
+            vec!["home"],
+            None,
+            Some("FREQ=WEEKLY;BYDAY=SA,SU"),
+            None,
+            vec!["*weekend"],
+            vec!["FREQ=", "BYDAY="],
+        ),
+        (
+            "每两周一三游泳",
+            vec!["health"],
+            Some("2026-09-10 19:00"),
+            Some("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE"),
+            Some("high"),
+            vec!["*2w[1,3]", "!high"],
+            vec!["FREQ=", "INTERVAL=", "BYDAY="],
+        ),
+        (
+            "每月指定日期交租",
+            vec!["finance"],
+            None,
+            Some("FREQ=MONTHLY;BYMONTHDAY=1,15"),
+            None,
+            vec!["*m[1,15]"],
+            vec!["FREQ=", "BYMONTHDAY="],
+        ),
+        (
+            "半年回顾",
+            vec!["okr"],
+            None,
+            Some("FREQ=YEARLY;BYMONTH=1,7"),
+            None,
+            vec!["*y[1,7]"],
+            vec!["FREQ=", "BYMONTH="],
+        ),
+    ];
+
+    for (title, tags, time_str, rrule, priority, must_contains, must_nots) in cases {
+        let start_ms = time_str.map(|ts| horae_core::time::parse_time(ts).unwrap());
+        let rec = tasks::create_capture(
+            &conn,
+            &CaptureInput {
+                title: title.to_string(),
+                status: if start_ms.is_some() {
+                    task::Status::Scheduled
+                } else {
+                    task::Status::Inbox
+                },
+                tag_names: tags.iter().map(|s| s.to_string()).collect(),
+                rrule: rrule.map(|s| s.to_string()),
+                priority: priority.map(|s| s.to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        if let Some(ms) = start_ms {
+            tasks::schedule(&conn, &rec.id, ms, None, rrule.map(|s| s.to_string())).unwrap();
+        }
+
+        let task = tasks::get(&conn, &rec.id).unwrap();
+        let serialized = app.task_to_quick_add(&task);
+
+        for needle in must_contains {
+            assert!(
+                serialized.contains(needle),
+                "任务 [{title}] 序列化结果必须包含 '{needle}'，实际: '{serialized}'"
+            );
+        }
+        for bad in must_nots {
+            assert!(
+                !serialized.contains(bad),
+                "任务 [{title}] 序列化结果严禁包含机器符号 '{bad}'，实际: '{serialized}'"
+            );
+        }
+
+        // 双向闭环校验：将序列化结果送回 parse_quick_add，必须能 100% 正确无损解析还原
+        let reparsed = horae_core::parser::parse_quick_add(&serialized);
+        assert_eq!(reparsed.title, title, "标题解析还原一致");
+        assert_eq!(reparsed.priority.as_deref(), priority, "优先级解析还原一致");
+        if let Some(expected_rrule) = rrule {
+            assert_eq!(
+                reparsed.rrule.as_deref(),
+                Some(expected_rrule),
+                "循环规则在逆向后再次解析，必须与数据库底层标准 RRULE 完全一致！"
+            );
+        }
+        if let Some(ms) = start_ms {
+            let reparsed_ms =
+                horae_core::time::parse_time(reparsed.time_str.as_ref().unwrap()).unwrap();
+            assert_eq!(
+                reparsed_ms, ms,
+                "排程时间戳经逆向后再次解析，必须毫秒级一致！"
+            );
+        }
+    }
+}
+
+#[test]
+fn syntax_guide_normal_mode_navigation_and_esc() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    seed(&conn);
+    let mut app = app_normal(&conn);
+
+    let initial_selected = app.selected;
+
+    // 1. Ctrl+P 打开语法速查
+    assert!(!app.show_syntax);
+    app.handle_key(ctrl('p')).unwrap();
+    assert!(app.show_syntax);
+    assert_eq!(app.syntax_scroll, 0);
+
+    // 2. j / Down / PageDown 滚动语法指南，但不触发背景列表移动
+    app.handle_key(key('j')).unwrap();
+    assert_eq!(app.syntax_scroll, 2);
+    assert_eq!(
+        app.selected, initial_selected,
+        "语法弹层打开时 j 不移动背景任务"
+    );
+
+    app.handle_key(kc(KeyCode::PageDown)).unwrap();
+    assert_eq!(app.syntax_scroll, 6);
+    assert_eq!(app.selected, initial_selected);
+
+    // 3. k / Up / PageUp 反向滚动
+    app.handle_key(key('k')).unwrap();
+    assert_eq!(app.syntax_scroll, 4);
+
+    // 4. g 滚到顶部
+    app.handle_key(key('g')).unwrap();
+    assert_eq!(app.syntax_scroll, 0);
+
+    // 5. Esc 关闭语法速查并复位滚动位置
+    app.handle_key(kc(KeyCode::Esc)).unwrap();
+    assert!(!app.show_syntax);
+    assert_eq!(app.syntax_scroll, 0);
+    assert_eq!(app.mode, Mode::Normal);
+}
+
+#[test]
+fn dual_open_syntax_and_completion_rendering() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    seed(&conn);
+    let mut app = app_normal(&conn);
+
+    let mut term = Terminal::new(TestBackend::new(100, 30)).unwrap();
+
+    app.lang = horae_core::i18n::Lang::Zh;
+
+    // 1. 录入模式下按 Ctrl+P 展开语法速查
+    app.handle_key(key('a')).unwrap();
+    assert_eq!(app.mode, Mode::Capturing);
+    app.handle_key(ctrl('p')).unwrap();
+    assert!(app.show_syntax);
+
+    // 此时未键入补全前缀，语法指南完整呈现
+    term.clear().unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let s_syntax = norm(&snap(&term));
+    assert!(
+        s_syntax.contains("语法说明指南") || s_syntax.contains("Syntax guide"),
+        "未激活补全时展示语法说明指南"
+    );
+
+    // 2. 输入 ~ 激活补全：候选下拉浮层（语法参考）浮在最上层
+    app.input_insert_char('~');
+    assert!(app.completion_active());
+
+    term.clear().unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let s_comp = norm(&snap(&term));
+    assert!(
+        s_comp.contains("today") || s_comp.contains("今天"),
+        "补全激活时浮层展示时间补全候选"
+    );
+    assert!(
+        s_comp.contains("表达多样性启发") || s_comp.contains("语法参考"),
+        "补全激活时展示补全参考卡片"
+    );
+
+    // 3. 两段式 Esc：第一个 Esc 取消补全浮层，保留录入模式并重新显露语法说明指南
+    app.handle_key(kc(KeyCode::Esc)).unwrap();
+    assert!(!app.completion_active(), "首个 Esc 关闭补全候选");
+    assert_eq!(app.mode, Mode::Capturing, "仍处于录入模式");
+    assert!(app.show_syntax, "语法指南重新完全展现");
+
+    // 4. 第二个 Esc 退出录入模式，重置语法指南
+    app.handle_key(kc(KeyCode::Esc)).unwrap();
+    assert_eq!(app.mode, Mode::Normal, "退出到 Normal 模式");
+    assert!(!app.show_syntax, "语法指南随录入退出而关闭");
+    assert_eq!(app.syntax_scroll, 0);
 }

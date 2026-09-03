@@ -41,11 +41,11 @@ impl<'a> AppHandlers for App<'a> {
                             // close, implicitly handled because popup is taken and not put back
                         }
                         KeyCode::Char('j') | KeyCode::Down => {
-                            idx = (idx + 1) % 11;
+                            idx = (idx + 1) % 12;
                             self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
                         }
                         KeyCode::Char('k') | KeyCode::Up => {
-                            idx = idx.checked_sub(1).unwrap_or(10);
+                            idx = idx.checked_sub(1).unwrap_or(11);
                             self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
                         }
                         KeyCode::Char(' ') => {
@@ -142,6 +142,15 @@ impl<'a> AppHandlers for App<'a> {
                                         self.completion_style.key(),
                                     );
                                 }
+                                11 => {
+                                    // 纯净录入无干扰：翻转并持久化到 settings 表。
+                                    self.zen_capture = !self.zen_capture;
+                                    let _ = horae_core::repo::settings::set(
+                                        self.conn,
+                                        "zen_capture",
+                                        if self.zen_capture { "1" } else { "0" },
+                                    );
+                                }
                                 _ => {}
                             }
                             self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
@@ -177,6 +186,9 @@ impl<'a> AppHandlers for App<'a> {
 
     fn handle_normal(&mut self, key: KeyEvent) -> Result<()> {
         if self.show_help && self.handle_help_navigation(key) {
+            return Ok(());
+        }
+        if self.show_syntax && self.handle_syntax_navigation(key) {
             return Ok(());
         }
         if self.handle_escape(key)? {
@@ -287,12 +299,16 @@ impl<'a> AppHandlers for App<'a> {
         match key.code {
             KeyCode::Esc => {
                 self.organizing_id = None;
+                self.show_syntax = false;
+                self.syntax_scroll = 0;
                 self.set_mode(Mode::Normal);
                 self.input_clear();
                 self.reload()?;
             }
             KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.organizing_id = None;
+                self.show_syntax = false;
+                self.syntax_scroll = 0;
                 self.set_mode(Mode::Normal);
                 self.input_clear();
                 self.reload()?;
@@ -321,13 +337,44 @@ impl<'a> AppHandlers for App<'a> {
             KeyCode::BackTab => {
                 self.completion_up();
             }
-            KeyCode::Up => self.completion_up(),
-            KeyCode::Down => self.completion_down(),
+            KeyCode::PageUp => {
+                if self.show_syntax {
+                    self.syntax_scroll = self.syntax_scroll.saturating_sub(4);
+                }
+            }
+            KeyCode::PageDown => {
+                if self.show_syntax {
+                    self.syntax_scroll = self.syntax_scroll.saturating_add(4).min(20);
+                }
+            }
+            KeyCode::Up => {
+                if self.completion_active() {
+                    self.completion_up();
+                } else if self.show_syntax {
+                    self.syntax_scroll = self.syntax_scroll.saturating_sub(2);
+                }
+            }
+            KeyCode::Down => {
+                if self.completion_active() {
+                    self.completion_down();
+                } else if self.show_syntax {
+                    self.syntax_scroll = self.syntax_scroll.saturating_add(2).min(20);
+                }
+            }
             KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.completion_down();
+                if self.completion_active() {
+                    self.completion_down();
+                } else if self.show_syntax {
+                    self.syntax_scroll = self.syntax_scroll.saturating_add(2).min(20);
+                }
             }
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.completion_up();
+                if self.completion_active() {
+                    self.completion_up();
+                } else {
+                    self.show_syntax = !self.show_syntax;
+                    self.syntax_scroll = 0;
+                }
             }
             KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.input_delete_word_backward();

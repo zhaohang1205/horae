@@ -1,7 +1,5 @@
-use crate::tui::app::{App, Mode, Pane, View};
-use horae_core::parser::{
-    parse_quick_add, parse_rrule_shorthand, priority_value, tokenize_quick_add, QuickAddKind,
-};
+use crate::tui::app::{App, Mode, View};
+use horae_core::parser::{parse_quick_add, priority_value, tokenize_quick_add, QuickAddKind};
 use horae_core::time;
 use ratatui::symbols::border;
 use ratatui::{
@@ -64,17 +62,9 @@ impl<'a> App<'a> {
                         " Organize: edit title @tags ~time *rrule (empty/Esc to skip) "
                     )
                 } else if self.view == View::Quotes && self.quotes.enabled {
-                    tr!(
-                        self.lang,
-                        " 快速录入金句 (自动 @quote 入库, 支持 @标签 及 Tab 补全) ",
-                        " Quick capture quote (auto @quote, @tag and Tab to complete) "
-                    )
+                    tr!(self.lang, " 快速录入金句 ", " Quick Capture Quote ")
                 } else {
-                    tr!(
-                        self.lang,
-                        " 快速录入 (支持 @标签 及 Tab 补全: home, work, errands, quick, focus...) ",
-                        " Quick capture (@tag, Tab to complete: home, work, errands, quick, focus...) "
-                    )
+                    tr!(self.lang, " 快速录入 ", " Quick Capture ")
                 }
             }
             Mode::Tagging => tr!(
@@ -132,7 +122,6 @@ impl<'a> App<'a> {
         };
 
         let mut text_lines: Vec<Line> = Vec::new();
-        let width = if self.mode == Mode::Capturing { 70 } else { 50 };
 
         // 输入行（首行）：快速录入带语法高亮，其余为纯文本行。行首固定一个空格。
         let mut input_line_display = if self.mode == Mode::Capturing {
@@ -160,17 +149,17 @@ impl<'a> App<'a> {
             let has_rrule = tokens.iter().any(|t| t.kind == QuickAddKind::Rrule);
             let has_prio = tokens.iter().any(|t| t.kind == QuickAddKind::Priority);
             let mut slots = Vec::new();
-            if !has_tag {
-                slots.push(tr!(self.lang, "@标签", "@tag"));
+            if !has_rrule {
+                slots.push(tr!(self.lang, "*周期", "*rrule"));
             }
             if !has_time {
                 slots.push(tr!(self.lang, "~时间", "~time"));
             }
-            if !has_rrule {
-                slots.push(tr!(self.lang, "*周期", "*rrule"));
-            }
             if !has_prio {
                 slots.push(tr!(self.lang, "!优先级", "!priority"));
+            }
+            if !has_tag {
+                slots.push(tr!(self.lang, "@标签", "@tag"));
             }
             if !slots.is_empty() {
                 let hint = format!("[{}]", slots.join("] ["));
@@ -182,41 +171,33 @@ impl<'a> App<'a> {
 
         if self.mode == Mode::Capturing {
             text_lines.push(input_line_display);
-            text_lines.push(Line::from(""));
-            if self.input.trim().is_empty() {
-                text_lines.push(self.capture_syntax_hint_line());
+            if self.show_syntax {
+                // 语法说明指南同时打开时，底部占满语法指南，输入框内展示输入行与实时解析行
+                if !self.input.trim().is_empty() {
+                    text_lines.push(Line::from(""));
+                    text_lines.extend(self.capture_preview_lines());
+                }
+            } else if self.is_zen_capturing() {
+                if !self.input.trim().is_empty() {
+                    text_lines.push(Line::from(""));
+                    text_lines.extend(self.capture_preview_lines());
+                }
             } else {
-                text_lines.extend(self.capture_preview_lines());
-                // 语法提示常驻：输入/编辑过程中始终可见，便于快速学习语法。
                 text_lines.push(Line::from(""));
-                text_lines.push(self.capture_syntax_hint_line());
+                if self.input.trim().is_empty() {
+                    text_lines.push(self.capture_syntax_hint_line());
+                } else {
+                    text_lines.extend(self.capture_preview_lines());
+                    // 语法提示常驻：输入/编辑过程中始终可见，便于快速学习语法。
+                    text_lines.push(Line::from(""));
+                    text_lines.push(self.capture_syntax_hint_line());
+                }
             }
         } else {
             text_lines.push(input_line_display);
         }
 
-        let height = text_lines.len() as u16 + 2;
-
-        // 输入框区域：show_syntax 时居左靠上，否则居中靠上（快速录入上移，留足下方候选空间）。
-        let area = if self.show_syntax {
-            Rect {
-                x: size.width / 20,
-                y: size.height / 10,
-                width: (size.width * 42 / 100).min(65),
-                height,
-            }
-        } else {
-            let w = (size.width * width / 100).min(size.width.saturating_sub(4));
-            let x = (size.width.saturating_sub(w)) / 2;
-            let top_offset = (size.height * 15 / 100).max(2);
-            let y = top_offset.min(size.height.saturating_sub(height));
-            Rect {
-                x,
-                y,
-                width: w,
-                height,
-            }
-        };
+        let (area, _) = self.capture_layout_geometry(size);
 
         // 输入区可用宽度：框宽 - 左右边框 - 左右内边距。
         let inner_width = area.width.saturating_sub(4) as usize;
@@ -227,15 +208,7 @@ impl<'a> App<'a> {
         let scroll_x = cursor_col.saturating_sub(inner_width) as u16;
 
         f.render_widget(ratatui::widgets::Clear, area);
-        let block_style = if self.show_syntax {
-            if self.pane == Pane::Right {
-                self.theme.border_active
-            } else {
-                self.theme.border_inactive
-            }
-        } else {
-            self.theme.accent
-        };
+        let block_style = self.theme.accent;
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
@@ -277,7 +250,7 @@ impl<'a> App<'a> {
         let width = if is_reference {
             input_area
                 .width
-                .max(64)
+                .max(72)
                 .min(f.area().width.saturating_sub(4))
         } else {
             input_area
@@ -398,8 +371,8 @@ impl<'a> App<'a> {
         let block_title = if is_reference {
             tr!(
                 self.lang,
-                " 语法速查 ({}/{}) · ↑↓ 切换 · Tab 采纳 · Esc 关闭 ",
-                " Syntax Guide ({}/{}) · ↑↓ cycle · Tab apply · Esc close ",
+                " 语法参考 · 表达多样性启发 ({}/{}) · ↑↓ 浏览 · Tab 采纳 · Esc 关闭 ",
+                " Syntax Guide & Inspiration ({}/{}) · ↑↓ cycle · Tab apply · Esc close ",
                 idx + 1,
                 total
             )
@@ -489,7 +462,7 @@ impl<'a> App<'a> {
             .map(|t| horae_core::parser::strip_token_prefix(&t.text).to_string())
         {
             let valid = horae_core::parser::rrule_valid(&raw);
-            let resolved = parse_rrule_shorthand(&raw);
+            let resolved = horae_core::parser::rrule_friendly_desc(&raw, self.lang);
             let (resolved_text, resolved_style) = if valid {
                 (resolved, Style::default().fg(self.theme.text_dim))
             } else {
@@ -547,5 +520,79 @@ impl<'a> App<'a> {
             ),
             Style::default().fg(self.theme.text_dim),
         ))
+    }
+
+    /// 计算输入覆盖层的所需高度，在上下结构双开模式下用于精确切分屏幕上部与下部。
+    pub(crate) fn input_overlay_height(&self, size: Rect) -> u16 {
+        if self.mode == Mode::Capturing {
+            let preview_lines = if !self.input.trim().is_empty() {
+                1 + self.capture_preview_lines().len() as u16
+            } else {
+                0
+            };
+            if self.show_syntax {
+                // 上下结构模式：留足下方语法指南展示空间
+                (1 + preview_lines + 2)
+                    .min(size.height.saturating_sub(6))
+                    .max(3)
+            } else if self.is_zen_capturing() {
+                (1 + preview_lines + 2).max(3)
+            } else {
+                let hint_line = 1;
+                let extra_blank = if preview_lines > 0 { 1 } else { 0 };
+                (1 + preview_lines + extra_blank + hint_line + 2).max(4)
+            }
+        } else {
+            3
+        }
+    }
+
+    /// 计算快速录入与语法说明指南在上下结构中的几何位置与尺寸 (input_area, Option<syntax_area>)。
+    /// 确保视觉重心处于视线黄金分割区，同时约束语法指南面积（高约 35%~40%，最大 13 行），
+    /// 消除面积过大遮蔽和重心严重偏置的问题。
+    pub(crate) fn capture_layout_geometry(&self, size: Rect) -> (Rect, Option<Rect>) {
+        let width_pct = if self.is_zen_capturing() { 88 } else { 82 };
+        let w = (size.width * width_pct / 100)
+            .max(72)
+            .min(size.width.saturating_sub(4));
+        let x = (size.width.saturating_sub(w)) / 2;
+
+        let input_h = self.input_overlay_height(size);
+
+        if self.show_syntax {
+            let max_syntax_h = size.height.saturating_sub(input_h + 4);
+            let syntax_h = (size.height * 38 / 100).clamp(8, 13).min(max_syntax_h);
+            let total_h = input_h + syntax_h;
+            // 黄金比例视线重心：避免顶死在第 0 行，将整个控制卡片组置于中上方舒适视线区
+            let top_y = (size.height.saturating_sub(total_h) * 2 / 5).max(1);
+
+            let input_area = Rect {
+                x,
+                y: top_y,
+                width: w,
+                height: input_h,
+            };
+            let syntax_area = Rect {
+                x,
+                y: top_y + input_h,
+                width: w,
+                height: syntax_h,
+            };
+            (input_area, Some(syntax_area))
+        } else {
+            let top_offset = if self.is_zen_capturing() {
+                (size.height * 20 / 100).max(2)
+            } else {
+                (size.height * 15 / 100).max(2)
+            };
+            let y = top_offset.min(size.height.saturating_sub(input_h));
+            let input_area = Rect {
+                x,
+                y,
+                width: w,
+                height: input_h,
+            };
+            (input_area, None)
+        }
     }
 }

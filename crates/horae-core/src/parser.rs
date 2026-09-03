@@ -297,6 +297,230 @@ pub fn parse_rrule_shorthand(s: &str) -> String {
     s.to_string()
 }
 
+/// 把已规范化的 RRULE（如 `FREQ=DAILY` / `FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE`）
+/// 还原为用户友好的紧凑简写语法（如 `d` / `2w[1,3]`），用于编辑区回填，避免向用户展示机器语法。
+pub fn rrule_to_shorthand(rrule: &str) -> String {
+    let mut clean = rrule.trim();
+    if let Some(stripped) = clean.strip_prefix("RRULE:") {
+        clean = stripped.trim();
+    } else if let Some(stripped) = clean.strip_prefix("rrule:") {
+        clean = stripped.trim();
+    }
+    if !clean.to_ascii_uppercase().contains("FREQ=") {
+        return clean.to_string();
+    }
+
+    let mut freq = None;
+    let mut interval = 1u32;
+    let mut byday = None;
+    let mut bymonthday = None;
+    let mut bymonth = None;
+
+    for part in clean.split(';') {
+        let mut kv = part.splitn(2, '=');
+        let k = kv.next().unwrap_or("").trim().to_ascii_uppercase();
+        let v = kv.next().unwrap_or("").trim();
+        match k.as_str() {
+            "FREQ" => freq = Some(v.to_ascii_uppercase()),
+            "INTERVAL" => {
+                if let Ok(n) = v.parse::<u32>() {
+                    interval = n;
+                }
+            }
+            "BYDAY" => byday = Some(v.to_ascii_uppercase()),
+            "BYMONTHDAY" => bymonthday = Some(v.to_string()),
+            "BYMONTH" => bymonth = Some(v.to_string()),
+            _ => {
+                // 若包含非常规字段（如 UNTIL/COUNT），保持原样避免破坏语义
+                return clean.to_string();
+            }
+        }
+    }
+
+    let Some(freq) = freq else {
+        return clean.to_string();
+    };
+
+    let iv_str = if interval > 1 {
+        interval.to_string()
+    } else {
+        String::new()
+    };
+
+    match freq.as_str() {
+        "DAILY" => {
+            if byday.is_none() && bymonthday.is_none() && bymonth.is_none() {
+                if interval == 1 {
+                    "d".to_string()
+                } else {
+                    format!("{}d", interval)
+                }
+            } else {
+                clean.to_string()
+            }
+        }
+        "WEEKLY" => {
+            if bymonthday.is_none() && bymonth.is_none() {
+                match byday.as_deref() {
+                    None => {
+                        if interval == 1 {
+                            "w".to_string()
+                        } else {
+                            format!("{}w", interval)
+                        }
+                    }
+                    Some(days) => {
+                        let mut nums = Vec::new();
+                        let mut ok = true;
+                        for d in days.split(',') {
+                            let n = match d.trim().to_ascii_uppercase().as_str() {
+                                "MO" => 1,
+                                "TU" => 2,
+                                "WE" => 3,
+                                "TH" => 4,
+                                "FR" => 5,
+                                "SA" => 6,
+                                "SU" => 7,
+                                _ => {
+                                    ok = false;
+                                    break;
+                                }
+                            };
+                            if !nums.contains(&n) {
+                                nums.push(n);
+                            }
+                        }
+                        if ok {
+                            nums.sort_unstable();
+                            if nums == [1, 2, 3, 4, 5] && interval == 1 {
+                                "weekday".to_string()
+                            } else if nums == [6, 7] && interval == 1 {
+                                "weekend".to_string()
+                            } else {
+                                let s_nums: Vec<String> =
+                                    nums.into_iter().map(|n| n.to_string()).collect();
+                                format!("{}w[{}]", iv_str, s_nums.join(","))
+                            }
+                        } else {
+                            clean.to_string()
+                        }
+                    }
+                }
+            } else {
+                clean.to_string()
+            }
+        }
+        "MONTHLY" => {
+            if byday.is_none() && bymonth.is_none() {
+                match bymonthday.as_deref() {
+                    None => {
+                        if interval == 1 {
+                            "m".to_string()
+                        } else {
+                            format!("{}m", interval)
+                        }
+                    }
+                    Some(days) => {
+                        format!("{}m[{}]", iv_str, days)
+                    }
+                }
+            } else {
+                clean.to_string()
+            }
+        }
+        "YEARLY" => {
+            if byday.is_none() && bymonthday.is_none() {
+                match bymonth.as_deref() {
+                    None => {
+                        if interval == 1 {
+                            "y".to_string()
+                        } else {
+                            format!("{}y", interval)
+                        }
+                    }
+                    Some(months) => {
+                        format!("{}y[{}]", iv_str, months)
+                    }
+                }
+            } else {
+                clean.to_string()
+            }
+        }
+        _ => clean.to_string(),
+    }
+}
+
+/// 把循环规则（简写或标准 RRULE）格式化为人类易读的自然语言描述（中/英），用于实时预览与详情展示。
+pub fn rrule_friendly_desc(s: &str, lang: crate::i18n::Lang) -> String {
+    let normalized = parse_rrule_shorthand(s);
+    let shorthand = rrule_to_shorthand(&normalized);
+    match shorthand.as_str() {
+        "d" => lang.tr("每天", "Daily").to_string(),
+        "w" => lang.tr("每周", "Weekly").to_string(),
+        "m" => lang.tr("每月", "Monthly").to_string(),
+        "y" => lang.tr("每年", "Yearly").to_string(),
+        "weekday" => lang
+            .tr("工作日 (周一至五)", "Weekdays (Mon-Fri)")
+            .to_string(),
+        "weekend" => lang.tr("周末 (周六日)", "Weekends (Sat-Sun)").to_string(),
+        _ => {
+            if let Some(rest) = shorthand.strip_suffix('d') {
+                if let Ok(n) = rest.parse::<u32>() {
+                    return crate::tr!(lang, "每 {} 天", "Every {} days", n).to_string();
+                }
+            }
+            if let Some(rest) = shorthand.strip_suffix('w') {
+                if let Ok(n) = rest.parse::<u32>() {
+                    return crate::tr!(lang, "每 {} 周", "Every {} weeks", n).to_string();
+                }
+            }
+            if let Some(rest) = shorthand.strip_suffix('m') {
+                if let Ok(n) = rest.parse::<u32>() {
+                    return crate::tr!(lang, "每 {} 个月", "Every {} months", n).to_string();
+                }
+            }
+            if let Some(rest) = shorthand.strip_suffix('y') {
+                if let Ok(n) = rest.parse::<u32>() {
+                    return crate::tr!(lang, "每 {} 年", "Every {} years", n).to_string();
+                }
+            }
+            if shorthand.contains('w') && shorthand.contains('[') {
+                if lang.is_zh() {
+                    let mut s = shorthand
+                        .replace('w', "周")
+                        .replace('[', "(周")
+                        .replace(']', ")");
+                    s = s.replace(',', ",周");
+                    return s;
+                } else {
+                    return format!("Every week {}", shorthand);
+                }
+            }
+            if shorthand.contains('m') && shorthand.contains('[') {
+                if lang.is_zh() {
+                    return shorthand
+                        .replace('m', "月")
+                        .replace('[', "(")
+                        .replace(']', "日)");
+                } else {
+                    return format!("Monthly {}", shorthand);
+                }
+            }
+            if shorthand.contains('y') && shorthand.contains('[') {
+                if lang.is_zh() {
+                    return shorthand
+                        .replace('y', "年")
+                        .replace('[', "(")
+                        .replace(']', "月)");
+                } else {
+                    return format!("Yearly {}", shorthand);
+                }
+            }
+            normalized
+        }
+    }
+}
+
 /// 判定一个循环简写/标准 RRULE 是否有效。
 ///
 /// 简写能映射成标准 RRULE（非原样 fallback），或已是 `FREQ=` 开头的 RRULE。
@@ -692,5 +916,222 @@ mod tests {
             parse_rrule_shorthand("2y[10,2]"),
             "FREQ=YEARLY;INTERVAL=2;BYMONTH=2,10"
         );
+    }
+
+    #[test]
+    fn rrule_to_shorthand_and_friendly_desc() {
+        assert_eq!(rrule_to_shorthand("FREQ=DAILY"), "d");
+        assert_eq!(rrule_to_shorthand("FREQ=DAILY;INTERVAL=2"), "2d");
+        assert_eq!(rrule_to_shorthand("FREQ=WEEKLY"), "w");
+        assert_eq!(rrule_to_shorthand("FREQ=WEEKLY;INTERVAL=3"), "3w");
+        assert_eq!(
+            rrule_to_shorthand("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"),
+            "weekday"
+        );
+        assert_eq!(rrule_to_shorthand("FREQ=WEEKLY;BYDAY=SA,SU"), "weekend");
+        assert_eq!(rrule_to_shorthand("FREQ=WEEKLY;BYDAY=MO,WE"), "w[1,3]");
+        assert_eq!(
+            rrule_to_shorthand("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE"),
+            "2w[1,3]"
+        );
+        assert_eq!(rrule_to_shorthand("FREQ=MONTHLY"), "m");
+        assert_eq!(
+            rrule_to_shorthand("FREQ=MONTHLY;BYMONTHDAY=1,15"),
+            "m[1,15]"
+        );
+        assert_eq!(
+            rrule_to_shorthand("FREQ=MONTHLY;INTERVAL=2;BYMONTHDAY=1,15"),
+            "2m[1,15]"
+        );
+        assert_eq!(rrule_to_shorthand("FREQ=YEARLY"), "y");
+        assert_eq!(rrule_to_shorthand("FREQ=YEARLY;BYMONTH=1,7"), "y[1,7]");
+        assert_eq!(
+            rrule_to_shorthand("FREQ=YEARLY;INTERVAL=2;BYMONTH=1,6"),
+            "2y[1,6]"
+        );
+
+        // Roundtrip check
+        for shorthand in [
+            "d", "2d", "w", "3w", "weekday", "weekend", "w[1,3]", "2w[1,3]", "m", "m[1,15]",
+            "2m[1,15]", "y", "y[1,7]", "2y[1,6]",
+        ] {
+            let parsed = parse_rrule_shorthand(shorthand);
+            assert_eq!(
+                rrule_to_shorthand(&parsed),
+                shorthand,
+                "Roundtrip failed for {shorthand}"
+            );
+        }
+
+        // Friendly descriptions
+        assert_eq!(rrule_friendly_desc("d", crate::i18n::Lang::Zh), "每天");
+        assert_eq!(
+            rrule_friendly_desc("2w[1,3]", crate::i18n::Lang::Zh),
+            "2周(周1,周3)"
+        );
+        assert_eq!(
+            rrule_friendly_desc("weekday", crate::i18n::Lang::En),
+            "Weekdays (Mon-Fri)"
+        );
+    }
+
+    #[test]
+    fn rrule_reverse_mapping_comprehensive_matrix() {
+        // 1. 基础单字母与多倍周期
+        assert_eq!(rrule_to_shorthand("FREQ=DAILY"), "d");
+        assert_eq!(rrule_to_shorthand("FREQ=DAILY;INTERVAL=1"), "d");
+        assert_eq!(rrule_to_shorthand("FREQ=DAILY;INTERVAL=3"), "3d");
+        assert_eq!(rrule_to_shorthand("FREQ=DAILY;INTERVAL=14"), "14d");
+
+        assert_eq!(rrule_to_shorthand("FREQ=WEEKLY"), "w");
+        assert_eq!(rrule_to_shorthand("FREQ=WEEKLY;INTERVAL=1"), "w");
+        assert_eq!(rrule_to_shorthand("FREQ=WEEKLY;INTERVAL=2"), "2w");
+        assert_eq!(rrule_to_shorthand("FREQ=WEEKLY;INTERVAL=5"), "5w");
+
+        assert_eq!(rrule_to_shorthand("FREQ=MONTHLY"), "m");
+        assert_eq!(rrule_to_shorthand("FREQ=MONTHLY;INTERVAL=1"), "m");
+        assert_eq!(rrule_to_shorthand("FREQ=MONTHLY;INTERVAL=3"), "3m");
+        assert_eq!(rrule_to_shorthand("FREQ=MONTHLY;INTERVAL=6"), "6m");
+
+        assert_eq!(rrule_to_shorthand("FREQ=YEARLY"), "y");
+        assert_eq!(rrule_to_shorthand("FREQ=YEARLY;INTERVAL=1"), "y");
+        assert_eq!(rrule_to_shorthand("FREQ=YEARLY;INTERVAL=2"), "2y");
+
+        // 2. 别名与特殊星期组
+        assert_eq!(
+            rrule_to_shorthand("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"),
+            "weekday"
+        );
+        assert_eq!(
+            rrule_to_shorthand("FREQ=WEEKLY;BYDAY=FR,TH,WE,TU,MO"),
+            "weekday"
+        );
+        assert_eq!(rrule_to_shorthand("FREQ=WEEKLY;BYDAY=SA,SU"), "weekend");
+        assert_eq!(rrule_to_shorthand("FREQ=WEEKLY;BYDAY=SU,SA"), "weekend");
+        // 带有 interval 的工作日/周末保持 Nw[...]
+        assert_eq!(
+            rrule_to_shorthand("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TU,WE,TH,FR"),
+            "2w[1,2,3,4,5]"
+        );
+        assert_eq!(
+            rrule_to_shorthand("FREQ=WEEKLY;INTERVAL=3;BYDAY=SA,SU"),
+            "3w[6,7]"
+        );
+
+        // 3. 各种星期组合（单日、多日、乱序、英文缩写）
+        assert_eq!(rrule_to_shorthand("FREQ=WEEKLY;BYDAY=MO"), "w[1]");
+        assert_eq!(rrule_to_shorthand("FREQ=WEEKLY;BYDAY=SU"), "w[7]");
+        assert_eq!(rrule_to_shorthand("FREQ=WEEKLY;BYDAY=MO,WE"), "w[1,3]");
+        assert_eq!(rrule_to_shorthand("FREQ=WEEKLY;BYDAY=WE,MO"), "w[1,3]");
+        assert_eq!(
+            rrule_to_shorthand("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR"),
+            "2w[1,3,5]"
+        );
+        assert_eq!(
+            rrule_to_shorthand("FREQ=WEEKLY;INTERVAL=4;BYDAY=TU,TH,SA"),
+            "4w[2,4,6]"
+        );
+
+        // 4. 月度按日（单日、多日、正数、负数倒数）
+        assert_eq!(rrule_to_shorthand("FREQ=MONTHLY;BYMONTHDAY=1"), "m[1]");
+        assert_eq!(rrule_to_shorthand("FREQ=MONTHLY;BYMONTHDAY=15"), "m[15]");
+        assert_eq!(
+            rrule_to_shorthand("FREQ=MONTHLY;BYMONTHDAY=1,15"),
+            "m[1,15]"
+        );
+        assert_eq!(
+            rrule_to_shorthand("FREQ=MONTHLY;INTERVAL=2;BYMONTHDAY=1,15"),
+            "2m[1,15]"
+        );
+        assert_eq!(rrule_to_shorthand("FREQ=MONTHLY;BYMONTHDAY=-1"), "m[-1]");
+        assert_eq!(
+            rrule_to_shorthand("FREQ=MONTHLY;BYMONTHDAY=1,2,-2,-1"),
+            "m[1,2,-2,-1]"
+        );
+
+        // 5. 年度按月（单月、多月、隔年）
+        assert_eq!(rrule_to_shorthand("FREQ=YEARLY;BYMONTH=6"), "y[6]");
+        assert_eq!(rrule_to_shorthand("FREQ=YEARLY;BYMONTH=1,7"), "y[1,7]");
+        assert_eq!(
+            rrule_to_shorthand("FREQ=YEARLY;INTERVAL=2;BYMONTH=6"),
+            "2y[6]"
+        );
+        assert_eq!(
+            rrule_to_shorthand("FREQ=YEARLY;INTERVAL=3;BYMONTH=1,6,12"),
+            "3y[1,6,12]"
+        );
+
+        // 6. 属性无序与大小写容错
+        assert_eq!(
+            rrule_to_shorthand("byday=mo,we;interval=2;freq=weekly"),
+            "2w[1,3]"
+        );
+        assert_eq!(
+            rrule_to_shorthand("bymonth=1,7;freq=yearly;interval=2"),
+            "2y[1,7]"
+        );
+
+        // 7. 高级/非简写规则安全兜底（不损坏数据，原样保留）
+        assert_eq!(
+            rrule_to_shorthand("FREQ=DAILY;COUNT=5"),
+            "FREQ=DAILY;COUNT=5"
+        );
+        assert_eq!(
+            rrule_to_shorthand("FREQ=WEEKLY;UNTIL=20261231T235959Z"),
+            "FREQ=WEEKLY;UNTIL=20261231T235959Z"
+        );
+        assert_eq!(
+            rrule_to_shorthand("FREQ=HOURLY;INTERVAL=2"),
+            "FREQ=HOURLY;INTERVAL=2"
+        );
+        assert_eq!(rrule_to_shorthand("d"), "d");
+        assert_eq!(rrule_to_shorthand("2w[1,3]"), "2w[1,3]");
+
+        // 8. 闭环 Roundtrip：所有简写先 parse 为标准 RRULE，再逆向映射必须完全自洽
+        let test_cases = [
+            "d",
+            "daily",
+            "2d",
+            "14d",
+            "w",
+            "weekly",
+            "2w",
+            "4w",
+            "weekday",
+            "workday",
+            "weekend",
+            "w[1]",
+            "w[7]",
+            "w[1,3]",
+            "w[mo,we]",
+            "2w[1,3]",
+            "4w[2,4,6]",
+            "m",
+            "monthly",
+            "2m",
+            "6m",
+            "m[1]",
+            "m[15]",
+            "m[1,15]",
+            "2m[1,15]",
+            "m[-1]",
+            "m[1,2,-2,-1]",
+            "y",
+            "yearly",
+            "2y",
+            "y[6]",
+            "y[1,7]",
+            "2y[6]",
+            "y[jan,jul]",
+        ];
+        for input in test_cases {
+            let parsed = parse_rrule_shorthand(input);
+            let shorthand = rrule_to_shorthand(&parsed);
+            let re_parsed = parse_rrule_shorthand(&shorthand);
+            assert_eq!(
+                parsed, re_parsed,
+                "逆向映射与正向解析必须保证标准 RFC 规则完全幂等！输入: {input} -> 简写: {shorthand}"
+            );
+        }
     }
 }
