@@ -348,10 +348,16 @@ fn write_today(conn: &Connection, dir: &Path) -> Result<bool> {
         sort(v);
     }
 
+    let today_date = chrono::Local::now().naive_local().date();
+    let cal_str = horae_core::lunar::day_calendar_info(today_date)
+        .map(|c| format!(" ({})", c.status_line()))
+        .unwrap_or_default();
+
     let mut md = String::new();
     md.push_str(&format!(
-        "# 今日待办 · {}\n> horae watch 自动生成 · 采集写 capture.txt · 操作写 actions.txt\n\n",
-        chrono::Local::now().format("%Y-%m-%d")
+        "# 今日待办 · {}{}\n> horae watch 自动生成 · 采集写 capture.txt · 操作写 actions.txt\n\n",
+        today_date.format("%Y-%m-%d"),
+        cal_str
     ));
 
     let mut any = false;

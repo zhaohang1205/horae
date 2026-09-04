@@ -238,6 +238,20 @@ pub enum Command {
     Review,
     /// List all tags grouped by category
     Tags,
+    /// View Chinese lunar calendar, 24 solar terms, and holiday reminders
+    #[command(
+        long_about = "View Chinese lunar calendar, 24 solar terms, and major holiday countdowns and advance reminders.",
+        after_help = "Examples:\n  horae calendar\n  horae calendar --short\n  horae calendar --json\n  horae calendar 2026-10-01",
+        visible_alias = "cal"
+    )]
+    Calendar {
+        #[arg(help = "Date to query (YYYY-MM-DD), defaults to today")]
+        date: Option<String>,
+        #[arg(short = 's', long = "short", help = "Print compact one-line summary")]
+        short: bool,
+        #[arg(long, help = "Output as JSON")]
+        json: bool,
+    },
     /// Calculate and output the single most important task right now
     #[command(
         long_about = "Calculate and output the single most important task right now, ending decision fatigue. Considers priority (high/medium/low), effective due time, and context.",
@@ -559,5 +573,28 @@ mod tests {
             parse(&["delete", "abc"]).unwrap().command,
             Some(Command::Archive { .. })
         ));
+    }
+
+    #[test]
+    fn calendar_parses_flags_and_aliases() {
+        let cli = parse(&["calendar", "--short"]).unwrap();
+        match cli.command.unwrap() {
+            Command::Calendar { date, short, json } => {
+                assert!(date.is_none());
+                assert!(short);
+                assert!(!json);
+            }
+            _ => panic!("应为 Calendar"),
+        }
+
+        let cli = parse(&["cal", "2026-09-25", "--json"]).unwrap();
+        match cli.command.unwrap() {
+            Command::Calendar { date, short, json } => {
+                assert_eq!(date.as_deref(), Some("2026-09-25"));
+                assert!(!short);
+                assert!(json);
+            }
+            _ => panic!("应为 Calendar"),
+        }
     }
 }

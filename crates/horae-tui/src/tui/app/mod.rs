@@ -309,6 +309,10 @@ pub(crate) struct App<'a> {
     pub(crate) completion_style: crate::tui::app::completion::CompletionStyle,
     /// 纯净录入无干扰（settings 键 `zen_capture`，默认开启）。
     pub(crate) zen_capture: bool,
+    /// 农历与节气提醒开关（settings 键 `lunar_reminder`，默认开启）。
+    pub(crate) lunar_enabled: bool,
+    /// 今日聚合历法与节气信息。
+    pub(crate) calendar_info: Option<horae_core::lunar::CalendarDayInfo>,
 }
 
 impl<'a> App<'a> {
@@ -354,6 +358,20 @@ impl<'a> App<'a> {
                 .as_deref(),
             Some("0")
         );
+        // 农历与节气提醒：缺省视为开启（settings 显式写 "0" 才关闭）。
+        let lunar_enabled = !matches!(
+            horae_core::repo::settings::get(conn, "lunar_reminder")
+                .ok()
+                .flatten()
+                .as_deref(),
+            Some("0")
+        );
+        let calendar_info = if lunar_enabled {
+            let today = chrono::Local::now().naive_local().date();
+            horae_core::lunar::day_calendar_info(today)
+        } else {
+            None
+        };
         let mut app = App {
             conn,
             view: View::Inbox,
@@ -414,6 +432,8 @@ impl<'a> App<'a> {
             start_in_capture,
             completion_style,
             zen_capture,
+            lunar_enabled,
+            calendar_info,
         };
         app.refresh()?;
 

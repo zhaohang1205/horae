@@ -545,11 +545,21 @@ impl<'a> AppRender for App<'a> {
             self.theme.text_dim
         };
         let items = build_list_items(self);
+        let lunar_suffix = if self.view == View::Today && self.lunar_enabled {
+            if let Some(ref cal) = self.calendar_info {
+                format!(" [{}]", cal.status_line())
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
         let title = tr!(
             self.lang,
-            " 任务 · {}{} ",
-            " Tasks · {}{} ",
+            " 任务 · {}{}{} ",
+            " Tasks · {}{}{} ",
             super::view_label(self.lang, self.view),
+            lunar_suffix,
             if let Some(ref tf) = self.tag_filter {
                 format!(" [@{}]", tf)
             } else {

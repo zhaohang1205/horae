@@ -143,6 +143,14 @@ impl<'a> App<'a> {
                             "Zen capture (no distractions)"
                         ),
                     ),
+                    (
+                        self.lunar_enabled,
+                        tr!(
+                            self.lang,
+                            "农历与节气提醒 (Lunar)",
+                            "Lunar & holiday reminders (Lunar)"
+                        ),
+                    ),
                 ];
                 for (i, (enabled, name)) in opts.iter().enumerate() {
                     let checkbox = if *enabled { "[x]" } else { "[ ]" };

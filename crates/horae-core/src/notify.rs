@@ -63,20 +63,77 @@ pub fn check(conn: &Connection) -> Result<()> {
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let key = format!("digest:{}", today);
     let mut state = notify::get_state()?;
-    if state.sent.contains(&key) {
-        return Ok(());
+    let mut dirty = false;
+
+    // 1. 农历节气与重大节日提醒
+    let lunar_enabled = !matches!(
+        crate::repo::settings::get(conn, "lunar_reminder")
+            .ok()
+            .flatten()
+            .as_deref(),
+        Some("0")
+    );
+    if lunar_enabled {
+        let today_date = chrono::Local::now().date_naive();
+        if let Some(cal) = crate::lunar::day_calendar_info(today_date) {
+            // A. 重大节日提前提醒 (3天与1天)
+            for w in &cal.warnings {
+                let warn_key = format!("lunar_warn_{}d:{}:{}", w.days_left, w.holiday_name, today);
+                if !state.sent.contains(&warn_key) {
+                    crate::pomo::notify(&format!("🔔 节日预告 · {}", w.holiday_name), &w.message());
+                    state.sent.push(warn_key);
+                    dirty = true;
+                }
+            }
+
+            // B. 今日节气提醒
+            if let Some(term) = cal.solar_term {
+                let term_key = format!("lunar_term:{}:{}", term.name(), today);
+                if !state.sent.contains(&term_key) {
+                    crate::pomo::notify(
+                        &format!("🌿 今日节气 · {}", term.name()),
+                        &format!("{} · 时令物候：{}", cal.lunar.short_format(), term.desc()),
+                    );
+                    state.sent.push(term_key);
+                    dirty = true;
+                }
+            }
+
+            // C. 今日节日提醒
+            for h in &cal.holidays {
+                let fest_key = format!("lunar_fest:{}:{}", h.name, today);
+                if !state.sent.contains(&fest_key) {
+                    let title = if h.is_major {
+                        format!("🎉 今日重大节日 · {}", h.name)
+                    } else {
+                        format!("🎋 今日节日 · {}", h.name)
+                    };
+                    crate::pomo::notify(
+                        &title,
+                        &format!("{} · {}", cal.lunar.short_format(), h.hint),
+                    );
+                    state.sent.push(fest_key);
+                    dirty = true;
+                }
+            }
+        }
     }
 
-    let digest = collect(conn, time::now_ms(), STALE_DAYS)?;
-    if !digest.has_any() {
-        return Ok(());
+    // 2. GTD 每日任务心智维护摘要
+    if !state.sent.contains(&key) {
+        let digest = collect(conn, time::now_ms(), STALE_DAYS)?;
+        if digest.has_any() {
+            let (summary, body) = render(&digest);
+            crate::pomo::notify(&summary, &body);
+            state.sent.push(key);
+            dirty = true;
+        }
     }
 
-    let (summary, body) = render(&digest);
-    crate::pomo::notify(&summary, &body);
-    state.sent.push(key);
-    prune(&mut state, &today);
-    notify::save_state(&state)?;
+    if dirty {
+        prune(&mut state, &today);
+        notify::save_state(&state)?;
+    }
     Ok(())
 }
 
@@ -267,5 +324,33 @@ mod tests {
                 "digest:2026-08-06".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn prune_lunar_and_holiday_keys_correctly() {
+        let mut state = notify::NotifyState {
+            sent: vec![
+                "lunar_warn_3d:中秋节:2026-09-22".into(),
+                "lunar_term:白露:2026-09-07".into(),
+                "lunar_fest:国庆节:2026-09-14".into(), // 超出 7 天
+            ],
+        };
+        // 以 2026-09-22 为今天，7 天内为 2026-09-15 至 2026-09-22
+        prune(&mut state, "2026-09-22");
+        assert_eq!(
+            state.sent,
+            vec!["lunar_warn_3d:中秋节:2026-09-22".to_string()]
+        );
+    }
+
+    #[test]
+    fn lunar_reminder_setting_toggle_in_notify() {
+        let (_dir, conn) = test_conn();
+        // 显式配置为关闭 "0"
+        crate::repo::settings::set(&conn, "lunar_reminder", "0").unwrap();
+        let val = crate::repo::settings::get(&conn, "lunar_reminder")
+            .unwrap()
+            .unwrap();
+        assert_eq!(val, "0");
     }
 }

@@ -145,6 +145,13 @@ impl<'a> App<'a> {
         self.counts.insert(View::Tomorrow, tomorrow.len());
         self.refresh_counts()?;
 
+        if self.lunar_enabled {
+            let today_date = chrono::Local::now().naive_local().date();
+            self.calendar_info = horae_core::lunar::day_calendar_info(today_date);
+        } else {
+            self.calendar_info = None;
+        }
+
         // 标签视图单独构建行（没有任务主体）。
         if self.view == View::Tags {
             if let Ok(all_tags) = tags::list_tags(self.conn) {

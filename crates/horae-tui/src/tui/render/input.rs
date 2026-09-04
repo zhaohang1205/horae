@@ -141,7 +141,7 @@ impl<'a> App<'a> {
             }
         } else if self.mode == Mode::Capturing
             && self.input_cursor == self.input.len()
-            && self.input.ends_with(' ')
+            && (self.input.is_empty() || self.input.ends_with(' '))
         {
             let tokens = tokenize_quick_add(&self.input);
             let has_tag = tokens.iter().any(|t| t.kind == QuickAddKind::Tag);
@@ -171,27 +171,9 @@ impl<'a> App<'a> {
 
         if self.mode == Mode::Capturing {
             text_lines.push(input_line_display);
-            if self.show_syntax {
-                // 语法说明指南同时打开时，底部占满语法指南，输入框内展示输入行与实时解析行
-                if !self.input.trim().is_empty() {
-                    text_lines.push(Line::from(""));
-                    text_lines.extend(self.capture_preview_lines());
-                }
-            } else if self.is_zen_capturing() {
-                if !self.input.trim().is_empty() {
-                    text_lines.push(Line::from(""));
-                    text_lines.extend(self.capture_preview_lines());
-                }
-            } else {
+            if !self.input.trim().is_empty() {
                 text_lines.push(Line::from(""));
-                if self.input.trim().is_empty() {
-                    text_lines.push(self.capture_syntax_hint_line());
-                } else {
-                    text_lines.extend(self.capture_preview_lines());
-                    // 语法提示常驻：输入/编辑过程中始终可见，便于快速学习语法。
-                    text_lines.push(Line::from(""));
-                    text_lines.push(self.capture_syntax_hint_line());
-                }
+                text_lines.extend(self.capture_preview_lines());
             }
         } else {
             text_lines.push(input_line_display);
@@ -510,18 +492,6 @@ impl<'a> App<'a> {
         text_lines
     }
 
-    /// 快速录入语法提示行（常驻于输入/编辑弹层底部）。
-    fn capture_syntax_hint_line(&self) -> Line<'static> {
-        Line::from(Span::styled(
-            tr!(
-                self.lang,
-                " [语法] @标签 (如 @work)  |  ~时间 (如 ~tomorrow, ~+3d, ~18:00)  |  *循环 (如 *2w[1,3], *m[1,2,-2,-1], *y[jan,jul])  |  !优先级 (如 !high)  |  日期搜索: MMDD (如 0829)",
-                " [syntax] @tag (@work)  |  ~time (~tomorrow, ~+3d, ~18:00)  |  *rrule (*2w[1,3], *m[1,2,-2,-1], *y[jan,jul])  |  !priority (!high)  |  date search: MMDD (e.g. 0829)"
-            ),
-            Style::default().fg(self.theme.text_dim),
-        ))
-    }
-
     /// 计算输入覆盖层的所需高度，在上下结构双开模式下用于精确切分屏幕上部与下部。
     pub(crate) fn input_overlay_height(&self, size: Rect) -> u16 {
         if self.mode == Mode::Capturing {
@@ -535,12 +505,8 @@ impl<'a> App<'a> {
                 (1 + preview_lines + 2)
                     .min(size.height.saturating_sub(6))
                     .max(3)
-            } else if self.is_zen_capturing() {
-                (1 + preview_lines + 2).max(3)
             } else {
-                let hint_line = 1;
-                let extra_blank = if preview_lines > 0 { 1 } else { 0 };
-                (1 + preview_lines + extra_blank + hint_line + 2).max(4)
+                (1 + preview_lines + 2).max(3)
             }
         } else {
             3

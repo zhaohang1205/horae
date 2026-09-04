@@ -41,11 +41,11 @@ impl<'a> AppHandlers for App<'a> {
                             // close, implicitly handled because popup is taken and not put back
                         }
                         KeyCode::Char('j') | KeyCode::Down => {
-                            idx = (idx + 1) % 12;
+                            idx = (idx + 1) % 13;
                             self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
                         }
                         KeyCode::Char('k') | KeyCode::Up => {
-                            idx = idx.checked_sub(1).unwrap_or(11);
+                            idx = idx.checked_sub(1).unwrap_or(12);
                             self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
                         }
                         KeyCode::Char(' ') => {
@@ -150,6 +150,22 @@ impl<'a> AppHandlers for App<'a> {
                                         "zen_capture",
                                         if self.zen_capture { "1" } else { "0" },
                                     );
+                                }
+                                12 => {
+                                    // 农历与节气提醒：翻转并持久化到 settings 表。
+                                    self.lunar_enabled = !self.lunar_enabled;
+                                    let _ = horae_core::repo::settings::set(
+                                        self.conn,
+                                        "lunar_reminder",
+                                        if self.lunar_enabled { "1" } else { "0" },
+                                    );
+                                    if self.lunar_enabled {
+                                        let today_date = chrono::Local::now().naive_local().date();
+                                        self.calendar_info =
+                                            horae_core::lunar::day_calendar_info(today_date);
+                                    } else {
+                                        self.calendar_info = None;
+                                    }
                                 }
                                 _ => {}
                             }

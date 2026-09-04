@@ -5,6 +5,7 @@ use anyhow::Result;
 
 mod alarm;
 mod backup;
+mod calendar;
 mod capture;
 mod focus;
 mod list;
@@ -140,6 +141,7 @@ fn run_inner(cmd: Command, conn: &Connection, profile: Option<&str>) -> Result<(
         Command::Untag { id, name } => tagging::remove(conn, &id, &name),
         Command::Review => review::run(conn),
         Command::Tags => tagging::list(conn),
+        Command::Calendar { date, short, json } => calendar::run(date.as_deref(), short, json),
         Command::Pomo { action, task_id } => match action.as_str() {
             "start" => {
                 if let Some(id) = task_id {

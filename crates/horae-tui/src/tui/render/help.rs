@@ -302,10 +302,10 @@ impl<'a> App<'a> {
                 Span::styled(format!("{:<22}", "智能槽位引导"), s_tok),
                 Span::raw(tr!(
                     self.lang,
-                    "输入标题后按空格，行末淡色显示未填写的 ",
-                    "Type title + space to see ghost "
+                    "打开或输入空格，行末淡色显示未填写的 ",
+                    "On open or space, ghost shows unfilled "
                 )),
-                Span::styled("[@标签] [~时间] [*周期] [!优先级]", s_dim),
+                Span::styled("[*周期] [~时间] [!优先级] [@标签]", s_dim),
             ]),
             Line::from(""),
             // ── 5. GTD 核心操作 ──

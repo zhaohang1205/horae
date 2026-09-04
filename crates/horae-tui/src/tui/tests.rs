@@ -124,6 +124,10 @@ fn drive_tui() {
     app.handle_key(key('a')).unwrap();
     let s = norm(&frame("6-capture-mode", &mut term, &mut app, &mut out));
     assert!(s.contains("快速录入"), "收集提示");
+    assert!(
+        s.contains("[*周期][~时间][!优先级][@标签]"),
+        "打开快速录入时提示槽位信息"
+    );
     for c in "Buy milk".chars() {
         app.handle_key(key(c)).unwrap();
     }
@@ -136,7 +140,7 @@ fn drive_tui() {
     app.handle_key(kc(KeyCode::Enter)).unwrap();
     let s = norm(&frame("8-organize", &mut term, &mut app, &mut out));
     assert!(s.contains("组织"), "回车进入组织/编辑模式");
-    assert!(s.contains("[语法]"), "编辑模式下语法提示常驻不消失");
+    assert!(!s.contains("[语法]"), "输入框内不再展示冗余语法提示行");
     // 预填了当前标题，追加单个 token 时间后确认
     for c in " ~tomorrow".chars() {
         app.handle_key(key(c)).unwrap();
@@ -2565,12 +2569,12 @@ fn module_toggle_popup_navigates_and_persists() {
     let reloaded = horae_core::repo::modules::ModuleVisibility::load(app.conn);
     assert!(!reloaded.splash);
 
-    // j 向下循环导航（0 → 1），k 反向且在 0 处回绕到 11（最后一项：纯净录入）
+    // j 向下循环导航（0 → 1），k 反向且在 0 处回绕到 12（最后一项：农历与节气提醒）
     app.handle_key(key('j')).unwrap();
     assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(1)));
     app.popup = Some(crate::tui::app::Popup::ModuleToggles(0));
     app.handle_key(key('k')).unwrap();
-    assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(11)));
+    assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(12)));
 
     // Esc 关闭弹层
     app.handle_key(kc(KeyCode::Esc)).unwrap();
@@ -3844,6 +3848,15 @@ fn zen_capture_preserves_slot_hints_with_custom_order() {
 
     let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
 
+    // 刚打开快速录入（空输入），即应提示槽位信息
+    term.clear().unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let s_init = norm(&snap(&term));
+    assert!(
+        s_init.contains("[*周期][~时间][!优先级][@标签]"),
+        "刚打开快速录入时也应提示槽位信息，实际渲染:\n{s_init}"
+    );
+
     // 输入标题并追加空格，检查槽位提示顺序：周期、时间、优先级、标签
     for c in "买牛奶 ".chars() {
         app.handle_key(key(c)).unwrap();
@@ -3873,6 +3886,73 @@ fn zen_capture_preserves_slot_hints_with_custom_order() {
         "已输入周期后，槽位提示应顺次展示时间、优先级、标签，实际:\n{s2}"
     );
     assert!(s2.contains("循环:*d"), "实时解析行应清晰展现周期规则");
+}
+
+#[test]
+fn capture_slot_hints_on_open_and_no_redundant_syntax_hint() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+
+    // 1. 打开快速录入，输入为空，光标处于第 0 位
+    app.handle_key(key('a')).unwrap();
+    assert_eq!(app.mode, Mode::Capturing);
+    assert!(app.input.is_empty());
+
+    // 2. 渲染验证：必须包含槽位提示 [*周期][~时间][!优先级][@标签]，且不包含旧的静态 [语法] 提示
+    term.clear().unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let s = norm(&snap(&term));
+    assert!(
+        s.contains("[*周期][~时间][!优先级][@标签]"),
+        "打开快速录入后，应该提示槽位信息，实际渲染:\n{s}"
+    );
+    assert!(
+        !s.contains("[语法]"),
+        "快速录入框内多余的语法提示行已被去除"
+    );
+
+    // 3. 开始键入标题（不带空格），此时槽位提示隐藏
+    for c in "准备报告".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    term.clear().unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let s2 = norm(&snap(&term));
+    assert!(
+        !s2.contains("[*周期]"),
+        "输入文字未按空格时隐藏槽位提示，避免视觉干扰"
+    );
+
+    // 4. 输入空格，槽位提示再次显现
+    app.handle_key(key(' ')).unwrap();
+    term.clear().unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let s3 = norm(&snap(&term));
+    assert!(
+        s3.contains("[*周期][~时间][!优先级][@标签]"),
+        "输入标题追加空格后继续展示槽位提示"
+    );
+
+    // 5. 填入 ~14:00 后，时间槽位消失，保留其余槽位
+    for c in "~14:00 ".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    term.clear().unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let s4 = norm(&snap(&term));
+    assert!(
+        s4.contains("[*周期][!优先级][@标签]"),
+        "时间槽位已填，展示剩余槽位"
+    );
+    assert!(!s4.contains("[~时间]"), "时间槽位不再提示");
+    assert!(
+        !s4.contains("[语法]"),
+        "即使包含解析预览行也不展示旧的静态语法行"
+    );
 }
 
 #[test]
@@ -4317,4 +4397,93 @@ fn dual_open_syntax_and_completion_rendering() {
     assert_eq!(app.mode, Mode::Normal, "退出到 Normal 模式");
     assert!(!app.show_syntax, "语法指南随录入退出而关闭");
     assert_eq!(app.syntax_scroll, 0);
+}
+
+#[test]
+fn lunar_calendar_info_loaded_by_default() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+
+    let app = App::new(&conn).unwrap();
+    assert!(app.lunar_enabled, "默认开启农历与节气提醒");
+    assert!(app.calendar_info.is_some(), "默认加载今日历法信息");
+    let cal = app.calendar_info.as_ref().unwrap();
+    assert!(!cal.lunar.short_format().is_empty());
+}
+
+#[test]
+fn lunar_reminder_toggle_via_f7_persists() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    assert!(app.lunar_enabled, "缺省开启农历与节气提醒");
+
+    // 打开 F7 弹层并跳到第 13 项（下标 12：农历与节气提醒开关）
+    app.handle_key(kc(KeyCode::F(7))).unwrap();
+    for _ in 0..12 {
+        app.handle_key(key('j')).unwrap();
+    }
+    assert_eq!(
+        app.popup,
+        Some(crate::tui::app::Popup::ModuleToggles(12)),
+        "应导航到农历与节气提醒选项"
+    );
+
+    // 空格切换为关闭
+    app.handle_key(key(' ')).unwrap();
+    assert!(!app.lunar_enabled);
+    assert!(app.calendar_info.is_none());
+    assert_eq!(
+        horae_core::repo::settings::get(&conn, "lunar_reminder")
+            .unwrap()
+            .as_deref(),
+        Some("0")
+    );
+
+    // 重新构造 App 验证持久化生效
+    let app2 = App::new(&conn).unwrap();
+    assert!(!app2.lunar_enabled, "重新加载后依然保持关闭");
+    assert!(app2.calendar_info.is_none());
+
+    // 再次空格切换为开启
+    app.handle_key(key(' ')).unwrap();
+    assert!(app.lunar_enabled);
+    assert!(app.calendar_info.is_some());
+    assert_eq!(
+        horae_core::repo::settings::get(&conn, "lunar_reminder")
+            .unwrap()
+            .as_deref(),
+        Some("1")
+    );
+}
+
+#[test]
+fn today_view_renders_holiday_or_warning_banner() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+
+    let mut app = app_normal(&conn);
+    app.set_view(View::Today);
+
+    // 注入节日提醒信息
+    if let Some(ref mut cal) = app.calendar_info {
+        cal.warnings = vec![horae_core::lunar::AdvanceWarning {
+            holiday_name: "中秋节".into(),
+            days_left: 3,
+            target_date: chrono::NaiveDate::from_ymd_opt(2026, 9, 25).unwrap(),
+            hint: "月满人团圆".into(),
+        }];
+    }
+
+    let mut term = Terminal::new(TestBackend::new(110, 30)).unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let frame = norm(&snap(&term));
+    assert!(
+        frame.contains("节日提醒") && frame.contains("中秋节"),
+        "今日视图应在顶部横幅展示重大节日提前提醒: {frame}"
+    );
 }

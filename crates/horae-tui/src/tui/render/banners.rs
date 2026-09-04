@@ -43,56 +43,99 @@ impl<'a> App<'a> {
             )));
             f.render_widget(banner, chunks[0]);
             main_area = chunks[1];
-        } else if !self.hide_pomo_banner {
+        } else if !self.hide_pomo_banner
+            && self.pomo.last_date.as_deref()
+                == Some(chrono::Local::now().format("%Y-%m-%d").to_string().as_str())
+            && self.pomo.today_count > 0
+            && self.pomo.break_prompt_visible(horae_core::time::now_ms())
+        {
             let pomo = &self.pomo;
-            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-            let today_active = pomo.last_date.as_deref() == Some(today.as_str());
-            // 仅在休息刚结束的窗口内提示“再接再厉”，避免当天每次启动都常驻旧横幅
-            let break_prompt_visible = pomo.break_prompt_visible(horae_core::time::now_ms());
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(1), Constraint::Min(0)])
+                .split(size);
 
-            if today_active && pomo.today_count > 0 && break_prompt_visible {
-                let chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Length(1), Constraint::Min(0)])
-                    .split(size);
+            let last_title = pomo.last_completed_task_title.as_deref().unwrap_or(tr!(
+                self.lang,
+                "上一任务",
+                "last task"
+            ));
+            let banner = Paragraph::new(Line::from(vec![
+                Span::styled(
+                    tr!(
+                        self.lang,
+                        " {} 成就结清: 今日已积 {} 个番茄 (Streak {} 连击!)  |  ",
+                        " {} Settled: {} tomatoes today (Streak {})  |  ",
+                        self.icon(Icon::Achievement),
+                        pomo.today_count,
+                        pomo.streak
+                    ),
+                    Style::default()
+                        .fg(self.theme.bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    tr!(
+                        self.lang,
+                        "休息已完成  |  再接再厉? {} [Space/P] 开启新一轮专注 [{}] ",
+                        "Break done  |  Go again? {} [Space/P] start a new focus [{}] ",
+                        self.icon(Icon::Active),
+                        last_title
+                    ),
+                    Style::default()
+                        .fg(self.theme.bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]))
+            .alignment(ratatui::layout::Alignment::Center)
+            .style(Style::default().bg(self.theme.text_success));
 
-                let last_title = pomo.last_completed_task_title.as_deref().unwrap_or(tr!(
-                    self.lang,
-                    "上一任务",
-                    "last task"
-                ));
-                let banner = Paragraph::new(Line::from(vec![
-                    Span::styled(
-                        tr!(
-                            self.lang,
-                            " {} 成就结清: 今日已积 {} 个番茄 (Streak {} 连击!)  |  ",
-                            " {} Settled: {} tomatoes today (Streak {})  |  ",
-                            self.icon(Icon::Achievement),
-                            pomo.today_count,
-                            pomo.streak
-                        ),
+            f.render_widget(banner, chunks[0]);
+            main_area = chunks[1];
+        } else if self.lunar_enabled && self.view == crate::tui::View::Today {
+            if let Some(cal) = &self.calendar_info {
+                let banner_opt = if let Some(warn) = cal.warnings.first() {
+                    Some((
+                        format!(" 🏮 节日提醒: {} ", warn.message()),
+                        self.theme.accent,
+                    ))
+                } else if let Some(h) = cal.holidays.iter().find(|h| h.is_major) {
+                    Some((
+                        format!(" 🎉 今日{} · {} ", h.name, h.hint),
+                        self.theme.accent,
+                    ))
+                } else if let Some(st) = cal.solar_term {
+                    Some((
+                        format!(" 🌱 今日节气: {} · {} ", st.name(), st.desc()),
+                        self.theme.accent,
+                    ))
+                } else if let Some(h) = cal.holidays.first() {
+                    Some((
+                        format!(" 🎏 今日{} · {} ", h.name, h.hint),
+                        self.theme.accent,
+                    ))
+                } else {
+                    None
+                };
+
+                if let Some((text, color)) = banner_opt {
+                    let chunks = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Length(1), Constraint::Min(0)])
+                        .split(size);
+
+                    let banner = Paragraph::new(Line::from(Span::styled(
+                        text,
                         Style::default()
+                            .bg(color)
                             .fg(self.theme.bg)
                             .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        tr!(
-                            self.lang,
-                            "休息已完成  |  再接再厉? {} [Space/P] 开启新一轮专注 [{}] ",
-                            "Break done  |  Go again? {} [Space/P] start a new focus [{}] ",
-                            self.icon(Icon::Active),
-                            last_title
-                        ),
-                        Style::default()
-                            .fg(self.theme.bg)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ]))
-                .alignment(ratatui::layout::Alignment::Center)
-                .style(Style::default().bg(self.theme.text_success));
+                    )))
+                    .alignment(Alignment::Center);
 
-                f.render_widget(banner, chunks[0]);
-                main_area = chunks[1];
+                    f.render_widget(banner, chunks[0]);
+                    main_area = chunks[1];
+                }
             }
         }
         main_area

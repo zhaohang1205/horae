@@ -489,3 +489,66 @@ fn modify_quick_add_and_explicit_flags() {
     assert!(show3["task"]["due_at"].is_null());
     assert!(show3["tags"].as_array().unwrap().is_empty());
 }
+
+#[test]
+fn calendar_command_short_and_json_outputs() {
+    let env = env();
+
+    // 1. 测试 --short 紧凑单行
+    let out = env.cmd().args(["calendar", "--short"]).output().unwrap();
+    assert!(out.status.success());
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(!s.trim().is_empty());
+    assert!(s.contains("·"));
+
+    // 2. 测试指定日期与 --json 结构化输出（以中秋节 2026-09-25 为例）
+    let out = env
+        .cmd()
+        .args(["cal", "2026-09-25", "--json"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["date"], "2026-09-25");
+    assert_eq!(v["lunar"]["month_name"], "八月");
+    assert_eq!(v["lunar"]["day_name"], "十五");
+    assert!(v["holidays"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|h| h["name"] == "中秋节"));
+
+    // 3. 测试 3 天提前提醒（2026-09-22 为中秋节前 3 天）
+    let out = env
+        .cmd()
+        .args(["calendar", "2026-09-22", "--json"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let warns = v["warnings"].as_array().unwrap();
+    assert!(warns
+        .iter()
+        .any(|w| w["holiday_name"] == "中秋节" && w["days_left"] == 3));
+
+    // 4. 测试默认终端卡片输出
+    let out = env.cmd().args(["calendar"]).output().unwrap();
+    assert!(out.status.success());
+    let card = String::from_utf8_lossy(&out.stdout);
+    assert!(card.contains("公历日期"));
+    assert!(card.contains("农历干支"));
+    assert!(card.contains("下一节气") || card.contains("今日节气"));
+    assert!(card.contains("摘要一览"));
+
+    // 5. 测试非法日期解析报错
+    let out = env.cmd().args(["calendar", "not-a-date"]).output().unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("无法解析日期"));
+
+    // 6. 测试超出农历范围日期报错 (1800年)
+    let out = env.cmd().args(["calendar", "1800-01-01"]).output().unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("超出支持的农历年份范围"));
+}
