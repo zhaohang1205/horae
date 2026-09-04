@@ -63,6 +63,12 @@ impl<'a> App<'a> {
                     )
                 } else if self.view == View::Quotes && self.quotes.enabled {
                     tr!(self.lang, " 快速录入金句 ", " Quick Capture Quote ")
+                } else if self.flash_mode {
+                    tr!(
+                        self.lang,
+                        " 快速录入 (闪念 · 回车退出) ",
+                        " Quick Capture (Flash · Enter to exit) "
+                    )
                 } else {
                     tr!(self.lang, " 快速录入 ", " Quick Capture ")
                 }

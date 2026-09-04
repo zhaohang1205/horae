@@ -309,6 +309,8 @@ pub(crate) struct App<'a> {
     pub(crate) completion_style: crate::tui::app::completion::CompletionStyle,
     /// 纯净录入无干扰（settings 键 `zen_capture`，默认开启）。
     pub(crate) zen_capture: bool,
+    /// 闪念录入即退出（settings 键 `flash_mode`，默认关闭）。
+    pub(crate) flash_mode: bool,
     /// 农历与节气提醒开关（settings 键 `lunar_reminder`，默认开启）。
     pub(crate) lunar_enabled: bool,
     /// 今日聚合历法与节气信息。
@@ -357,6 +359,14 @@ impl<'a> App<'a> {
                 .flatten()
                 .as_deref(),
             Some("0")
+        );
+        // 闪念录入即退出：缺省视为关闭（settings 显式写 "1" 才开启）。
+        let flash_mode = matches!(
+            horae_core::repo::settings::get(conn, "flash_mode")
+                .ok()
+                .flatten()
+                .as_deref(),
+            Some("1")
         );
         // 农历与节气提醒：缺省视为开启（settings 显式写 "0" 才关闭）。
         let lunar_enabled = !matches!(
@@ -432,6 +442,7 @@ impl<'a> App<'a> {
             start_in_capture,
             completion_style,
             zen_capture,
+            flash_mode,
             lunar_enabled,
             calendar_info,
         };
@@ -442,12 +453,21 @@ impl<'a> App<'a> {
             // 启动即快速录入：空输入，光标就位。
             app.input.clear();
             app.set_mode(Mode::Capturing);
-            app.status_message = tr!(
-                lang,
-                "快速录入: @标签 ~时间 *周期 (Esc 返回列表)",
-                "Quick capture: @tag ~time *rrule (Esc for list)"
-            )
-            .into();
+            app.status_message = if flash_mode {
+                tr!(
+                    lang,
+                    "闪念录入: 回车录入并退出 (Esc 返回列表)",
+                    "Flash capture: Enter to save & exit (Esc for list)"
+                )
+                .into()
+            } else {
+                tr!(
+                    lang,
+                    "快速录入: @标签 ~时间 *周期 (Esc 返回列表)",
+                    "Quick capture: @tag ~time *rrule (Esc for list)"
+                )
+                .into()
+            };
         }
         app.switch_to_english_ime();
         Ok(app)

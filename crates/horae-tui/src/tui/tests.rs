@@ -2569,12 +2569,12 @@ fn module_toggle_popup_navigates_and_persists() {
     let reloaded = horae_core::repo::modules::ModuleVisibility::load(app.conn);
     assert!(!reloaded.splash);
 
-    // j 向下循环导航（0 → 1），k 反向且在 0 处回绕到 12（最后一项：农历与节气提醒）
+    // j 向下循环导航（0 → 1），k 反向且在 0 处回绕到 13（最后一项：农历与节气提醒）
     app.handle_key(key('j')).unwrap();
     assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(1)));
     app.popup = Some(crate::tui::app::Popup::ModuleToggles(0));
     app.handle_key(key('k')).unwrap();
-    assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(12)));
+    assert_eq!(app.popup, Some(crate::tui::app::Popup::ModuleToggles(13)));
 
     // Esc 关闭弹层
     app.handle_key(kc(KeyCode::Esc)).unwrap();
@@ -4421,14 +4421,14 @@ fn lunar_reminder_toggle_via_f7_persists() {
 
     assert!(app.lunar_enabled, "缺省开启农历与节气提醒");
 
-    // 打开 F7 弹层并跳到第 13 项（下标 12：农历与节气提醒开关）
+    // 打开 F7 弹层并跳到第 14 项（下标 13：农历与节气提醒开关）
     app.handle_key(kc(KeyCode::F(7))).unwrap();
-    for _ in 0..12 {
+    for _ in 0..13 {
         app.handle_key(key('j')).unwrap();
     }
     assert_eq!(
         app.popup,
-        Some(crate::tui::app::Popup::ModuleToggles(12)),
+        Some(crate::tui::app::Popup::ModuleToggles(13)),
         "应导航到农历与节气提醒选项"
     );
 
@@ -4486,4 +4486,165 @@ fn today_view_renders_holiday_or_warning_banner() {
         frame.contains("节日提醒") && frame.contains("中秋节"),
         "今日视图应在顶部横幅展示重大节日提前提醒: {frame}"
     );
+}
+
+#[test]
+fn flash_mode_toggle_via_f7_persists() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    assert!(!app.flash_mode, "缺省关闭闪念录入模式");
+
+    // 打开 F7 弹层并跳到第 13 项（下标 12：闪念录入模式开关）
+    app.handle_key(kc(KeyCode::F(7))).unwrap();
+    for _ in 0..12 {
+        app.handle_key(key('j')).unwrap();
+    }
+    assert_eq!(
+        app.popup,
+        Some(crate::tui::app::Popup::ModuleToggles(12)),
+        "应导航到闪念录入模式选项"
+    );
+
+    // 空格切换为开启
+    app.handle_key(key(' ')).unwrap();
+    assert!(app.flash_mode);
+    assert_eq!(
+        horae_core::repo::settings::get(&conn, "flash_mode")
+            .unwrap()
+            .as_deref(),
+        Some("1")
+    );
+
+    // 重新构造 App 验证持久化生效
+    let mut app2 = App::new(&conn).unwrap();
+    assert!(app2.flash_mode, "重新加载后依然保持开启");
+
+    // 再次空格切换为关闭
+    app2.handle_key(kc(KeyCode::F(7))).unwrap();
+    for _ in 0..12 {
+        app2.handle_key(key('j')).unwrap();
+    }
+    app2.handle_key(key(' ')).unwrap();
+    assert!(!app2.flash_mode);
+    assert_eq!(
+        horae_core::repo::settings::get(&conn, "flash_mode")
+            .unwrap()
+            .as_deref(),
+        Some("0")
+    );
+}
+
+#[test]
+fn flash_mode_enter_quits_after_capture() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+    app.flash_mode = true;
+
+    // 按 a 进入快速录入
+    app.handle_key(key('a')).unwrap();
+    assert_eq!(app.mode, Mode::Capturing);
+    assert!(!app.should_quit);
+
+    // 输入任务标题与标签
+    for c in "Buy coffee @errands".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+
+    // 按 Enter 提交
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+
+    // 验证任务已创建
+    let filter = horae_core::repo::tasks::ListFilter {
+        status: None,
+        tags: vec![],
+        query: None,
+        review_stale: false,
+    };
+    let tasks = horae_core::repo::tasks::list(&conn, &filter).unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].title, "Buy coffee");
+
+    // 验证触发退出
+    assert!(app.should_quit, "闪念录入完成后应退出应用");
+}
+
+#[test]
+fn flash_mode_empty_input_does_not_quit() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+    app.flash_mode = true;
+
+    // 按 a 进入快速录入
+    app.handle_key(key('a')).unwrap();
+    assert_eq!(app.mode, Mode::Capturing);
+
+    // 输入为空直接按 Enter
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+
+    assert_eq!(app.mode, Mode::Normal);
+    assert!(!app.should_quit, "空输入不应退出应用");
+}
+
+#[test]
+fn flash_mode_organize_does_not_quit() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+    app.flash_mode = true;
+
+    // 先创建一个待办任务在收件箱中
+    horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "Task in inbox".into(),
+            status: horae_core::model::task::Status::Inbox,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    app.reload().unwrap();
+
+    // 按 e 组织该任务
+    app.handle_key(key('e')).unwrap();
+    assert_eq!(app.mode, Mode::Capturing);
+    assert!(app.organizing_id.is_some());
+
+    // 按 Enter 提交编辑
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+
+    // 验证没有退出应用
+    assert!(!app.should_quit, "整理已有任务不应触发闪念退出");
+}
+
+#[test]
+fn flash_mode_invalid_input_does_not_quit() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+    app.flash_mode = true;
+
+    // 按 a 进入快速录入
+    app.handle_key(key('a')).unwrap();
+
+    // 输入非法循环规则
+    for c in "Task *bad_rrule".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+
+    // 按 Enter
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+
+    // 依然在 Capturing 模式，且没有退出
+    assert_eq!(app.mode, Mode::Capturing);
+    assert!(!app.should_quit, "校验失败不应退出应用");
+    assert!(app.status_message.contains("循环无效") || app.status_message.contains("bad rrule"));
 }

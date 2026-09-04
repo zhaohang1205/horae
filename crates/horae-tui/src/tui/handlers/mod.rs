@@ -41,11 +41,11 @@ impl<'a> AppHandlers for App<'a> {
                             // close, implicitly handled because popup is taken and not put back
                         }
                         KeyCode::Char('j') | KeyCode::Down => {
-                            idx = (idx + 1) % 13;
+                            idx = (idx + 1) % 14;
                             self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
                         }
                         KeyCode::Char('k') | KeyCode::Up => {
-                            idx = idx.checked_sub(1).unwrap_or(12);
+                            idx = idx.checked_sub(1).unwrap_or(13);
                             self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
                         }
                         KeyCode::Char(' ') => {
@@ -152,6 +152,15 @@ impl<'a> AppHandlers for App<'a> {
                                     );
                                 }
                                 12 => {
+                                    // 闪念录入即退出：翻转并持久化到 settings 表。
+                                    self.flash_mode = !self.flash_mode;
+                                    let _ = horae_core::repo::settings::set(
+                                        self.conn,
+                                        "flash_mode",
+                                        if self.flash_mode { "1" } else { "0" },
+                                    );
+                                }
+                                13 => {
                                     // 农历与节气提醒：翻转并持久化到 settings 表。
                                     self.lunar_enabled = !self.lunar_enabled;
                                     let _ = horae_core::repo::settings::set(
@@ -343,9 +352,16 @@ impl<'a> AppHandlers for App<'a> {
                 }
                 let input = self.input.clone();
                 let mode = self.mode;
+                let is_flash_capture = self.flash_mode
+                    && mode == Mode::Capturing
+                    && self.organizing_id.is_none()
+                    && !input.trim().is_empty();
                 self.set_mode(Mode::Normal);
                 self.input_clear();
                 self.confirm_input(mode, &input)?;
+                if is_flash_capture {
+                    self.should_quit = true;
+                }
             }
             KeyCode::Tab => {
                 self.handle_tab_completion();

@@ -144,6 +144,14 @@ impl<'a> App<'a> {
                         ),
                     ),
                     (
+                        self.flash_mode,
+                        tr!(
+                            self.lang,
+                            "闪念录入即退出 (Flash)",
+                            "Flash mode (exit on capture)"
+                        ),
+                    ),
+                    (
                         self.lunar_enabled,
                         tr!(
                             self.lang,
