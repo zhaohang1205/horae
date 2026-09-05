@@ -29,9 +29,8 @@ pub fn open(name: Option<&str>) -> anyhow::Result<Connection> {
     conn.execute_batch(
         "PRAGMA journal_mode=WAL;
          PRAGMA synchronous=NORMAL;
-         PRAGMA cache_size=-64000;
-         PRAGMA temp_store=MEMORY;
-         PRAGMA mmap_size=3000000000;",
+         PRAGMA cache_size=-2000;
+         PRAGMA temp_store=MEMORY;",
     )?;
 
     migrate::run(&mut conn)?;
