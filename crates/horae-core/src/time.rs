@@ -213,7 +213,7 @@ pub fn parse_time(s: &str) -> Result<i64> {
         .replace('／', "/");
     let s = s_clean.as_str();
     let now = Local::now();
-    let midnight = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+    let default_time = NaiveTime::from_hms_opt(9, 0, 0).unwrap();
 
     if s == "now" {
         return Ok(now.with_timezone(&Utc).timestamp_millis());
@@ -239,29 +239,29 @@ pub fn parse_time(s: &str) -> Result<i64> {
         if after_unit.is_empty() {
             return Ok(base.with_timezone(&Utc).timestamp_millis());
         }
-        let t = parse_optional_time(after_unit, midnight)?;
+        let t = parse_optional_time(after_unit, default_time)?;
         return local_to_utc_ms(base.date_naive().and_time(t));
     }
 
     // 中文天词：今天/明天/后天（可带 HH:MM）
     if let Some(stripped) = s.strip_prefix("今天") {
-        let t = parse_optional_time(stripped.trim(), midnight)?;
+        let t = parse_optional_time(stripped.trim(), default_time)?;
         return local_to_utc_ms(now.date_naive().and_time(t));
     }
     if let Some(stripped) = s.strip_prefix("明天") {
-        let t = parse_optional_time(stripped.trim(), midnight)?;
+        let t = parse_optional_time(stripped.trim(), default_time)?;
         let day = now.date_naive() + Duration::days(1);
         return local_to_utc_ms(day.and_time(t));
     }
     if let Some(stripped) = s.strip_prefix("后天") {
-        let t = parse_optional_time(stripped.trim(), midnight)?;
+        let t = parse_optional_time(stripped.trim(), default_time)?;
         let day = now.date_naive() + Duration::days(2);
         return local_to_utc_ms(day.and_time(t));
     }
 
     // 星期几（中文）：周X / 星期X / 下周X（X ∈ 一~日, 可带 HH:MM）
     if let Some((wd, time_part, next_week)) = parse_cn_weekday(s) {
-        let t = parse_optional_time(time_part, midnight)?;
+        let t = parse_optional_time(time_part, default_time)?;
         let today = now.date_naive();
         let delta = (wd.num_days_from_monday() + 7 - today.weekday().num_days_from_monday()) % 7;
         let off = (delta as i64) + if next_week { 7 } else { 0 };
@@ -271,7 +271,7 @@ pub fn parse_time(s: &str) -> Result<i64> {
 
     // 星期几（英文）：mon / monday / next friday（可带 HH:MM）
     if let Some((wd, time_part, next_week)) = parse_en_weekday(s) {
-        let t = parse_optional_time(time_part, midnight)?;
+        let t = parse_optional_time(time_part, default_time)?;
         let today = now.date_naive();
         let delta = (wd.num_days_from_monday() + 7 - today.weekday().num_days_from_monday()) % 7;
         let off = (delta as i64) + if next_week { 7 } else { 0 };
@@ -281,11 +281,11 @@ pub fn parse_time(s: &str) -> Result<i64> {
 
     // English today/tomorrow
     if let Some(stripped) = s.strip_prefix("today") {
-        let time = parse_optional_time(stripped.trim(), midnight)?;
+        let time = parse_optional_time(stripped.trim(), default_time)?;
         return local_to_utc_ms(now.date_naive().and_time(time));
     }
     if let Some(stripped) = s.strip_prefix("tomorrow") {
-        let time = parse_optional_time(stripped.trim(), midnight)?;
+        let time = parse_optional_time(stripped.trim(), default_time)?;
         let tomorrow = now.date_naive() + Duration::days(1);
         return local_to_utc_ms(tomorrow.and_time(time));
     }
@@ -293,7 +293,7 @@ pub fn parse_time(s: &str) -> Result<i64> {
     // 斜杠/点/短横线日期（可带 HH:MM）：2026/8/20、8/20、2026.8.20、8-20
     if let Some((date_part, time_part)) = split_date_time(s) {
         if let Some(d) = parse_flex_date(date_part) {
-            let t = parse_optional_time(time_part, midnight)?;
+            let t = parse_optional_time(time_part, default_time)?;
             return local_to_utc_ms(d.and_time(t));
         }
     }
@@ -316,7 +316,7 @@ pub fn parse_time(s: &str) -> Result<i64> {
         return local_to_utc_ms(dt);
     }
     if let Ok(d) = NaiveDate::parse_from_str(&s_norm, "%Y-%m-%d") {
-        return local_to_utc_ms(d.and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap()));
+        return local_to_utc_ms(d.and_time(default_time));
     }
 
     Err(anyhow!("could not parse time: '{}'", s))
@@ -480,13 +480,17 @@ mod tests {
         NaiveTime::from_hms_opt(0, 0, 0).unwrap()
     }
 
+    fn default_time() -> NaiveTime {
+        NaiveTime::from_hms_opt(9, 0, 0).unwrap()
+    }
+
     #[test]
     fn parse_chinese_day_words() {
         let today = Local::now().date_naive();
-        assert_eq!(parse_time("今天").unwrap(), local_ms(today, midnight()));
+        assert_eq!(parse_time("今天").unwrap(), local_ms(today, default_time()));
         assert_eq!(
             parse_time("明天").unwrap(),
-            local_ms(today + Duration::days(1), midnight())
+            local_ms(today + Duration::days(1), default_time())
         );
         assert_eq!(
             parse_time("明天 09:30").unwrap(),
@@ -497,7 +501,7 @@ mod tests {
         );
         assert_eq!(
             parse_time("后天").unwrap(),
-            local_ms(today + Duration::days(2), midnight())
+            local_ms(today + Duration::days(2), default_time())
         );
     }
 
@@ -515,7 +519,10 @@ mod tests {
         let wed = chrono::Weekday::Wed;
         let delta = (wed.num_days_from_monday() + 7 - wd.num_days_from_monday()) % 7;
         let target = today + Duration::days(delta as i64);
-        assert_eq!(parse_time("周三").unwrap(), local_ms(target, midnight()));
+        assert_eq!(
+            parse_time("周三").unwrap(),
+            local_ms(target, default_time())
+        );
         assert_eq!(
             parse_time("星期三 10:00").unwrap(),
             local_ms(target, NaiveTime::from_hms_opt(10, 0, 0).unwrap())
@@ -538,7 +545,7 @@ mod tests {
         let wed = chrono::Weekday::Wed;
         let delta = (wed.num_days_from_monday() + 7 - wd.num_days_from_monday()) % 7;
         let target = today + Duration::days(delta as i64);
-        assert_eq!(parse_time("wed").unwrap(), local_ms(target, midnight()));
+        assert_eq!(parse_time("wed").unwrap(), local_ms(target, default_time()));
         assert_eq!(
             parse_time("wednesday 10:00").unwrap(),
             local_ms(target, NaiveTime::from_hms_opt(10, 0, 0).unwrap())

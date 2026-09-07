@@ -188,10 +188,7 @@ impl<'a> App<'a> {
         let candidates = match prefix {
             '@' => self.tag_candidates(token),
             '~' => {
-                let base: Vec<String> = crate::tui::keys::time_candidates(self.lang)
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect();
+                let base = crate::tui::keys::time_candidates(self.lang);
                 filter_and_sort_candidates('~', &base, token, self.lang)
             }
             '*' => {

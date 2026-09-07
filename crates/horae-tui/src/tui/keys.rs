@@ -59,48 +59,42 @@ pub(crate) enum When {
 /// 非任务视图：行不是任务，任务操作键不适用。
 pub(crate) const NON_TASK_VIEWS: &[View] = &[View::Tags, View::Archived, View::Settings];
 
-/// `~` 时间补全候选（中文模式：首屏覆盖自然语言天词、常用英文词、相对偏移、星期词汇、跨周表达与整点时刻等多样表达）。
-pub(crate) const TIME_CANDIDATES_ZH: &[&str] = &[
-    "today",
-    "tomorrow",
-    "今天",
-    "明天",
-    "+1h",
-    "+1d",
-    "周五",
-    "下周一",
-    "18:00",
-    "now",
-    "8/20",
-    "后天",
-    "+30m",
-    "+15m",
-    "+2h",
-    "+3h",
-    "+4h",
-    "+2d",
-    "+3d",
-    "+1w",
-    "周一",
-    "周二",
-    "周三",
-    "周四",
-    "周六",
-    "周日",
-    "周末",
-    "09:00",
-];
+/// `~` 时间补全候选（启发式展示支持的语法边界）。
+pub(crate) fn time_candidates(lang: Lang) -> Vec<String> {
+    let now = chrono::Local::now();
+    let current_time_str = now.format("%H:%M").to_string();
 
-/// `~` 时间补全候选（英文模式：纯英文词汇，首屏涵盖天词、相对偏移、星期、整点时刻等多样表达）。
-pub(crate) const TIME_CANDIDATES_EN: &[&str] = &[
-    "today", "tomorrow", "+1h", "+1d", "fri", "18:00", "now", "8/20", "+30m", "+15m", "+2h", "+3h",
-    "+4h", "+2d", "+3d", "+1w", "mon", "tue", "wed", "thu", "sat", "sun", "weekend", "09:00",
-];
+    // hh:mm by itself shows now + 2h
+    let plus_2h = now + chrono::Duration::hours(2);
+    let hh_mm = plus_2h.format("%H:%M").to_string();
 
-pub(crate) fn time_candidates(lang: Lang) -> &'static [&'static str] {
     match lang {
-        Lang::Zh => TIME_CANDIDATES_ZH,
-        Lang::En => TIME_CANDIDATES_EN,
+        Lang::Zh => vec![
+            hh_mm,
+            "+30m".to_string(),
+            "+2h".to_string(),
+            "+1d".to_string(),
+            "+1w".to_string(),
+            "周一".to_string(),
+            "周五".to_string(),
+            "下周一".to_string(),
+            format!("明天 {}", current_time_str),
+            format!("8/20 {}", current_time_str),
+            "now".to_string(),
+        ],
+        Lang::En => vec![
+            hh_mm.clone(),
+            "+30m".to_string(),
+            "+2h".to_string(),
+            "+1d".to_string(),
+            "+1w".to_string(),
+            "mon".to_string(),
+            "fri".to_string(),
+            "next mon".to_string(),
+            format!("tomorrow {}", current_time_str),
+            format!("8/20 {}", current_time_str),
+            "now".to_string(),
+        ],
     }
 }
 

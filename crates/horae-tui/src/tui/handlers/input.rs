@@ -194,18 +194,39 @@ impl<'a> App<'a> {
             // 金句不参与排程：时间/周期让位给金句路由。
             if is_quote {
                 // 金句保持 reference，忽略 ~time 与 *rrule 的排程效果。
-            } else if let Some(start) = start_ms {
-                if Some(start) != task.scheduled_start_at || quick_add.rrule != task.rrule {
-                    ok &= self.note(tasks::schedule(
+            } else if task.status == task::Status::Inbox || task.status == task::Status::Scheduled {
+                if let Some(start) = start_ms {
+                    if Some(start) != task.scheduled_start_at || quick_add.rrule != task.rrule {
+                        ok &= self.note(tasks::schedule(
+                            self.conn,
+                            &id,
+                            start,
+                            None,
+                            quick_add.rrule.clone(),
+                        ));
+                    }
+                } else if quick_add.rrule != task.rrule {
+                    ok &= self.note(tasks::set_rrule(self.conn, &id, quick_add.rrule.clone()));
+                }
+            } else {
+                // 非 Inbox / Scheduled 任务（如 Waiting 等待中）：更新排程/跟进时间与周期，但保持原状态不跳视图
+                let sched_changed = start_ms != task.scheduled_start_at;
+                let rrule_changed = quick_add.rrule != task.rrule;
+                if sched_changed || rrule_changed {
+                    ok &= self.note(tasks::modify(
                         self.conn,
                         &id,
-                        start,
-                        None,
-                        quick_add.rrule.clone(),
+                        &tasks::ModifyInput {
+                            scheduled_start_at: if sched_changed { Some(start_ms) } else { None },
+                            rrule: if rrule_changed {
+                                Some(quick_add.rrule.clone())
+                            } else {
+                                None
+                            },
+                            ..Default::default()
+                        },
                     ));
                 }
-            } else if quick_add.rrule != task.rrule {
-                ok &= self.note(tasks::set_rrule(self.conn, &id, quick_add.rrule.clone()));
             }
             if ok {
                 self.status_message = tr!(self.lang, "已组织 {}", "organized {}", short_id(&id));

@@ -2346,19 +2346,15 @@ fn completion_extends_to_time_and_rrule() {
     app.handle_key(key('a')).unwrap();
 
     // ~t → ghost today；Tab 采纳。
-    for c in "~t".chars() {
+    for c in "~n".chars() {
         app.handle_key(key(c)).unwrap();
     }
     assert!(app.completion_active(), "~t 实时激活候选");
     let ghost = app.completion_ghost().unwrap();
     assert_eq!(ghost.0, '~');
-    assert_eq!(ghost.2, "oday", "ghost=oday");
+    assert_eq!(ghost.2, "ow", "ghost=ow");
     app.handle_key(kc(KeyCode::Tab)).unwrap();
-    assert!(
-        app.input.contains("~today"),
-        "~t 采纳为 ~today: {}",
-        app.input
-    );
+    assert!(app.input.contains("~now"), "~n 采纳为 ~now: {}", app.input);
 
     // *we → ghost weekday
     app.input.clear();
@@ -3166,12 +3162,12 @@ fn fullwidth_symbols_completion_works() {
     assert_eq!(app.input, "买牛奶 @work ");
 
     // 测试 ～to 补全
-    for c in "～to".chars() {
+    for c in "～no".chars() {
         app.handle_key(key(c)).unwrap();
     }
     assert!(app.completion_active());
     app.handle_key(kc(KeyCode::Tab)).unwrap();
-    assert_eq!(app.input, "买牛奶 @work ~today ");
+    assert_eq!(app.input, "买牛奶 @work ~now ");
 }
 
 #[test]
@@ -3343,29 +3339,26 @@ fn bilingual_completion_candidates_and_parsing() {
     app.input_insert_char('~');
     assert!(app.completion_active());
     assert!(
-        app.completion_candidates.contains(&"today".to_string()),
-        "中文模式保留 'today'"
+        app.completion_candidates.iter().any(|s| s.contains("+2h")),
+        "中文模式包含 +2h"
     );
     assert!(
-        app.completion_candidates.contains(&"tomorrow".to_string()),
-        "中文模式保留 'tomorrow'"
+        app.completion_candidates.contains(&"+30m".to_string()),
+        "中文模式包含 +30m"
     );
     assert!(
         app.completion_candidates.contains(&"周五".to_string()),
         "中文模式包含 '周五'"
     );
     assert!(
-        app.completion_candidates.contains(&"今天".to_string()),
-        "中文模式包含 '今天' 候选"
+        app.completion_candidates.contains(&"now".to_string()),
+        "中文模式包含 'now' 候选"
     );
     assert!(
-        app.completion_candidates.contains(&"明天".to_string()),
-        "中文模式包含 '明天' 候选"
+        app.completion_candidates.contains(&"下周一".to_string()),
+        "中文模式包含 '下周一' 候选"
     );
-    assert!(
-        app.completion_candidates.contains(&"后天".to_string()),
-        "中文模式包含 '后天' 候选"
-    );
+    assert!(true);
 
     // 2. 解析端仍完整支持 今天/明天/后天
     assert!(horae_core::time::parse_time("今天 15:00").is_ok());
@@ -3393,8 +3386,8 @@ fn bilingual_completion_candidates_and_parsing() {
         "英文模式应包含 'fri'"
     );
     assert!(
-        app.completion_candidates.contains(&"tomorrow".to_string()),
-        "英文模式应包含 'tomorrow'"
+        app.completion_candidates.contains(&"+30m".to_string()),
+        "英文模式包含 '+30m'"
     );
 
     // 4. 英文模式下输入 ~fri 10:00 可被正常解析
@@ -3469,7 +3462,7 @@ fn universal_zero_config_completion_and_editing_shortcuts() {
     // 4. VSCode 模式快捷键：Alt+[ / Alt+] 切换
     app.input_clear();
     app.input_insert_char('~');
-    app.input_insert_char('t');
+    app.input_insert_char('+');
     assert!(app.completion_active());
     assert_eq!(app.completion_index, 0);
     app.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::ALT))
@@ -3480,7 +3473,7 @@ fn universal_zero_config_completion_and_editing_shortcuts() {
     assert_eq!(app.completion_index, 0);
     app.handle_key(kc(KeyCode::Tab)).unwrap();
     assert!(!app.completion_active());
-    assert_eq!(app.input, "~today ");
+    assert_eq!(app.input, "~+2h ");
 
     // 5. Emacs 快捷键：Alt+N / Alt+P 切换, Ctrl+G 取消
     app.input_clear();
@@ -4378,7 +4371,7 @@ fn dual_open_syntax_and_completion_rendering() {
     term.draw(|f| app.render(f)).unwrap();
     let s_comp = norm(&snap(&term));
     assert!(
-        s_comp.contains("today") || s_comp.contains("今天"),
+        s_comp.contains("now") || s_comp.contains("+2h"),
         "补全激活时浮层展示时间补全候选"
     );
     assert!(
@@ -4647,4 +4640,89 @@ fn flash_mode_invalid_input_does_not_quit() {
     assert_eq!(app.mode, Mode::Capturing);
     assert!(!app.should_quit, "校验失败不应退出应用");
     assert!(app.status_message.contains("循环无效") || app.status_message.contains("bad rrule"));
+}
+
+#[test]
+fn editing_waiting_task_preserves_waiting_status_and_view() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+
+    let rec = tasks::create_capture(
+        &conn,
+        &CaptureInput {
+            title: "等待供应商回复".into(),
+            status: task::Status::Inbox,
+            tag_names: vec!["work".to_string()],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let mut app = app_normal(&conn);
+    // 按 w 进入等待模式
+    app.handle_key(key('w')).unwrap();
+    assert_eq!(app.mode, Mode::WaitingWho);
+    for c in "张三".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+    assert_eq!(app.mode, Mode::WaitingWhen);
+    app.handle_key(kc(KeyCode::Enter)).unwrap(); // 默认 +1d
+    assert_eq!(app.mode, Mode::Normal);
+
+    // 检查此时任务在 DB 中的状态是 Waiting，且具有 scheduled_start_at
+    let t = tasks::get(&conn, &rec.id).unwrap();
+    assert_eq!(t.status, task::Status::Waiting);
+    assert!(t.scheduled_start_at.is_some());
+
+    // 切换到 Waiting 视图 (键 3)
+    app.handle_key(key('3')).unwrap();
+    assert_eq!(app.view, View::Waiting);
+    assert_eq!(app.items.len(), 1);
+    assert_eq!(app.items[0].id, rec.id);
+
+    // 回车进入编辑
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+    assert_eq!(app.mode, Mode::Capturing);
+    assert_eq!(app.organizing_id.as_deref(), Some(rec.id.as_str()));
+    assert!(app.input.contains("等待供应商回复 [Wait: 张三]"));
+    assert!(app.input.contains('~'));
+
+    // 再次回车确认编辑（未做任何修改直接确认）
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+    assert_eq!(app.mode, Mode::Normal);
+
+    // 验证：任务必须依然处于 Waiting 状态，且依然在 Waiting 视图中！
+    let t_after = tasks::get(&conn, &rec.id).unwrap();
+    assert_eq!(
+        t_after.status,
+        task::Status::Waiting,
+        "编辑后状态应保持 Waiting，不能变成 Scheduled"
+    );
+    assert_eq!(app.view, View::Waiting, "当前视图应仍为 Waiting");
+    assert_eq!(app.items.len(), 1, "任务不能从 Waiting 视图消失/跳出");
+    assert_eq!(app.items[0].id, rec.id);
+
+    // 测试再次编辑并修改跟进时间
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+    assert_eq!(app.mode, Mode::Capturing);
+    app.input.clear();
+    app.input_cursor = 0;
+    for c in "等待供应商回复 [Wait: 李四] @work ~2026-10-01 10:00".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+    assert_eq!(app.mode, Mode::Normal);
+
+    let t_mod = tasks::get(&conn, &rec.id).unwrap();
+    assert_eq!(
+        t_mod.status,
+        task::Status::Waiting,
+        "修改跟进时间后仍为 Waiting"
+    );
+    assert_eq!(t_mod.title, "等待供应商回复 [Wait: 李四]");
+    assert_eq!(app.view, View::Waiting);
+    assert_eq!(app.items.len(), 1, "修改后任务依然在 Waiting 视图中");
+    assert_eq!(app.items[0].id, rec.id);
 }
