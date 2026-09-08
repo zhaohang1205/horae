@@ -135,6 +135,15 @@ pub(crate) enum Mode {
     RenamingChecklist,
 }
 
+/// TUI 启动模式选择（正常主页面 vs 闪念录入即退出）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum LaunchMode {
+    #[default]
+    Default,
+    Normal,
+    Flash,
+}
+
 impl Mode {
     pub(crate) fn is_input(&self) -> bool {
         !matches!(self, Mode::Normal | Mode::Visual | Mode::ChecklistFocus)
@@ -318,7 +327,12 @@ pub(crate) struct App<'a> {
 }
 
 impl<'a> App<'a> {
+    #[allow(dead_code)]
     pub(crate) fn new(conn: &'a Connection) -> Result<Self> {
+        Self::new_with_mode(conn, LaunchMode::Default)
+    }
+
+    pub(crate) fn new_with_mode(conn: &'a Connection, launch_mode: LaunchMode) -> Result<Self> {
         // 从 settings 表恢复语言与主题。
         let lang = match horae_core::repo::settings::get(conn, "lang")
             .ok()
@@ -339,14 +353,18 @@ impl<'a> App<'a> {
         let quotes = horae_core::repo::quotes::Quotes::load(conn);
         let modules = horae_core::repo::modules::ModuleVisibility::load(conn);
         let icon_style = crate::tui::icons::IconStyle::load(conn);
-        // 启动即快速录入：缺省视为开启（settings 显式写 "0" 才关闭）。
-        let start_in_capture = !matches!(
-            horae_core::repo::settings::get(conn, "start_capture")
-                .ok()
-                .flatten()
-                .as_deref(),
-            Some("0")
-        );
+        // 启动即快速录入：缺省视为关闭（settings 显式写 "1" 才开启）。
+        let start_in_capture = match launch_mode {
+            LaunchMode::Flash => true,
+            LaunchMode::Normal => false,
+            LaunchMode::Default => matches!(
+                horae_core::repo::settings::get(conn, "start_capture")
+                    .ok()
+                    .flatten()
+                    .as_deref(),
+                Some("1")
+            ),
+        };
         let completion_style = horae_core::repo::settings::get(conn, "completion_style")
             .ok()
             .flatten()
@@ -361,13 +379,17 @@ impl<'a> App<'a> {
             Some("0")
         );
         // 闪念录入即退出：缺省视为关闭（settings 显式写 "1" 才开启）。
-        let flash_mode = matches!(
-            horae_core::repo::settings::get(conn, "flash_mode")
-                .ok()
-                .flatten()
-                .as_deref(),
-            Some("1")
-        );
+        let flash_mode = match launch_mode {
+            LaunchMode::Flash => true,
+            LaunchMode::Normal => false,
+            LaunchMode::Default => matches!(
+                horae_core::repo::settings::get(conn, "flash_mode")
+                    .ok()
+                    .flatten()
+                    .as_deref(),
+                Some("1")
+            ),
+        };
         // 农历与节气提醒：缺省视为开启（settings 显式写 "0" 才关闭）。
         let lunar_enabled = !matches!(
             horae_core::repo::settings::get(conn, "lunar_reminder")

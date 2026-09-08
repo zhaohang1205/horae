@@ -19,10 +19,24 @@ fn main() -> Result<()> {
     if let Some(cli::Command::Profile { action }) = cli.command {
         return commands::profile::run(action);
     }
+    let launch_mode = if cli.flash
+        || matches!(cli.command, Some(cli::Command::Flash))
+        || matches!(cli.command, Some(cli::Command::Tui { flash: true, .. }))
+    {
+        horae_tui::LaunchMode::Flash
+    } else if cli.normal || matches!(cli.command, Some(cli::Command::Tui { normal: true, .. })) {
+        horae_tui::LaunchMode::Normal
+    } else {
+        horae_tui::LaunchMode::Default
+    };
     let conn = horae_core::db::conn::open(cli.profile.as_deref())?;
-    commands::run(
-        cli.command.unwrap_or(cli::Command::Tui),
+    commands::run_with_mode(
+        cli.command.unwrap_or(cli::Command::Tui {
+            flash: false,
+            normal: false,
+        }),
         &conn,
         cli.profile.as_deref(),
+        launch_mode,
     )
 }

@@ -125,6 +125,7 @@ fn zh_about(path: &str) -> Option<&'static str> {
         "pomo" => "番茄钟命令（start、stop、daemon、waybar）",
         "alarm" => "临近任务的闹钟提醒（waybar、next）",
         "tui" => "启动交互式 TUI",
+        "flash" => "以闪念录入模式启动（开启即录入，回车确认录入即关闭）",
         "ntfy" => "通过 ntfy 推送手机提醒",
         "watch" => "监视与手机同步的文件夹（手机 <-> 电脑 桥接）",
         "export" => "导出完整备份（任务、事件、标签、设置、番茄钟）到 JSON",
@@ -158,6 +159,7 @@ fn zh_long_about(path: &str) -> Option<&'static str> {
         "export" => "把所有任务、事件、标签、设置与番茄钟状态导出到单个 JSON 文件——数据库的完整还原点。",
         "import" => "导入由 `horae export` 创建的备份。默认采用合并方式：已存在的 id 对应任务保持不变，其余任务加入。传入 --replace 则清空当前任务数据并精确还原备份。",
         "stats" => "以终端仪表盘（MOTD 风格）展示今日完成的番茄钟、燃尽情况与待办任务。",
+        "flash" => "直接进入快速录入模式。输入任务并回车确认后，自动保存至收件箱并立即退出。",
         "profile" => "配置集让你可以维护多套独立数据（例如 work / personal / prod1），各自存放在独立的 SQLite 文件中，通过 `horae --profile <name>` 或 TUI 设置视图切换。本命令只编辑配置（~/.config/horae/config.json），不触碰任何数据。",
         _ => return None,
     })
@@ -165,7 +167,8 @@ fn zh_long_about(path: &str) -> Option<&'static str> {
 
 fn zh_after_help(path: &str) -> Option<&'static str> {
     Some(match path {
-        "horae" => "示例:\n  horae                       启动 TUI\n  horae capture \"买牛奶\" --tag home --high\n  horae list --status next\n  horae show <id>\n  horae completions bash\n\n时间语法: now、+2h、+30m、+1d、today、tomorrow、2026-07-24 14:30\n日期搜索: 四位数字 MMDD，例如 0829\n任务引用: 完整 id、唯一 id 前缀，或精确标题",
+        "horae" => "示例:\n  horae                       正常模式启动（主页面）\n  horae -f                    闪念录入模式启动\n  horae capture \"买牛奶\" --tag home --high\n  horae list --status next\n  horae show <id>\n  horae completions bash\n\n时间语法: now、+2h、+30m、+1d、today、tomorrow、2026-07-24 14:30\n日期搜索: 四位数字 MMDD，例如 0829\n任务引用: 完整 id、唯一 id 前缀，或精确标题",
+        "flash" => "示例:\n  horae flash\n  horae f\n  horae -f",
         "capture" => "示例:\n  horae capture \"买牛奶\" --tag home\n  horae capture \"给妈妈打电话\" --high --due tomorrow\n  horae capture \"提交报告\" --status scheduled --due +1d\n  horae capture \"给老板发邮件 ~today @work !high\"",
         "modify" => "示例:\n  horae modify <id> \"买有机牛奶 @groceries\"\n  horae modify <id> --due tomorrow\n  horae modify <id> --tag home --untag work\n  horae modify <id> --clear-due\n  horae modify <id> --clear-schedule\n  horae modify <id> --notes \"下午3点电话\"\n  horae modify <id> --edit-notes\n  horae modify <id> --status next",
         "list" => "示例:\n  horae list\n  horae list --status next\n  horae list --status scheduled --tag work\n  horae list --date 0829 --json\n  horae list --due-before +1d --json",
@@ -194,6 +197,8 @@ fn zh_arg_help(path: &str, arg: &str) -> Option<&'static str> {
         ("horae", "lang") => {
             "帮助文本的输出语言：`en`（默认）或 `zh`（中文）。也可通过环境变量 `HORAE_LANG` 设置。"
         }
+        (_, "flash") => "以闪念录入模式启动（开启即录入，回车确认录入即关闭）",
+        (_, "normal") => "以正常模式启动（开启后正常进入主页面）",
         ("capture", "title") => "任务标题（可省略引号）",
         ("capture", "clip") => "从系统剪贴板读取内容作为任务标题/语法",
         ("capture", "tag") => "要添加的标签（可重复）",

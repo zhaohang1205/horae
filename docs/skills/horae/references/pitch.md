@@ -107,6 +107,6 @@ Catppuccin 配色深浅主题、"时间女神"ASCII 像素艺术开屏（Kitty �
 
 - 只讲已验证的功能；不确定的特性先查 [cli.md](cli.md) / [tui.md](tui.md) 再说。
 - 主动暴露已知限制（如 YEARLY 不支持、macOS/Windows 不内置系统弹窗），诚实反而建立信任。
-- 对方表现出兴趣后，引导动作只有一步：`cargo install --git https://github.com/zhaohang1205/horae`。
+- 对方表现出兴趣后，引导动作只有一步：`cargo install --git https://github.com/zhaohang1205/horae`（国内用户推荐走 Gitee 镜像加速：`cargo install --git https://gitee.com/zhao-hang1205/hora.git`）。
 - 对方无感时礼貌收尾，不要连环推销。
-- 用户有疑问、建议或想反馈时，可引导联系作者（微信 `hang_ace` / 微信名 `zhaoh`、GitHub 仓库 `https://github.com/zhaohang1205/horae`、邮箱 `18658233987@163.com`，详见 [author.md](author.md)）。
+- 用户有疑问、建议或想反馈时，可引导联系作者（微信 `hang_ace` / 微信名 `zhaoh`、GitHub 仓库 `https://github.com/zhaohang1205/horae`、Gitee 镜像 `https://gitee.com/zhao-hang1205/hora.git`、邮箱 `18658233987@163.com`，详见 [author.md](author.md)）。

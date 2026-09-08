@@ -3,9 +3,8 @@ use crate::tui::app::{App, Mode};
 use ratatui::symbols::border;
 use ratatui::{
     layout::{Alignment, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::canvas::{Canvas, Points},
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
@@ -218,89 +217,5 @@ impl<'a> App<'a> {
                 );
             }
         }
-    }
-
-    /// 专注模式的圆形进度环 Canvas（点阵图案 + 外围刻度）。
-    pub(super) fn render_focus_ring(
-        &self,
-        f: &mut Frame,
-        canvas_area: Rect,
-        elapsed_fraction: f64,
-        ring_color: Color,
-        dim_color: Color,
-        bg_color: Color,
-    ) {
-        let cw = canvas_area.width as f64;
-        let ch = canvas_area.height as f64;
-        let y_range = (100.0 * ch * 2.0 / cw).max(10.0);
-        let cx_c = 50.0_f64;
-        let cy_c = y_range / 2.0;
-        let max_r = cy_c.min(50.0) * 0.88;
-        let outer_r = max_r;
-        let inner_r = max_r * 0.68;
-
-        let ef = elapsed_fraction;
-        let rc = ring_color;
-        let dc = dim_color;
-        let bgc = bg_color;
-
-        let canvas = Canvas::default()
-            .marker(ratatui::symbols::Marker::Braille)
-            .x_bounds([0.0, 100.0])
-            .y_bounds([0.0, y_range])
-            .background_color(bgc)
-            .paint(move |ctx| {
-                let steps = 1440_usize;
-                let ring_steps = ((outer_r - inner_r) * 3.0) as usize + 1;
-
-                let mut rem_pts: Vec<(f64, f64)> = Vec::with_capacity(steps * ring_steps);
-                let mut ela_pts: Vec<(f64, f64)> = Vec::with_capacity(steps * ring_steps);
-
-                for i in 0..steps {
-                    let angle_deg = i as f64 * 360.0 / steps as f64;
-                    let angle_rad = (90.0_f64 - angle_deg).to_radians();
-                    let frac = angle_deg / 360.0;
-
-                    for ri in 0..=ring_steps {
-                        let r = inner_r + ri as f64 * (outer_r - inner_r) / ring_steps as f64;
-                        let x = cx_c + r * angle_rad.cos();
-                        let y = cy_c + r * angle_rad.sin();
-                        if !(0.5..=99.5).contains(&x) || y < 0.5 || y > y_range - 0.5 {
-                            continue;
-                        }
-                        if frac >= ef {
-                            rem_pts.push((x, y));
-                        } else {
-                            ela_pts.push((x, y));
-                        }
-                    }
-                }
-                ctx.draw(&Points {
-                    coords: &ela_pts,
-                    color: dc,
-                });
-                ctx.draw(&Points {
-                    coords: &rem_pts,
-                    color: rc,
-                });
-
-                // 外围刻度点
-                let mut tick_pts = vec![];
-                for t in 0..12 {
-                    let deg = t as f64 * 30.0;
-                    let rad = (90.0_f64 - deg).to_radians();
-                    for ri in 0..=3 {
-                        let r = outer_r + 2.0 + ri as f64 * 0.8;
-                        let x = cx_c + r * rad.cos();
-                        let y = cy_c + r * rad.sin();
-                        tick_pts.push((x, y));
-                    }
-                }
-                ctx.draw(&Points {
-                    coords: &tick_pts,
-                    color: self.theme.text_dim,
-                });
-            });
-        f.render_widget(canvas, canvas_area);
     }
 }

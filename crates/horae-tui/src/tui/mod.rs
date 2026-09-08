@@ -6,6 +6,7 @@ pub mod render;
 pub mod theme;
 pub mod ui;
 
+pub use app::LaunchMode;
 pub(crate) use app::{App, Pane, View};
 pub(crate) use handlers::AppHandlers;
 pub(crate) use render::AppRender;
@@ -109,10 +110,19 @@ pub mod splash;
 /// 启动交互式 TUI。
 /// 内置默认开屏图；允许用户用 `~/.config/horae/splash.png` 覆盖。
 pub fn run(conn: &Connection, profile: Option<&str>) -> Result<()> {
+    run_with_mode(conn, profile, LaunchMode::Default)
+}
+
+/// 以指定启动模式运行交互式 TUI（正常模式或闪念录入即退出模式）。
+pub fn run_with_mode(
+    conn: &Connection,
+    profile: Option<&str>,
+    launch_mode: LaunchMode,
+) -> Result<()> {
     let mods = horae_core::repo::modules::ModuleVisibility::load(conn);
     // 先把真正耗时的初始化（加载数据、构建 App）做完——这一刻才是「启动完成」的时点。
     // 在此冻结启动用时，开屏读到的才是包含全部初始化成本的准确值，而非开屏前的 0ms。
-    let mut app = App::new(conn)?;
+    let mut app = App::new_with_mode(conn, launch_mode)?;
     app.profile_name = profile
         .map(|s| s.to_string())
         .or_else(|| {
@@ -122,7 +132,8 @@ pub fn run(conn: &Connection, profile: Option<&str>) -> Result<()> {
         })
         .unwrap_or_default();
     let _ = horae_core::time::boot_elapsed_ms();
-    if mods.splash {
+    // 闪念模式下跳过开屏页，实现极速就绪
+    if mods.splash && launch_mode != LaunchMode::Flash {
         let _ = splash::show_splash(conn);
     }
     enable_raw_mode()?;

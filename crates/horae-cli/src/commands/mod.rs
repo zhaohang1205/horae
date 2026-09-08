@@ -22,14 +22,29 @@ mod status;
 mod tagging;
 mod watch;
 
+#[allow(dead_code)]
 pub fn run(cmd: Command, conn: &Connection, profile: Option<&str>) -> Result<()> {
-    let result = run_inner(cmd, conn, profile);
+    run_with_mode(cmd, conn, profile, horae_tui::LaunchMode::Default)
+}
+
+pub fn run_with_mode(
+    cmd: Command,
+    conn: &Connection,
+    profile: Option<&str>,
+    launch_mode: horae_tui::LaunchMode,
+) -> Result<()> {
+    let result = run_inner(cmd, conn, profile, launch_mode);
     // CLI hook：每次命令结束后顺带检查每日心智维护摘要（每天至多一次，已发送则直接跳过）。
     let _ = notify::check(conn);
     result
 }
 
-fn run_inner(cmd: Command, conn: &Connection, profile: Option<&str>) -> Result<()> {
+fn run_inner(
+    cmd: Command,
+    conn: &Connection,
+    profile: Option<&str>,
+    launch_mode: horae_tui::LaunchMode,
+) -> Result<()> {
     match cmd {
         Command::Capture {
             title,
@@ -165,7 +180,8 @@ fn run_inner(cmd: Command, conn: &Connection, profile: Option<&str>) -> Result<(
             "next" => alarm::next(slot, limit),
             _ => anyhow::bail!("unknown alarm action"),
         },
-        Command::Tui => horae_tui::run(conn, profile),
+        Command::Tui { .. } => horae_tui::run_with_mode(conn, profile, launch_mode),
+        Command::Flash => horae_tui::run_with_mode(conn, profile, horae_tui::LaunchMode::Flash),
         Command::Watch {
             dir,
             interval,

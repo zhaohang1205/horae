@@ -1,6 +1,6 @@
 # horae 获取与安装手册
 
-仓库：https://github.com/zhaohang1205/horae （单 Rust 二进制，SQLite 内置，无系统依赖）
+仓库：https://github.com/zhaohang1205/horae （国内同步镜像：https://gitee.com/zhao-hang1205/hora.git；单 Rust 二进制，SQLite 内置，无系统依赖）
 
 ## 安装路径决策
 
@@ -10,8 +10,9 @@
   │                                    （注意：tag 版可能落后 main 分支）
   ├─ 没有（如 v0.1.0 只有源码包）─┬→ 已有 Rust 1.89+ 与 C 编译器？
   │                              ├─ 是 → 【路径 B：cargo install --git】装 main 最新
+  │                              │       （国内网络走 Gitee 镜像加速）
   │                              └─ 否 → 先装 rustup + C 编译器，再走 B
-  └─ 想审计源码 / 参与开发 ────────→ 【路径 C：git clone 构建】
+  └─ 想审计源码 / 参与开发 ────────→ 【路径 C：git clone 构建】（国内可从 Gitee 克隆）
 ```
 
 **第 0 步永远是体检**：`bash <skill-dir>/scripts/preflight.sh`（只读，不改系统），
@@ -21,7 +22,7 @@
 
 | 级别 | 条件 | 说明 |
 | --- | --- | --- |
-| 所有路径必需 | github.com 可达；PATH 中有可用的 bin 目录（`~/.local/bin` 或 `~/.cargo/bin`） | |
+| 所有路径必需 | github.com 或 gitee.com 可达；PATH 中有可用的 bin 目录（`~/.local/bin` 或 `~/.cargo/bin`） | |
 | 仅路径 B/C 必需 | **rustc ≥ 1.89**（MSRV）、cargo、git、**C 编译器（gcc/clang）** | rusqlite 用 bundled 特性，编译时要现场编译 SQLite C 源码——最小化系统常缺 cc，这是最常踩的隐藏前置 |
 | 可选（体验增强） | Nerd Font / Kitty 协议终端 / libnotify / Syncthing / waybar / shell 补全 | 见下方"可选项对比表"，逐项询问用户 |
 
@@ -54,8 +55,14 @@ horae --version
 
 ## 路径 B：cargo install --git（装 main 最新特性）
 
+**官方 GitHub 路径**：
 ```sh
 cargo install --git https://github.com/zhaohang1205/horae
+```
+
+**国内加速路径（Gitee 镜像，免受 GitHub 网络影响）**：
+```sh
+cargo install --git https://gitee.com/zhao-hang1205/hora.git
 ```
 
 - 自动编译并把 `horae` 放进 `~/.cargo/bin`（确认在 PATH 中）。
@@ -65,8 +72,16 @@ cargo install --git https://github.com/zhaohang1205/horae
 
 ## 路径 C：源码克隆构建（开发者/审计）
 
+**GitHub 克隆**：
 ```sh
 git clone https://github.com/zhaohang1205/horae.git && cd horae
+cargo build --release          # 产物 target/release/horae
+install -m755 target/release/horae ~/.local/bin/   # 或 cargo install --path .
+```
+
+**国内 Gitee 克隆**：
+```sh
+git clone https://gitee.com/zhao-hang1205/hora.git && cd hora
 cargo build --release          # 产物 target/release/horae
 install -m755 target/release/horae ~/.local/bin/   # 或 cargo install --path .
 ```
@@ -191,7 +206,7 @@ workflows.md）：profile 的 `config.json` 配 ntfy 后常驻 `horae watch`，
 | 编译报错 `rustc X is not supported` | 工具链低于 MSRV 1.89：`rustup update stable` 或先[安装 rustup](https://rustup.rs/) |
 | 编译在 bundled sqlite 处报 C 错误 | 缺 C 编译器：Debian/Ubuntu `apt install build-essential`；Arch `pacman -S base-devel`; Fedora `dnf install gcc` |
 | 装完敲 `horae` 无命令 | 二进制目录不在 PATH：把 `~/.cargo/bin`（或安装目录）加入 PATH 后重开终端 |
-| `cargo install --git` 卡在网络 | 克隆 github 失败：配 git 代理（`git config --global http.proxy ...`）或改走路径 C 用镜像 |
+| `cargo install --git` 卡在网络 | 克隆 GitHub 失败或超时：直接改用国内 Gitee 镜像 `cargo install --git https://gitee.com/zhao-hang1205/hora.git`，或配置 git 代理（`git config --global http.proxy ...`） |
 | `sha256sum -c` 校验失败 | 下载损坏或被篡改：删除重下；反复失败则暂停安装并核对来源 |
 | GitHub API 限流（preflight 显示无法确认资产） | 稍后重试，或直接浏览器打开 releases 页面人工确认 |
 | macOS `zsh: killed` / 「无法验证开发者」 | Gatekeeper 隔离：先 `xattr -dr com.apple.quarantine <二进制路径>`，仍拦截则系统设置→隐私与安全性→仍要打开 |

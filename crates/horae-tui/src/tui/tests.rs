@@ -2653,26 +2653,49 @@ fn icons_toggle_persists_and_switches_style() {
 }
 
 #[test]
-fn start_capture_default_on_enters_capturing() {
+fn start_capture_default_off_enters_normal() {
     horae_core::repo::state::set_test_override();
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
 
-    // 无 settings 记录 = 默认开启：启动直接进入快速录入，输入为空。
+    // 无 settings 记录 = 默认关闭：启动直接进入主页面（Normal 模式）。
+    let app = App::new(&conn).unwrap();
+    assert!(!app.start_in_capture, "缺省应视为关闭");
+    assert_eq!(app.mode, Mode::Normal, "启动即进入主页面");
+
+    // 显式写 "1" 后启动进入快速录入。
+    horae_core::repo::settings::set(&conn, "start_capture", "1").unwrap();
     let mut app = App::new(&conn).unwrap();
-    assert!(app.start_in_capture, "缺省应视为开启");
-    assert_eq!(app.mode, Mode::Capturing, "启动即快速录入");
+    assert!(app.start_in_capture);
+    assert_eq!(app.mode, Mode::Capturing, "显式开启后进入快速录入");
     assert!(app.input.is_empty(), "空输入等待录入");
 
     // Esc 退出后回到 Normal 列表浏览。
     app.handle_key(kc(KeyCode::Esc)).unwrap();
     assert_eq!(app.mode, Mode::Normal);
+}
 
-    // 显式写 "0" 后启动保持 Normal（既有行为）。
+#[test]
+fn launch_modes_override_settings() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+
+    // 即使 settings 中全部设为 0，Flash 模式依然强制开启录入与回车退出
     horae_core::repo::settings::set(&conn, "start_capture", "0").unwrap();
-    let app = App::new(&conn).unwrap();
-    assert!(!app.start_in_capture);
-    assert_eq!(app.mode, Mode::Normal, "显式关闭后 Normal 起步");
+    horae_core::repo::settings::set(&conn, "flash_mode", "0").unwrap();
+    let flash_app = App::new_with_mode(&conn, LaunchMode::Flash).unwrap();
+    assert!(flash_app.start_in_capture);
+    assert!(flash_app.flash_mode);
+    assert_eq!(flash_app.mode, Mode::Capturing);
+
+    // 即使 settings 中全部设为 1，Normal 模式依然强制进入主页面 Normal 模式
+    horae_core::repo::settings::set(&conn, "start_capture", "1").unwrap();
+    horae_core::repo::settings::set(&conn, "flash_mode", "1").unwrap();
+    let normal_app = App::new_with_mode(&conn, LaunchMode::Normal).unwrap();
+    assert!(!normal_app.start_in_capture);
+    assert!(!normal_app.flash_mode);
+    assert_eq!(normal_app.mode, Mode::Normal);
 }
 
 #[test]
@@ -4725,4 +4748,102 @@ fn editing_waiting_task_preserves_waiting_status_and_view() {
     assert_eq!(app.view, View::Waiting);
     assert_eq!(app.items.len(), 1, "修改后任务依然在 Waiting 视图中");
     assert_eq!(app.items[0].id, rec.id);
+}
+
+#[test]
+fn pomodoro_focus_mode_renders_cleanly_across_resolutions() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    let t = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "Focus deep work task".to_string(),
+            status: task::Status::Next,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let _ = horae_core::repo::tasks::add_checklist_item(&conn, &t.id, "Step 1 draft").unwrap();
+    let _ = horae_core::repo::tasks::add_checklist_item(&conn, &t.id, "Step 2 review").unwrap();
+
+    let now = horae_core::time::now_ms();
+    let pomo = horae_core::model::pomodoro::PomoState {
+        phase: horae_core::model::pomodoro::Phase::Work,
+        task_id: Some(t.id.clone()),
+        task_title: Some(t.title.clone()),
+        start_ts: Some(now - 10 * 60 * 1000), // 已过 10 分钟
+        end_ts: Some(now + 15 * 60 * 1000),   // 剩余 15 分钟
+        today_count: 3,
+        streak: 5,
+        ..Default::default()
+    };
+    horae_core::repo::pomodoro::save_state(&pomo).unwrap();
+    app.pomo = pomo;
+
+    // 1. Tier 1: 宽屏/全屏大分辨率 (120x35) - 悬浮卡片模式
+    {
+        let mut term = Terminal::new(TestBackend::new(120, 35)).unwrap();
+        term.draw(|f| app.render(f)).unwrap();
+        let s = snap(&term);
+        assert!(
+            !s.contains('╭') && !s.contains('╯'),
+            "番茄钟专注模式不应渲染UI外边框"
+        );
+        assert!(s.contains("Focus deep work task"), "应包含任务标题");
+        assert!(s.contains("Step 1 draft"), "大屏卡片应包含检查单子项");
+        assert!(s.contains("[x]"), "应包含快捷键提示");
+        assert!(s.contains("[S]"), "应包含停止按键提示");
+    }
+
+    // 2. Tier 2: 经典标准终端 (80x24) - 均衡流式布局
+    {
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        term.draw(|f| app.render(f)).unwrap();
+        let s = snap(&term);
+        assert!(s.contains("Focus deep work task"), "标准屏应包含任务标题");
+        assert!(s.contains("[x]"), "标准屏应包含完成快捷键");
+        assert!(s.contains("[S]"), "标准屏应包含停止快捷键");
+        assert!(s.contains("Step 1 draft"), "80x24 终端应呈现检查单");
+    }
+
+    // 3. Tier 2: 紧凑矮终端 (80x19) - 自动切换中型字体且不截断
+    {
+        let mut term = Terminal::new(TestBackend::new(80, 19)).unwrap();
+        term.draw(|f| app.render(f)).unwrap();
+        let s = snap(&term);
+        assert!(s.contains("[x]"), "紧凑屏操作按键绝不能被截断");
+        assert!(s.contains("[S]"), "紧凑屏停止按键绝不能被截断");
+        assert!(s.contains("Focus deep work task"));
+    }
+
+    // 4. Tier 3: 极简分屏小窗 (48x12) - 平滑进度条模式
+    {
+        let mut term = Terminal::new(TestBackend::new(48, 12)).unwrap();
+        term.draw(|f| app.render(f)).unwrap();
+        let s = snap(&term);
+        assert!(s.contains('%'), "极小窗口应包含平滑进度条百分比");
+        assert!(s.contains("[x]"), "极小窗口必须保全完成快捷键");
+        assert!(s.contains("[S]"), "极小窗口必须保全停止快捷键");
+    }
+}
+
+#[test]
+fn pomodoro_smooth_bar_precision() {
+    use crate::tui::render::focus::build_smooth_bar;
+
+    let (filled, empty) = build_smooth_bar(0.0, 10);
+    assert_eq!(filled, "");
+    assert_eq!(empty, "░░░░░░░░░░");
+
+    let (filled, empty) = build_smooth_bar(1.0, 10);
+    assert_eq!(filled, "██████████");
+    assert_eq!(empty, "");
+
+    let (filled, empty) = build_smooth_bar(0.5, 10);
+    assert_eq!(filled, "█████");
+    assert_eq!(empty, "░░░░░");
 }

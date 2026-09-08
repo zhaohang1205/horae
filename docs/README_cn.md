@@ -58,8 +58,8 @@ horae show <task-id>                 # 查看完整时间线
 ## CLI
 
 | 命令 / Command | 说明 |
-| --- | --- |
-| `horae` | 启动 TUI |
+| `horae` / `horae --normal`（`-n`） | 启动正常模式，直接进入主页面 |
+| `horae flash` / `horae -f`（`--flash`） | 启动闪念输入模式：开启即录入，回车确认录入即关闭（别名 `f`） |
 | `horae capture [title] [--clip] [--notes N] [--tag T]... [--due TIME] [--status S] [--high\|--medium\|--low] [--json]` | 捕获新任务（别名 `c`，支持 `--clip` 瞬时入库） |
 | `horae list [--status S] [--tag T]... [--date MMDD] [--due-before TIME] [--json]` | 列出任务（别名 `l`）；日期搜索统一用四位数字，如 `0829` |
 | `horae show <id> [--json]` | 任务详情 + 时间线（别名 `s`） |

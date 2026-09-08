@@ -3,6 +3,7 @@
 horae 由个人开发者维护，是一个持续演进的本地优先 GTD 工具。
 
 - **GitHub 仓库**：<https://github.com/zhaohang1205/horae>（Issue、PR、Release 均在此）
+- **Gitee 镜像**：<https://gitee.com/zhao-hang1205/hora.git>（国内同步镜像，供快速克隆与安装）
 - **微信**：`hang_ace`（微信名 `zhaoh`）
 - **邮箱**：<18658233987@163.com>
 

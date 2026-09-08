@@ -552,3 +552,41 @@ fn calendar_command_short_and_json_outputs() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("超出支持的农历年份范围"));
 }
+
+#[test]
+fn flash_and_normal_cli_flags_and_subcommands() {
+    let env = env();
+
+    // 1. horae --help 包含 --flash 与 --normal 选项
+    let out = env.cmd().args(["--help"]).output().unwrap();
+    assert!(out.status.success());
+    let help = String::from_utf8_lossy(&out.stdout);
+    assert!(help.contains("--flash"));
+    assert!(help.contains("-f"));
+    assert!(help.contains("--normal"));
+    assert!(help.contains("-n"));
+    assert!(help.contains("flash"));
+
+    // 2. 中文帮助包含闪念录入与正常模式说明
+    let out = env.cmd().args(["--lang", "zh", "--help"]).output().unwrap();
+    assert!(out.status.success());
+    let zh_help = String::from_utf8_lossy(&out.stdout);
+    assert!(zh_help.contains("闪念录入模式"));
+    assert!(zh_help.contains("正常模式"));
+
+    // 3. horae flash --help 正确展示子命令帮助
+    let out = env.cmd().args(["flash", "--help"]).output().unwrap();
+    assert!(out.status.success());
+    let flash_help = String::from_utf8_lossy(&out.stdout);
+    assert!(flash_help.contains("quick capture"));
+
+    // 4. horae f --help (别名)
+    let out = env.cmd().args(["f", "--help"]).output().unwrap();
+    assert!(out.status.success());
+
+    // 5. --flash 与 --normal 互斥
+    let out = env.cmd().args(["--flash", "--normal"]).output().unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("cannot be used with") || err.contains("conflicts with"));
+}

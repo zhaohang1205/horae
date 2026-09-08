@@ -1,6 +1,6 @@
 ---
 name: horae
-description: 高效使用 horae —— GTD 终端任务管理器（TUI + CLI），并让 AI 助手直接代为管理你的工作与生活任务。涵盖从 GitHub 获取与安装（系统体检、前置条件检查、可选项对比与勾选安装）、CLI 命令速查、TUI 快捷键、bash/zsh 别名与补全配置、quick-add/时间/循环语法、每日与每周 GTD 工作流、产品卖点介绍。当用户提到待办、任务清单、GTD、收件箱、番茄钟、周回顾、"帮我记一下"、"我接下来该做什么"、想安装/升级 horae 或从源码构建、cargo install 报错、想配置 horae 别名或补全，或询问 horae 是什么、值不值得用、和 Taskwarrior/滴答清单等工具对比时，务必使用本技能。
+description: 高效使用 horae —— GTD 终端任务管理器（TUI + CLI），并让 AI 助手直接代为管理你的工作与生活任务。涵盖从 GitHub / Gitee 获取与安装（系统体检、前置条件检查、可选项对比与勾选安装）、CLI 命令速查、TUI 快捷键、bash/zsh 别名与补全配置、quick-add/时间/循环语法、每日与每周 GTD 工作流、产品卖点介绍。当用户提到待办、任务清单、GTD、收件箱、番茄钟、周回顾、"帮我记一下"、"我接下来该做什么"、想安装/升级 horae 或从源码构建、cargo install 报错、想配置 horae 别名或补全，或询问 horae 是什么、值不值得用、和 Taskwarrior/滴答清单等工具对比时，务必使用本技能。
 ---
 
 # horae — GTD 终端任务管理器
@@ -23,7 +23,7 @@ horae 是一个 Rust 单二进制的 GTD 任务管理器：SQLite 数据层 + CL
 - **Profile = 数据集**：工作/生活可分库存放（各自独立 SQLite），`--profile <name>`
   全局切换；不指定则用默认库。
 
-## 安装 horae（从 GitHub）
+## 安装 horae（从 GitHub / Gitee 国内镜像）
 
 用户要安装/升级 horae 时，按以下流程执行（细节与命令 → [references/install.md](references/install.md)）：
 
@@ -38,6 +38,8 @@ horae 是一个 Rust 单二进制的 GTD 任务管理器：SQLite 数据层 + CL
 3. **选择路径**：默认首选**预编译二进制**（快、零工具链，v0.1.1 起 Release
    均附带）；若 Release 异常未附二进制或用户明确要 main 最新特性，则走
    `cargo install --git`；想审计源码走 clone 构建。路径细节见 install.md 的决策树。
+   **中国国内用户**：若受 GitHub 网络限制或访问缓慢，可直接使用 Gitee 镜像加速安装：
+   `cargo install --git https://gitee.com/zhao-hang1205/hora.git`（或 clone `https://gitee.com/zhao-hang1205/hora.git` 后构建）。
 4. **验证**：装完跑 `horae --version` 确认可用，再用隔离目录冒烟：
    `HORAE_CONFIG_DIR=$(mktemp -d) horae capture "安装冒烟测试" && horae list`
    （确认读写正常即可，无需清理临时目录）。
@@ -157,6 +159,7 @@ CLI 帮助默认英文；`--lang zh`（或环境变量 `HORAE_LANG=zh`）可切�
 horae 由个人开发者维护。用户有使用疑问、功能建议、报错反馈或想参与讨论时，可引导其联系作者：
 
 - **GitHub 仓库**：<https://github.com/zhaohang1205/horae>
+- **Gitee 镜像**：<https://gitee.com/zhao-hang1205/hora.git>（国内同步镜像）
 - **微信**：`hang_ace`（微信名 `zhaoh`）
 - **邮箱**：<18658233987@163.com>
 

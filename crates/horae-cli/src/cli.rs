@@ -9,7 +9,7 @@ use std::path::PathBuf;
     about = "GTD terminal task manager",
     long_about = "A GTD terminal task manager in Rust: SQLite data layer + CLI + ratatui TUI in one binary.\n\
     Every task state change is stamped with UTC-ms and appended to an append-only task_events timeline.",
-    after_help = "Examples:\n  horae                       launch the TUI\n  horae capture \"buy milk\" --tag home --high\n  horae list --status next\n  horae show <id>\n  horae completions bash\n\nTime syntax: now, +2h, +30m, +1d, today, tomorrow, 2026-07-24 14:30\nDate search: four digits MMDD, for example 0829\nTask refs: full id, unique id-prefix, or exact title."
+    after_help = "Examples:\n  horae                       launch in normal mode (main view)\n  horae -f                    launch in flash capture mode\n  horae capture \"buy milk\" --tag home --high\n  horae list --status next\n  horae show <id>\n  horae completions bash\n\nTime syntax: now, +2h, +30m, +1d, today, tomorrow, 2026-07-24 14:30\nDate search: four digits MMDD, for example 0829\nTask refs: full id, unique id-prefix, or exact title."
 )]
 pub struct Cli {
     /// Profile (data set) to use; defaults to the configured default profile.
@@ -20,6 +20,14 @@ pub struct Cli {
     /// Also configurable via the `HORAE_LANG` environment variable.
     #[arg(long, value_name = "LANG", global = true)]
     pub lang: Option<String>,
+
+    /// Launch in flash capture mode (quick capture, Enter to save and exit)
+    #[arg(short = 'f', long = "flash", conflicts_with = "normal")]
+    pub flash: bool,
+
+    /// Launch in normal mode (open main view directly)
+    #[arg(short = 'n', long = "normal", conflicts_with = "flash")]
+    pub normal: bool,
 
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -306,7 +314,33 @@ pub enum Command {
         all: bool,
     },
     /// Launch the interactive TUI
-    Tui,
+    #[command(
+        long_about = "Launch the interactive TUI. Use --flash (-f) for quick capture with auto-exit on Enter, or --normal (-n) for standard main view.",
+        after_help = "Examples:\n  horae tui\n  horae tui --flash\n  horae tui --normal"
+    )]
+    Tui {
+        #[arg(
+            short = 'f',
+            long = "flash",
+            conflicts_with = "normal",
+            help = "Launch in flash capture mode (quick capture, Enter to save and exit)"
+        )]
+        flash: bool,
+        #[arg(
+            short = 'n',
+            long = "normal",
+            conflicts_with = "flash",
+            help = "Launch in normal mode (open main view directly)"
+        )]
+        normal: bool,
+    },
+    /// Launch in flash capture mode (quick capture, Enter to save and exit)
+    #[command(
+        long_about = "Launch directly into quick capture mode. Typing and pressing Enter records the task into inbox and exits immediately.",
+        after_help = "Examples:\n  horae flash\n  horae f\n  horae -f",
+        visible_alias = "f"
+    )]
+    Flash,
     /// Push mobile reminders via ntfy (requires `ntfy` config in the profile)
     #[command(
         long_about = "Send task reminders to your phone via ntfy (https://ntfy.sh). \

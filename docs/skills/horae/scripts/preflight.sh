@@ -110,10 +110,21 @@ fi
 
 # ---------- 3. 网络 ----------
 section "网络"
+gh_ok=0
 if { have curl || have wget; } && { curl -sI --max-time 8 -o /dev/null https://github.com 2>/dev/null || wget -q --spider -T 8 https://github.com 2>/dev/null; }; then
   ok "github.com 可达"
+  gh_ok=1
 else
-  bad "无法访问 github.com（下载/克隆将失败；检查代理或网络）"
+  bad "无法访问 github.com（下载/克隆可能受网络影响）"
+fi
+
+if { have curl || have wget; } && { curl -sI --max-time 8 -o /dev/null https://gitee.com 2>/dev/null || wget -q --spider -T 8 https://gitee.com 2>/dev/null; }; then
+  ok "gitee.com 可达（国内镜像源可用: https://gitee.com/zhao-hang1205/hora.git）"
+  if [[ $gh_ok -eq 0 ]]; then
+    info "GitHub 受限但 Gitee 可达 → 建议走国内镜像: cargo install --git https://gitee.com/zhao-hang1205/hora.git"
+  fi
+else
+  info "gitee.com 未连通"
 fi
 
 # ---------- 4. 已安装情况 ----------
@@ -137,7 +148,7 @@ if echo "$latest_json" | grep -q '"tag_name"'; then
     ok "最新 Release $tag 附带预编译二进制（预编译路径可用）:"
     echo "$bin_assets" | while read -r a; do printf '      - %s\n' "$a"; done
   else
-    info "最新 Release $tag 未附预编译二进制（仅源码包）→ 当前请走 cargo install --git"
+    info "最新 Release $tag 未附预编译二进制（仅源码包）→ 当前请走 cargo install --git（国内可走 Gitee: cargo install --git https://gitee.com/zhao-hang1205/hora.git）"
   fi
 else
   info "GitHub API 不可达/限流，无法确认 Release 资产（可稍后重试或直接看 releases 页面）"
