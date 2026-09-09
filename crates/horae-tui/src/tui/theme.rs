@@ -57,20 +57,20 @@ impl Theme {
             is_dark: false,
             bg: Color::Rgb(239, 241, 245),         // Base
             fg: Color::Rgb(76, 79, 105),           // Text
-            text_dim: Color::Rgb(156, 160, 176),   // Overlay0
+            text_dim: Color::Rgb(108, 111, 133),   // Subtext0 (increased contrast)
             text_urgent: Color::Rgb(210, 15, 57),  // Red
             text_success: Color::Rgb(64, 160, 43), // Green
             rrule_fg: Color::Rgb(254, 100, 11),    // Peach
 
             border_active: Color::Rgb(30, 102, 245), // Blue
-            border_inactive: Color::Rgb(188, 192, 204), // Surface1
+            border_inactive: Color::Rgb(156, 160, 176), // Overlay0 (increased contrast)
 
             hl_bg: Color::Rgb(204, 208, 218),         // Surface0
             hl_fg: Color::Rgb(30, 102, 245),          // Blue
             row_active_bg: Color::Rgb(172, 176, 190), // Surface2，活动行（比 hl_bg 高一档）
 
             status_bg: Color::Rgb(230, 233, 239), // Mantle
-            status_fg: Color::Rgb(92, 95, 119),   // Subtext1
+            status_fg: Color::Rgb(76, 79, 105),   // Text (increased contrast)
 
             accent: Color::Rgb(30, 102, 245), // Blue
         }
