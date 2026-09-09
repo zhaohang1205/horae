@@ -103,7 +103,7 @@ pub fn parse_quick_add(input: &str) -> QuickAdd {
     let tokens = tokenize_quick_add(input);
     let mut title_parts = Vec::new();
     let mut tags = Vec::new();
-    let mut time_str = None;
+    let mut time_str: Option<String> = None;
     let mut rrule = None;
     let mut priority = None;
 
@@ -111,7 +111,22 @@ pub fn parse_quick_add(input: &str) -> QuickAdd {
     while i < tokens.len() {
         let tok = &tokens[i];
         match tok.kind {
-            QuickAddKind::Title => title_parts.push(tok.text.clone()),
+            QuickAddKind::Title => {
+                if is_hhmm(&tok.text) {
+                    if let Some(ref mut existing) = time_str {
+                        if !existing.contains(':') && !existing.contains('：') {
+                            existing.push(' ');
+                            existing.push_str(&tok.text);
+                        } else {
+                            title_parts.push(tok.text.clone());
+                        }
+                    } else {
+                        time_str = Some(tok.text.clone());
+                    }
+                } else {
+                    title_parts.push(tok.text.clone());
+                }
+            }
             QuickAddKind::Tag => tags.push(strip_token_prefix(&tok.text).to_string()),
             QuickAddKind::Time => {
                 let mut combined = strip_token_prefix(&tok.text).to_string();
@@ -123,6 +138,14 @@ pub fn parse_quick_add(input: &str) -> QuickAdd {
                         i += 1;
                     }
                 }
+
+                if let Some(existing) = &time_str {
+                    if is_hhmm(existing) {
+                        combined.push(' ');
+                        combined.push_str(existing);
+                    }
+                }
+
                 time_str = Some(combined);
             }
             QuickAddKind::Rrule => {
@@ -759,10 +782,10 @@ mod tests {
         assert_eq!(q.time_str.as_deref(), Some("明天 09:00"));
         assert_eq!(q.title, "买牛奶");
 
-        // 无 ~ 前缀的裸时刻不被吸收，留在标题
+        // 以前：无 ~ 前缀的裸时刻不被吸收，留在标题。现在：支持裸时刻与后续时间合并
         let q = parse_quick_add("报告 15:30 ~today");
-        assert_eq!(q.time_str.as_deref(), Some("today"));
-        assert!(q.title.contains("15:30"), "裸时刻留在标题: {}", q.title);
+        assert_eq!(q.time_str.as_deref(), Some("today 15:30"));
+        assert_eq!(q.title, "报告");
     }
 
     #[test]
@@ -1133,5 +1156,40 @@ mod tests {
                 "逆向映射与正向解析必须保证标准 RFC 规则完全幂等！输入: {input} -> 简写: {shorthand}"
             );
         }
+    }
+
+    #[test]
+    fn bare_hhmm_time_parsing() {
+        // 裸的 15:30 没有 `~` 也能被正确解析为 time_str
+        let q = parse_quick_add("开会 15:30");
+        assert_eq!(q.title, "开会");
+        assert_eq!(q.time_str.as_deref(), Some("15:30"));
+
+        let q2 = parse_quick_add("15:30 开会");
+        assert_eq!(q2.title, "开会");
+        assert_eq!(q2.time_str.as_deref(), Some("15:30"));
+
+        // 后置时间组合："15:30 ~明天"
+        let q3 = parse_quick_add("15:30 开会 ~明天");
+        assert_eq!(q3.title, "开会");
+        assert_eq!(q3.time_str.as_deref(), Some("明天 15:30"));
+
+        // 前置时间组合："~明天 打卡 15:30"
+        let q4 = parse_quick_add("~明天 打卡 15:30");
+        assert_eq!(q4.title, "打卡");
+        assert_eq!(q4.time_str.as_deref(), Some("明天 15:30"));
+
+        // 如果已经有一个时刻，则新的时刻降级为普通标题
+        let q5 = parse_quick_add("14:00 打卡 15:30");
+        assert_eq!(q5.title, "打卡 15:30");
+        assert_eq!(q5.time_str.as_deref(), Some("14:00"));
+
+        let q6 = parse_quick_add("~明天 14:00 打卡 15:30");
+        assert_eq!(q6.title, "打卡 15:30");
+        assert_eq!(q6.time_str.as_deref(), Some("明天 14:00"));
+
+        let q7 = parse_quick_add("~明天 15:30");
+        assert_eq!(q7.title, "");
+        assert_eq!(q7.time_str.as_deref(), Some("明天 15:30"));
     }
 }
