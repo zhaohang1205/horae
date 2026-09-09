@@ -116,14 +116,38 @@ impl<'a> App<'a> {
                 );
                 let completion_label = self.completion_style.label(self.lang);
                 let opts = [
-                    (self.modules.splash, "开屏页 (Splash)"),
-                    (self.modules.reference, "6 参考资料 (Reference)"),
-                    (self.modules.done, "7 已完成 (Done)"),
-                    (self.modules.archived, "8 归档箱 (Archived)"),
-                    (self.modules.tags, "9 标签库 (Tags)"),
-                    (self.quotes.enabled, "0 金句 (Quotes)"),
-                    (self.modules.review, "r 周回顾 (Review)"),
-                    (self.modules.settings, "M 设置 (Settings)"),
+                    (
+                        self.modules.splash,
+                        tr!(self.lang, "开屏页 (Splash)", "Splash screen"),
+                    ),
+                    (
+                        self.modules.reference,
+                        tr!(self.lang, "6 参考资料 (Reference)", "6 Reference"),
+                    ),
+                    (
+                        self.modules.done,
+                        tr!(self.lang, "7 已完成 (Done)", "7 Done"),
+                    ),
+                    (
+                        self.modules.archived,
+                        tr!(self.lang, "8 归档箱 (Archived)", "8 Archived"),
+                    ),
+                    (
+                        self.modules.tags,
+                        tr!(self.lang, "9 标签库 (Tags)", "9 Tags"),
+                    ),
+                    (
+                        self.quotes.enabled,
+                        tr!(self.lang, "0 金句 (Quotes)", "0 Quotes"),
+                    ),
+                    (
+                        self.modules.review,
+                        tr!(self.lang, "r 周回顾 (Review)", "r Review"),
+                    ),
+                    (
+                        self.modules.settings,
+                        tr!(self.lang, "M 设置 (Settings)", "M Settings"),
+                    ),
                     (nerd, icons_label),
                     (
                         self.start_in_capture,

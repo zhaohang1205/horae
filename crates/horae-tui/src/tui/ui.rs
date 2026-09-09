@@ -153,7 +153,7 @@ pub(crate) fn build_list_items(app: &App) -> Vec<ListItem<'static>> {
             } else if is_checked_in {
                 // 已打卡：重点展示下一次执行时间。
                 time::relative_due(app.lang, r.due)
-                    .map(|s| format!("已打卡·下次:{}", s))
+                    .map(|s| tr!(app.lang, "已打卡·下次:{}", "checked in·next:{}", s))
                     .unwrap_or_default()
             } else {
                 time::relative_due(app.lang, r.due)
