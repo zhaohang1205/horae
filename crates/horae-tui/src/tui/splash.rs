@@ -1,6 +1,9 @@
 //! 开屏（splash）：ASCII 艺术字、GTD 标语展示与按键等待。
 
 use horae_core::i18n::Lang;
+use unicode_width::UnicodeWidthStr;
+
+use crate::tui::icons::IconStyle;
 
 /// figlet 字体 "Delta Corps Priest1" 渲染的 HORAE 艺术字（视觉主体）。
 const HORAE_LOGO: &[&str] = &[
@@ -15,8 +18,6 @@ const HORAE_LOGO: &[&str] = &[
     "                            ███    ███",
 ];
 
-use unicode_width::UnicodeWidthStr;
-
 /// 水平居中所需的起始列。
 fn center_x(cols: u16, w: u16) -> u16 {
     if cols > w {
@@ -26,11 +27,23 @@ fn center_x(cols: u16, w: u16) -> u16 {
     }
 }
 
+/// 文本按显示宽度居中填充到指定列宽。
+fn center_pad(text: &str, width: usize) -> String {
+    let w = text.width();
+    if w >= width {
+        return text.to_string();
+    }
+    let pad = width - w;
+    let left = pad / 2;
+    let right = pad - left;
+    format!("{}{}{}", " ".repeat(left), text, " ".repeat(right))
+}
+
 /// Catppuccin 点缀色（RGB），与 `theme.rs` 的 Mocha 保持一致。
 type Rgb = (u8, u8, u8);
 const ROSEWATER: Rgb = (245, 224, 220);
+const TEXT: Rgb = (205, 214, 244);
 const OVERLAY0: Rgb = (108, 112, 134);
-
 const CRUST: Rgb = (17, 17, 27);
 
 /// 前景色转义序列。
@@ -58,6 +71,49 @@ fn write_centered<W: std::io::Write>(
     write!(out, "{sgr}{}{text}\x1b[0m", fg(color))
 }
 
+/// 绘制带左右横线的副标题 `───── Goddess of Time ─────`。
+fn draw_subtitle<W: std::io::Write>(
+    out: &mut W,
+    cols: u16,
+    y: u16,
+    brand: &str,
+) -> std::io::Result<()> {
+    use crossterm::{cursor::MoveTo, ExecutableCommand};
+    let dash = "─────";
+    let full_text = format!("{dash} {brand} {dash}");
+    let start_x = center_x(cols, full_text.width() as u16);
+
+    out.execute(MoveTo(start_x, y))?;
+    write!(out, "{}{dash} \x1b[0m", fg(OVERLAY0))?;
+    write!(out, "{}{brand}\x1b[0m", fg(ROSEWATER))?;
+    write!(out, "{} {dash}\x1b[0m", fg(OVERLAY0))?;
+    Ok(())
+}
+
+/// 绘制卡片网格中的单行（4列，用竖线 `│` 分隔）。
+#[allow(clippy::too_many_arguments)]
+fn draw_card_row<W: std::io::Write>(
+    out: &mut W,
+    start_x: u16,
+    y: u16,
+    items: [&str; 4],
+    card_w: usize,
+    text_sgr: &str,
+    text_color: Rgb,
+    sep_color: Rgb,
+) -> std::io::Result<()> {
+    use crossterm::{cursor::MoveTo, ExecutableCommand};
+    out.execute(MoveTo(start_x, y))?;
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            write!(out, "{}│\x1b[0m", fg(sep_color))?;
+        }
+        let padded = center_pad(item, card_w);
+        write!(out, "{text_sgr}{}{padded}\x1b[0m", fg(text_color))?;
+    }
+    Ok(())
+}
+
 /// 品牌副标题：呼应「时间女神」。
 const BRAND_SUBTITLE: &str = "Goddess of Time";
 
@@ -79,7 +135,7 @@ pub(super) fn show_splash(conn: &rusqlite::Connection) -> anyhow::Result<()> {
 
     let mut stdout = std::io::stdout();
 
-    // 从 settings 表恢复语言（与应用一致：en → 英文，否则中文）。
+    // 从 settings 表恢复语言与图标风格。
     let mut lang = match horae_core::repo::settings::get(conn, "lang")
         .ok()
         .flatten()
@@ -88,6 +144,7 @@ pub(super) fn show_splash(conn: &rusqlite::Connection) -> anyhow::Result<()> {
         Some("en") => Lang::En,
         _ => Lang::Zh,
     };
+    let icon_style = IconStyle::load(conn);
 
     // 先进入 raw mode 再画首帧，这样等待期间能收到 Resize / F6 事件并重绘。
     crossterm::terminal::enable_raw_mode()?;
@@ -102,6 +159,7 @@ pub(super) fn show_splash(conn: &rusqlite::Connection) -> anyhow::Result<()> {
                 rows,
                 lang,
                 horae_core::time::boot_elapsed_ms(),
+                icon_style,
             )?;
             stdout.flush()?;
             let mut redraw = false;
@@ -142,33 +200,117 @@ pub(super) fn show_splash(conn: &rusqlite::Connection) -> anyhow::Result<()> {
     result
 }
 
-/// 纵向布局常量（单位：终端行）。
-const TOP_MARGIN: u16 = 2;
-const BOTTOM_MARGIN: u16 = 2; // 版本行上方留白（版本行占最后一行）
-const SUBTITLE_H: u16 = 1; // 品牌副标题占一行
-const PROMPT_H: u16 = 1; // 提示语
-const GAP_WORD_SUBTITLE: u16 = 3;
-const BANNER_PAD_TOP: u16 = 2;
-const BANNER_PAD_BOT: u16 = 2; // 字标与副标题之间
-const GAP_SUBTITLE_PROMPT: u16 = 2; // 副标题区与提示语之间
-
-/// 一帧开屏的纵向布局（各元素起始行）。
+/// 一帧开屏的纵向布局（各元素起始行与卡片列宽）。
 #[derive(Debug, PartialEq, Eq)]
 struct SplashLayout {
-    logo_y: u16,
+    banner_y: u16,
+    banner_pad_top: u16,
+    banner_pad_bot: u16,
     subtitle_y: u16,
+    slogan_y: u16,
+    cards_y: Option<u16>,
+    prompt_y: Option<u16>,
+    footer_y: u16,
+    card_width: u16,
 }
 
-/// 纵向布局推演（纯函数）：将文本组合块在可用区内垂直居中。
-fn splash_layout(rows: u16, logo_h: u16) -> SplashLayout {
-    // 组合块高 = 字标 + 副标题，在可用区内取中。
-    let comp_h = BANNER_PAD_TOP + logo_h + BANNER_PAD_BOT.max(GAP_WORD_SUBTITLE) + SUBTITLE_H;
-    let prompt_y = rows.saturating_sub(BOTTOM_MARGIN + PROMPT_H);
-    let avail = prompt_y.saturating_sub(GAP_SUBTITLE_PROMPT + TOP_MARGIN);
-    let logo_y = TOP_MARGIN + avail.saturating_sub(comp_h) / 2 + BANNER_PAD_TOP;
+/// 纵向布局推演（纯函数）：根据终端行列自适应布局。
+fn splash_layout(cols: u16, rows: u16, logo_h: u16) -> SplashLayout {
+    let show_cards = rows >= 20 && cols >= 45;
+    let show_prompt = rows >= 18;
 
-    let subtitle_y = logo_y + logo_h + GAP_WORD_SUBTITLE;
-    SplashLayout { logo_y, subtitle_y }
+    let banner_pad_top = if rows >= 32 {
+        2
+    } else if rows >= 22 {
+        1
+    } else {
+        0
+    };
+    let banner_pad_bot = if rows >= 32 {
+        2
+    } else if rows >= 22 {
+        1
+    } else {
+        0
+    };
+    let banner_h = banner_pad_top + logo_h + banner_pad_bot;
+
+    let footer_y = if rows >= 24 {
+        rows.saturating_sub(2)
+    } else {
+        rows.saturating_sub(1)
+    };
+
+    let card_width = if cols >= 67 {
+        16
+    } else if cols >= 55 {
+        13
+    } else {
+        10
+    };
+
+    let cards_h = if show_cards { 3 } else { 0 };
+    let gap_banner_sub = 1;
+    let gap_sub_slogan = if rows >= 26 { 1 } else { 0 };
+    let gap_slogan_cards = if show_cards {
+        if rows >= 26 {
+            2
+        } else {
+            1
+        }
+    } else {
+        0
+    };
+
+    let content_h = banner_h + gap_banner_sub + 1 + gap_sub_slogan + 1 + gap_slogan_cards + cards_h;
+
+    let avail = footer_y.saturating_sub(content_h + if show_prompt { 2 } else { 0 });
+    let top_margin = if rows >= 24 {
+        (avail * 2 / 5).max(1)
+    } else {
+        avail / 2
+    };
+
+    let banner_y = top_margin;
+    let subtitle_y = banner_y + banner_h + gap_banner_sub;
+    let slogan_y = subtitle_y + 1 + gap_sub_slogan;
+    let cards_y = if show_cards {
+        Some(slogan_y + 1 + gap_slogan_cards)
+    } else {
+        None
+    };
+
+    let prompt_y = if show_prompt {
+        if let Some(cy) = cards_y {
+            let space = footer_y.saturating_sub(cy + cards_h);
+            if space >= 2 {
+                Some(cy + cards_h + space / 2)
+            } else {
+                None
+            }
+        } else {
+            let space = footer_y.saturating_sub(slogan_y + 1);
+            if space >= 2 {
+                Some(slogan_y + 1 + space / 2)
+            } else {
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    SplashLayout {
+        banner_y,
+        banner_pad_top,
+        banner_pad_bot,
+        subtitle_y,
+        slogan_y,
+        cards_y,
+        prompt_y,
+        footer_y,
+        card_width,
+    }
 }
 
 /// 清屏并绘制一帧纯文本开屏内容。
@@ -178,6 +320,7 @@ fn draw_frame_with<W: std::io::Write>(
     rows: u16,
     lang: Lang,
     boot_ms: Option<u128>,
+    icon_style: IconStyle,
 ) -> anyhow::Result<()> {
     use crossterm::{cursor, ExecutableCommand};
 
@@ -187,7 +330,7 @@ fn draw_frame_with<W: std::io::Write>(
         .map(|l| l.width() as u16)
         .max()
         .unwrap_or(0);
-    let lay = splash_layout(rows, logo_h);
+    let lay = splash_layout(cols, rows, logo_h);
 
     out.execute(crossterm::terminal::Clear(
         crossterm::terminal::ClearType::All,
@@ -220,34 +363,108 @@ fn draw_frame_with<W: std::io::Write>(
             )
         };
 
-    // 绘制横幅背景与内容
-    // 顶部留白
-    for i in 0..BANNER_PAD_TOP {
-        draw_banner_line(out, lay.logo_y - BANNER_PAD_TOP + i, "", "", None)?;
+    // 1. 粉色通栏横幅与 HORAE 像素字标
+    for i in 0..lay.banner_pad_top {
+        draw_banner_line(out, lay.banner_y + i, "", "", None)?;
     }
-
-    // Logo (只有Logo带有横幅背景色)
     for (i, line) in HORAE_LOGO.iter().enumerate() {
-        draw_banner_line(out, lay.logo_y + i as u16, line, "\x1b[1m", Some(logo_w))?;
+        draw_banner_line(
+            out,
+            lay.banner_y + lay.banner_pad_top + i as u16,
+            line,
+            "\x1b[1m",
+            Some(logo_w),
+        )?;
+    }
+    for i in 0..lay.banner_pad_bot {
+        draw_banner_line(
+            out,
+            lay.banner_y + lay.banner_pad_top + logo_h + i,
+            "",
+            "",
+            None,
+        )?;
     }
 
-    // 底部留白
-    for i in 0..BANNER_PAD_BOT {
-        draw_banner_line(out, lay.logo_y + logo_h + i, "", "", None)?;
+    // 2. 带分割细线的品牌副标题 `───── Goddess of Time ─────`
+    draw_subtitle(out, cols, lay.subtitle_y, BRAND_SUBTITLE)?;
+
+    // 3. 核心哲学标语 `Ideas in. Time accounted.`
+    let slogan = tr!(lang, "心念所至 · 岁月有迹", "Ideas in. Time accounted.");
+    write_centered(out, cols, lay.slogan_y, "", slogan, TEXT)?;
+
+    // 4. 四列特性指标卡片（极速启动、快速捕获、时间资产、GTD心流）
+    if let Some(cy) = lay.cards_y {
+        let (icon_bolt, icon_pencil, icon_clock, icon_workflow) = match icon_style {
+            IconStyle::Nerd => ("\u{f0e7}", "\u{f040}", "\u{f017}", "\u{f0e8}"),
+            IconStyle::Ascii => ("*", "+", "@", "&"),
+        };
+
+        let boot_str = boot_ms
+            .map(|ms| format!("{ms}ms"))
+            .unwrap_or_else(|| "3ms".to_string());
+        let val_time = tr!(lang, "time", "time");
+        let val_gtd = tr!(lang, "gtd", "gtd");
+
+        let lbl_startup = tr!(lang, "极速启动", "startup");
+        let lbl_capture = tr!(lang, "闪电捕获", "capture");
+        let lbl_asset = tr!(lang, "时间资产", "asset");
+        let lbl_workflow = tr!(lang, "心流流程", "workflow");
+
+        let total_w = lay.card_width * 4 + 3;
+        let start_x = center_x(cols, total_w);
+        let card_w = lay.card_width as usize;
+
+        // 行 0：图标
+        draw_card_row(
+            out,
+            start_x,
+            cy,
+            [icon_bolt, icon_pencil, icon_clock, icon_workflow],
+            card_w,
+            "",
+            ROSEWATER,
+            OVERLAY0,
+        )?;
+        // 行 1：指标值
+        draw_card_row(
+            out,
+            start_x,
+            cy + 1,
+            [&boot_str, "<10s", val_time, val_gtd],
+            card_w,
+            "\x1b[1m",
+            TEXT,
+            OVERLAY0,
+        )?;
+        // 行 2：副标签
+        draw_card_row(
+            out,
+            start_x,
+            cy + 2,
+            [lbl_startup, lbl_capture, lbl_asset, lbl_workflow],
+            card_w,
+            "",
+            OVERLAY0,
+            OVERLAY0,
+        )?;
     }
 
-    // 副标题 (移除横幅背景，使用系统透明底色)
-    write_centered(out, cols, lay.subtitle_y, "", BRAND_SUBTITLE, ROSEWATER)?;
+    // 5. 交互提示（暗色闪烁）
+    if let Some(py) = lay.prompt_y {
+        let prompt = prompts(lang);
+        write_centered(out, cols, py, "\x1b[5m", prompt, OVERLAY0)?;
+    }
 
-    // 3. 提示语（闪烁暗色）；版本、作者与启动用时（底部居中、暗）
-    let prompt = prompts(lang);
-    let prompt_y = rows.saturating_sub(BOTTOM_MARGIN + PROMPT_H);
-    write_centered(out, cols, prompt_y, "\x1b[5m", prompt, OVERLAY0)?;
-    let mut version = format!("v{} · by zhaohang1205", env!("CARGO_PKG_VERSION"));
+    // 6. 底部信息行：版本、Rust Built、作者、启动耗时
+    let mut footer = format!(
+        "v{}  ·  RUST BUILT  ·  by zhaohang1205",
+        env!("CARGO_PKG_VERSION")
+    );
     if let Some(ms) = boot_ms {
-        version.push_str(&tr!(lang, " · 启动用时 {}ms", " · started in {}ms", ms));
+        footer.push_str(&format!("  ·  {ms}ms"));
     }
-    write_centered(out, cols, rows.saturating_sub(1), "", &version, OVERLAY0)?;
+    write_centered(out, cols, lay.footer_y, "", &footer, OVERLAY0)?;
 
     Ok(())
 }
@@ -281,31 +498,47 @@ mod splash_tests {
 
     #[test]
     fn splash_layout_centers_block() {
-        let lay = splash_layout(24, 9);
-        assert_eq!(lay.logo_y, 5);
-        assert_eq!(lay.subtitle_y, 17);
+        let lay = splash_layout(80, 24, 9);
+        assert_eq!(lay.banner_y, 1);
+        assert_eq!(lay.subtitle_y, 13);
+        assert_eq!(lay.slogan_y, 14);
+        assert_eq!(lay.cards_y, Some(16));
+        assert_eq!(lay.prompt_y, Some(20));
+        assert_eq!(lay.footer_y, 22);
+        assert_eq!(lay.card_width, 16);
     }
 
     #[test]
     fn draw_frame_renders_clean_text_splash() {
         let mut buf = std::io::Cursor::new(Vec::new());
-        draw_frame_with(&mut buf, 80, 24, Lang::Zh, None).unwrap();
+        draw_frame_with(&mut buf, 80, 24, Lang::Zh, None, IconStyle::Nerd).unwrap();
         let s = String::from_utf8(buf.into_inner()).unwrap();
         assert!(s.contains("█"), "应绘制 HORAE 艺术字");
         assert!(s.contains(BRAND_SUBTITLE), "应绘制品牌副标题");
-        assert!(!s.contains("启动用时"), "未打点时不应出现启动用时段");
+        assert!(s.contains("RUST BUILT"), "应包含 RUST BUILT 标识");
+        assert!(s.contains("<10s"), "应绘制特性卡片");
         assert!(!s.contains("\x1b_G"), "不应包含任何 Kitty 图形协议控制指令");
     }
 
     #[test]
     fn draw_frame_shows_boot_ms_bilingual() {
-        // 打点后底部版本行应携带启动用时；中英文措辞随语言切换。
-        for (lang, needle) in [(Lang::Zh, "启动用时 42ms"), (Lang::En, "started in 42ms")] {
+        // 打点后底部版本行与卡片应携带启动用时
+        for lang in [Lang::Zh, Lang::En] {
             let mut buf = std::io::Cursor::new(Vec::new());
-            draw_frame_with(&mut buf, 80, 24, lang, Some(42)).unwrap();
+            draw_frame_with(&mut buf, 80, 24, lang, Some(42), IconStyle::Nerd).unwrap();
             let s = String::from_utf8(buf.into_inner()).unwrap();
             assert!(s.contains("by zhaohang1205"), "版本行应存在");
-            assert!(s.contains(needle), "{lang:?} 应显示「{needle}」");
+            assert!(s.contains("42ms"), "{lang:?} 应显示「42ms」");
         }
+    }
+
+    #[test]
+    fn draw_frame_supports_ascii_icon_style() {
+        let mut buf = std::io::Cursor::new(Vec::new());
+        draw_frame_with(&mut buf, 80, 24, Lang::En, Some(3), IconStyle::Nerd).unwrap();
+        let s = String::from_utf8(buf.into_inner()).unwrap();
+        assert!(s.contains("startup"), "英文卡片应显示 startup");
+        assert!(s.contains("Ideas in. Time accounted."));
+        assert!(s.contains("│"), "卡片应有竖线分隔符");
     }
 }
