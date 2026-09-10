@@ -37,11 +37,10 @@ cargo build --release
 
 为了获得最佳体验，建议：
 
-- **支持 Kitty 图形协议的终端**：开屏页（Splash Screen）的“时间女神”像素艺术通过 Kitty 图形协议渲染，推荐使用 Kitty、Ghostty 或 WezTerm。其它终端会自动回退为纯 ASCII 文字版开屏，功能不受影响。
 - **安装 Nerd Font**：界面图标默认使用 Nerd Font 字形；未安装时自动回退为纯 ASCII 字符（不会出现“豆腐块”）。可从 [Nerd Fonts](https://www.nerdfonts.com/) 任选一款并设为终端字体。
 - **Windows 用户**：
   - 用 Rust 1.89+ 从源码构建（`cargo build --release`）；数据目录位于 `%APPDATA%\horae\`。
-  - 桌面通知依赖 Linux 的 `notify-send`，在 Windows / macOS 上系统级弹窗可能不触发，但番茄钟计时与 TUI 内提醒正常工作；用 WezTerm 等支持 Kitty 协议的终端可获完整开屏。
+  - 桌面通知依赖 Linux 的 `notify-send`，在 Windows / macOS 上系统级弹窗可能不触发，但番茄钟计时与 TUI 内提醒正常工作。
   - 可用 `HORAE_CONFIG_DIR` 环境变量自定义数据目录。
 
 ## 快速开始

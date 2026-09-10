@@ -24,7 +24,7 @@
 | --- | --- | --- |
 | 所有路径必需 | github.com 或 gitee.com 可达；PATH 中有可用的 bin 目录（`~/.local/bin` 或 `~/.cargo/bin`） | |
 | 仅路径 B/C 必需 | **rustc ≥ 1.89**（MSRV）、cargo、git、**C 编译器（gcc/clang）** | rusqlite 用 bundled 特性，编译时要现场编译 SQLite C 源码——最小化系统常缺 cc，这是最常踩的隐藏前置 |
-| 可选（体验增强） | Nerd Font / Kitty 协议终端 / libnotify / Syncthing / waybar / shell 补全 | 见下方"可选项对比表"，逐项询问用户 |
+| 可选（体验增强） | Nerd Font / libnotify / Syncthing / waybar / shell 补全 | 见下方"可选项对比表"，逐项询问用户 |
 
 ## 路径 A：预编译二进制（可用时首选）
 
@@ -93,7 +93,6 @@ install -m755 target/release/horae ~/.local/bin/   # 或 cargo install --path .
 | 可选项 | 安了得到什么 | 不安会怎样 | 日后补装 |
 | --- | --- | --- | --- |
 | **Nerd Font**（任选一款设为终端字体） | 界面图标为丰富字形 | 自动回退纯 ASCII 字符，不会出现"豆腐块"；功能无损 | [nerdfonts.com](https://www.nerdfonts.com/) 下载或发行版包（Arch: `pacman -S ttf-nerd-fonts-symbols`），设为终端字体即可；也可用 `HORAE_ICONS=nerd\|ascii` 强制指定 |
-| **Kitty 协议终端**（Kitty/Ghostty/WezTerm） | 开屏"时间女神"像素艺术完整渲染 | ASCII 文字版开屏，功能无损 | 换装终端即可，无需重装 horae |
 | **libnotify / notify-send** | 番茄钟结束、任务到期的桌面弹窗 | 计时、TUI 内提醒完全正常，只是没有系统级弹窗；**Windows/macOS 本就不内置系统弹窗**（macOS 用户可自建或用 ntfy，见下） | Linux: Arch `sudo pacman -S libnotify`；Debian/Ubuntu `sudo apt install libnotify-bin`；Fedora `sudo dnf install libnotify`。macOS/Windows 见「macOS 专属安装与排错」 |
 | **Syncthing**（手机桥） | 手机笔记 App 写一行即采集任务、回看今日快照、收到期提醒；零服务器 | 纯单机使用，其余功能全部正常 | 见 workflows.md「手机采集桥」一节；需常驻 `horae watch` |
 | **waybar 模块** | 状态栏常驻 🍅 倒计时与最近到期提醒 | 手动跑 `horae stats` 查看 | waybar 配置里加 custom module 指向 `horae pomo waybar` / `horae alarm waybar` |
@@ -107,9 +106,9 @@ install -m755 target/release/horae ~/.local/bin/   # 或 cargo install --path .
 
 | 平台 | 数据目录 | 备注 |
 | --- | --- | --- |
-| Linux | `~/.config/horae/` | 体验最完整（桌面通知、waybar、Kitty 协议均支持） |
+| Linux | `~/.config/horae/` | 体验最完整（桌面通知、waybar 均支持） |
 | macOS | `~/Library/Application Support/horae/` | 系统级弹窗不内置（可自建/走 ntfy），计时/TUI 提醒正常 |
-| Windows | `%APPDATA%\horae\` | 源码构建；桌面通知不触发；WezTerm 可获完整开屏 |
+| Windows | `%APPDATA%\horae\` | 源码构建；桌面通知不触发 |
 
 ## macOS 专属安装与排错
 
@@ -185,7 +184,6 @@ workflows.md）：profile 的 `config.json` 配 ntfy 后常驻 `horae watch`，
 
 - Nerd Font：macOS 若未装字体，图标自动回退 ASCII（无豆腐块）；想要图标字形可
   `brew install --cask font-hack-nerd-font` 并设为终端字体。
-- Kitty 协议终端：Ghostty / Kitty / WezTerm 在 macOS 同样完整渲染开屏像素艺术。
 
 ## 升级
 

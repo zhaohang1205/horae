@@ -156,13 +156,6 @@ fi
 
 # ---------- 6. 终端能力 ----------
 section "终端体验（纯观感）"
-term_prog="${TERM_PROGRAM:-}${KITTY_WINDOW_ID:+kitty}"
-case "$term_prog${TERM:-}" in
-  *ghostty*) ok "Ghostty（支持 Kitty 图形协议 → 开屏像素艺术完整）" ;;
-  *kitty*) ok "Kitty（图形协议开屏完整）" ;;
-  *WezTerm*) ok "WezTerm（支持 Kitty 图形协议）" ;;
-  *) info "当前终端未知是否支持 Kitty 协议；不支持则 ASCII 开屏回退，功能无损" ;;
-esac
 if have fc-list && fc-list 2>/dev/null | grep -qi nerd; then
   ok "检测到 Nerd Font（图标字形完整）"
 elif [[ $base == "macOS" ]]; then

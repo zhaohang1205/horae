@@ -37,11 +37,10 @@ Data lives in `~/.config/horae/` (`horae.db` + `config.json` (profile config) + 
 
 For the best experience:
 
-- **A terminal with the Kitty graphics protocol**: the splash screen's "Goddess of Time" pixel art is rendered via the Kitty graphics protocol — Kitty, Ghostty, or WezTerm are recommended. Other terminals fall back to a plain ASCII splash automatically; nothing breaks.
 - **Install a Nerd Font**: UI icons default to Nerd Font glyphs; when none is found they fall back to plain ASCII (no tofu characters). Pick any font from [Nerd Fonts](https://www.nerdfonts.com/) and set it as your terminal font.
 - **Windows users**:
   - Build from source with Rust 1.89+ (`cargo build --release`); the data directory is `%APPDATA%\horae\`.
-  - Desktop notifications rely on Linux's `notify-send`, so system pop-ups may not appear on Windows / macOS — but pomodoro timing and in-TUI reminders still work. Use a Kitty-protocol terminal such as WezTerm for the full splash.
+  - Desktop notifications rely on Linux's `notify-send`, so system pop-ups may not appear on Windows / macOS — but pomodoro timing and in-TUI reminders still work.
   - The `HORAE_CONFIG_DIR` environment variable overrides the data directory.
 
 ## Quick start

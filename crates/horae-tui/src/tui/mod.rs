@@ -107,8 +107,7 @@ pub(crate) fn row_from_tags_with_due(
 }
 pub mod splash;
 
-/// 启动交互式 TUI。
-/// 内置默认开屏图；允许用户用 `~/.config/horae/splash.png` 覆盖。
+/// 启动交互式 TUI 开屏页与主程序。
 pub fn run(conn: &Connection, profile: Option<&str>) -> Result<()> {
     run_with_mode(conn, profile, LaunchMode::Default)
 }
@@ -157,7 +156,6 @@ pub fn run_with_mode(
         crossterm::event::DisableMouseCapture,
         crossterm::event::DisableBracketedPaste
     )?;
-    let _ = splash::delete_kitty_image(terminal.backend_mut());
     let _ = terminal.backend_mut().flush();
     terminal.show_cursor()?;
     result
