@@ -9,11 +9,12 @@ use crate::time;
 
 /// 构建任务到期/逾期提醒卡片。
 pub fn build_due_card(task: &Task, due_ms: i64, is_overdue: bool, tags: &[String]) -> Value {
-    let (header_title, header_color) = if is_overdue {
-        ("⚠️ 任务已逾期", "red")
+    let (status_label, header_color) = if is_overdue {
+        ("⚠️ 逾期", "red")
     } else {
-        ("⏰ 任务即将到期", "orange")
+        ("⏰ 即将到期", "orange")
     };
+    let header_title = format!("{status_label}：{}", task.title);
 
     let formatted_time = time::format_local(Some(due_ms));
     let priority_str = match task.priority.as_deref() {
@@ -34,53 +35,24 @@ pub fn build_due_card(task: &Task, due_ms: i64, is_overdue: bool, tags: &[String
 
     let mut elements = Vec::new();
 
-    // 任务主标题
+    // 任务主标题与结构化详情（全端兼容排版，避免多列折叠丢失）
+    let mut main_content = format!("### 📋 {}\n\n", task.title);
+    main_content.push_str(&format!("* ⏰ **截止/计划**: {}\n", formatted_time));
+    main_content.push_str(&format!("* ⚡ **优先级**: {}\n", priority_str));
+    main_content.push_str(&format!("* 🏷 **标签**: {}\n", tags_str));
+    main_content.push_str(&format!("* 📌 **状态**: {}", task.status));
+
     elements.push(json!({
         "tag": "div",
         "text": {
             "tag": "lark_md",
-            "content": format!("**{}**", task.title)
+            "content": main_content
         }
     }));
 
-    // 结构化元数据字段
-    elements.push(json!({
-        "tag": "div",
-        "fields": [
-            {
-                "is_short": true,
-                "text": {
-                    "tag": "lark_md",
-                    "content": format!("**截止时间**\n{}", formatted_time)
-                }
-            },
-            {
-                "is_short": true,
-                "text": {
-                    "tag": "lark_md",
-                    "content": format!("**优先级**\n{}", priority_str)
-                }
-            },
-            {
-                "is_short": true,
-                "text": {
-                    "tag": "lark_md",
-                    "content": format!("**标签**\n{}", tags_str)
-                }
-            },
-            {
-                "is_short": true,
-                "text": {
-                    "tag": "lark_md",
-                    "content": format!("**状态**\n{}", task.status)
-                }
-            }
-        ]
-    }));
-
-    // 若有备注，显示备注前两行
+    // 若有备注，显示前三行备注
     if !task.notes.trim().is_empty() {
-        let snippet: String = task.notes.lines().take(2).collect::<Vec<_>>().join("\n");
+        let snippet: String = task.notes.lines().take(3).collect::<Vec<_>>().join("\n");
         let truncated = if snippet.chars().count() > 150 {
             format!("{}...", snippet.chars().take(150).collect::<String>())
         } else {
@@ -90,24 +62,65 @@ pub fn build_due_card(task: &Task, due_ms: i64, is_overdue: bool, tags: &[String
             "tag": "div",
             "text": {
                 "tag": "lark_md",
-                "content": format!("**备注**\n{}", truncated)
+                "content": format!("📝 **备注**\n> {}", truncated.replace('\n', "\n> "))
             }
         }));
     }
 
-    // 底部注解
+    // 分割线与交互按钮
+    elements.push(json!({
+        "tag": "hr"
+    }));
+
+    elements.push(json!({
+        "tag": "action",
+        "actions": [
+            {
+                "tag": "button",
+                "text": {
+                    "tag": "plain_text",
+                    "content": "✅ 标为完成"
+                },
+                "type": "primary",
+                "value": {
+                    "action": "done",
+                    "task_id": task.id
+                }
+            },
+            {
+                "tag": "button",
+                "text": {
+                    "tag": "plain_text",
+                    "content": "📅 顺延 1 天"
+                },
+                "type": "default",
+                "value": {
+                    "action": "postpone_1d",
+                    "task_id": task.id
+                }
+            }
+        ]
+    }));
+
+    // 底部注解（包含 ID 与标题，确保预览与通知中心均清晰可见）
     let id8 = &task.id[..task.id.len().min(8)];
     elements.push(json!({
         "tag": "note",
         "elements": [
             {
                 "tag": "plain_text",
-                "content": format!("来自 horae GTD • ID: #{id8}")
+                "content": format!("horae GTD • #{id8} • {}", task.title)
             }
         ]
     }));
 
     json!({
+        "config": {
+            "summary": {
+                "content": format!("{status_label}：{} (截止 {})", task.title, formatted_time)
+            },
+            "update_multi": true
+        },
         "header": {
             "title": {
                 "tag": "plain_text",
@@ -329,24 +342,28 @@ pub fn build_captured_card(task: &Task, tags: &[String]) -> Value {
         ]
     }));
 
+    let id8 = &task.id[..task.id.len().min(8)];
     elements.push(json!({
         "tag": "note",
         "elements": [
             {
                 "tag": "plain_text",
-                "content": format!("ID: {} • 飞书随手记已入库", task.id)
+                "content": format!("horae GTD • #{id8} • 随手记已入库")
             }
         ]
     }));
 
     json!({
         "config": {
+            "summary": {
+                "content": format!("📥 已录入：{}", task.title)
+            },
             "update_multi": true
         },
         "header": {
             "title": {
                 "tag": "plain_text",
-                "content": "📥 已收入 horae 收件箱"
+                "content": format!("📥 已录入：{}", task.title)
             },
             "template": "turquoise"
         },
@@ -357,10 +374,10 @@ pub fn build_captured_card(task: &Task, tags: &[String]) -> Value {
 /// 构建卡片动作执行完毕后的更新卡片
 pub fn build_action_result_card(task: &Task, message: &str, is_done: bool) -> Value {
     let header_template = if is_done { "green" } else { "blue" };
-    let header_title = if is_done {
-        "✅ 任务已标为完成"
+    let (action_label, header_title) = if is_done {
+        ("✅ 已完成", format!("✅ 已完成：{}", task.title))
     } else {
-        "📅 任务已调整"
+        ("📅 已顺延", format!("📅 已顺延：{}", task.title))
     };
 
     let mut elements = Vec::new();
@@ -372,18 +389,22 @@ pub fn build_action_result_card(task: &Task, message: &str, is_done: bool) -> Va
         }
     }));
 
+    let id8 = &task.id[..task.id.len().min(8)];
     elements.push(json!({
         "tag": "note",
         "elements": [
             {
                 "tag": "plain_text",
-                "content": format!("ID: {} • 当前状态: {}", task.id, task.status)
+                "content": format!("horae GTD • #{id8} • 状态: {}", task.status)
             }
         ]
     }));
 
     json!({
         "config": {
+            "summary": {
+                "content": format!("{action_label}：{}", task.title)
+            },
             "update_multi": true
         },
         "header": {
@@ -430,11 +451,15 @@ mod tests {
             false,
             &["work".into(), "report".into()],
         );
-        assert_eq!(card["header"]["title"]["content"], "⏰ 任务即将到期");
+        assert_eq!(card["header"]["title"]["content"], "⏰ 即将到期：写汇报");
         assert_eq!(card["header"]["template"], "orange");
+        assert_eq!(card["config"]["update_multi"], true);
 
         let overdue_card = build_due_card(&task, 1720000000000, true, &[]);
-        assert_eq!(overdue_card["header"]["title"]["content"], "⚠️ 任务已逾期");
+        assert_eq!(
+            overdue_card["header"]["title"]["content"],
+            "⚠️ 逾期：写汇报"
+        );
         assert_eq!(overdue_card["header"]["template"], "red");
     }
 
@@ -468,14 +493,14 @@ mod tests {
         };
 
         let card = build_captured_card(&task, &["life".into()]);
-        assert_eq!(card["header"]["title"]["content"], "📥 已收入 horae 收件箱");
+        assert_eq!(card["header"]["title"]["content"], "📥 已录入：买咖啡");
         assert_eq!(card["header"]["template"], "turquoise");
         assert_eq!(card["config"]["update_multi"], true);
 
         let result_card = build_action_result_card(&task, "操作已完成", true);
         assert_eq!(
             result_card["header"]["title"]["content"],
-            "✅ 任务已标为完成"
+            "✅ 已完成：买咖啡"
         );
         assert_eq!(result_card["header"]["template"], "green");
         assert_eq!(result_card["config"]["update_multi"], true);
