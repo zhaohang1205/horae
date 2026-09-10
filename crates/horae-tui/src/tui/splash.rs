@@ -452,29 +452,30 @@ fn draw_frame_with<W: std::io::Write>(
         write_centered(out, cols, py, "\x1b[5m", prompt, OVERLAY0)?;
     }
 
-    // 6. 底部信息行：版本，作者（github链接），rust built
-    let version = format!("v{}", env!("CARGO_PKG_VERSION"));
-    let author_plain = "by zhaohang1205 (github.com/zhaohang1205)";
-    let rust_built = "RUST BUILT";
-
-    let visible_footer = if cols >= 68 {
-        format!("{version}  ·  {author_plain}  ·  {rust_built}")
-    } else if cols >= 52 {
-        format!("{version}  ·  github.com/zhaohang1205  ·  {rust_built}")
-    } else {
-        format!("{version}  ·  zhaohang1205  ·  {rust_built}")
+    // 6. 底部信息行：版本（沙漏图标）、作者（GitHub 图标 + 点击跳转隐藏链接）、RUST BUILT（Rust 图标）
+    let (icon_hourglass, icon_github, icon_rust) = match icon_style {
+        IconStyle::Nerd => ("\u{f252} ", "\u{f09b} ", "\u{e7a8} "),
+        IconStyle::Ascii => ("", "", ""),
     };
 
-    let full_footer = if cols >= 68 {
-        let osc8_link =
-            "\x1b]8;;https://github.com/zhaohang1205\x1b\\github.com/zhaohang1205\x1b]8;;\x1b\\";
-        format!("{version}  ·  by zhaohang1205 ({osc8_link})  ·  {rust_built}")
-    } else if cols >= 52 {
-        let osc8_link =
-            "\x1b]8;;https://github.com/zhaohang1205\x1b\\github.com/zhaohang1205\x1b]8;;\x1b\\";
-        format!("{version}  ·  {osc8_link}  ·  {rust_built}")
+    let version = format!("{icon_hourglass}horae v{}", env!("CARGO_PKG_VERSION"));
+    let author_plain = format!("{icon_github}by zhaohang1205");
+    let rust_built = format!("{icon_rust}RUST BUILT");
+
+    let author_link =
+        format!("\x1b]8;;https://github.com/zhaohang1205\x1b\\{author_plain}\x1b]8;;\x1b\\");
+
+    let (visible_footer, full_footer) = if cols >= 54 {
+        (
+            format!("{version}  ·  {author_plain}  ·  {rust_built}"),
+            format!("{version}  ·  {author_link}  ·  {rust_built}"),
+        )
     } else {
-        format!("{version}  ·  zhaohang1205  ·  {rust_built}")
+        let rust_short = format!("{icon_rust}RUST");
+        (
+            format!("{version} · {author_plain} · {rust_short}"),
+            format!("{version} · {author_link} · {rust_short}"),
+        )
     };
 
     let start_x = center_x(cols, visible_footer.width() as u16);
@@ -530,9 +531,16 @@ mod splash_tests {
         let s = String::from_utf8(buf.into_inner()).unwrap();
         assert!(s.contains("█"), "应绘制 HORAE 艺术字");
         assert!(s.contains(BRAND_SUBTITLE), "应绘制品牌副标题");
+        assert!(s.contains("horae v"), "应包含 horae 及其版本号");
         assert!(s.contains("RUST BUILT"), "应包含 RUST BUILT 标识");
         assert!(s.contains("by zhaohang1205"), "应包含作者信息");
-        assert!(s.contains("github.com/zhaohang1205"), "应包含 github 链接");
+        assert!(
+            s.contains("https://github.com/zhaohang1205"),
+            "应包含 github 跳转链接"
+        );
+        assert!(s.contains("\u{f252}"), "应包含沙漏图标");
+        assert!(s.contains("\u{f09b}"), "应包含 GitHub 图标");
+        assert!(s.contains("\u{e7a8}"), "应包含 Rust 图标");
         assert!(s.contains("<10s"), "应绘制特性卡片");
         assert!(!s.contains("\x1b_G"), "不应包含任何 Kitty 图形协议控制指令");
     }
@@ -558,5 +566,9 @@ mod splash_tests {
         assert!(s.contains("startup"), "英文卡片应显示 startup");
         assert!(s.contains("Ideas in. Time accounted."));
         assert!(s.contains("│"), "卡片应有竖线分隔符");
+        assert!(
+            !s.contains("\u{f252}"),
+            "ASCII 模式不应含 Nerd Font 沙漏图标"
+        );
     }
 }
