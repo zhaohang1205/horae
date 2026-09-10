@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-10
+
+### Performance
+
+- **极速冷启动性能优化（12ms → 2ms）**：
+  - **快速字体扫描与持久化**：新增纯文件系统字体目录快速检查（`fast_check_nerd_font`），耗时仅 0.3ms，直接规避耗时 10ms+ 的 `fc-list` 外部子进程开销；首次探测后自动将 `icons: nerd/ascii` 持久化到 `settings` 表，后续启动单点查库耗时 < 5µs。
+  - **输入法切换完全异步化**：将 `switch_to_english_ime` 放入后台线程执行，消除外部输入法指令对冷启动首帧渲染的同步阻塞（主线程耗时降至 ~20µs）。
+  - **配置项单次批量载入（Batch Query）**：新增 `settings::get_all` 单次 SQL 批量加载所有配置，消除 10+ 次独立点查准备与执行开销。
+  - **去除重复加载**：消除 `ModuleVisibility` 重复加载，直接复用已解析语言与图标风格透传给开屏页。
+
 ## [0.2.0] - 2026-09-10
 
 ### Added

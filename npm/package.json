@@ -1,6 +1,6 @@
 {
   "name": "horae-cli",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "GTD terminal task manager with time-datafication, tags, and pomodoro",
   "main": "bin/horae.js",
   "bin": {
