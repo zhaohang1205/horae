@@ -22,11 +22,33 @@
 
 ## 安装
 
-需要 Rust 1.89+，SQLite 已内置，无系统依赖。
+### 方式一：npm 安装（推荐，无需 Rust 环境）
+
+适用于任何已安装 Node.js 的环境，自动下载对应系统的预编译二进制：
 
 ```sh
+# 免安装直接体验
+npx horae-cli
+
+# 或全局安装（安装后在终端直接使用 horae 命令）
+npm install -g horae-cli
+```
+
+### 方式二：Cargo 安装（Rust 官方渠道）
+
+需要 Rust 1.89+，SQLite 已内置，无额外系统依赖：
+
+```sh
+# 从 crates.io 安装最新稳定版
+cargo install horae
+
+# 或安装 Git 开发分支
 cargo install --git https://github.com/zhaohang1205/horae
-# 或本地构建（从源码编译）：
+```
+
+### 方式三：从源码本地构建
+
+```sh
 git clone https://github.com/zhaohang1205/horae.git && cd horae
 cargo build --release
 ```

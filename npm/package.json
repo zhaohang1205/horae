@@ -1,0 +1,42 @@
+{
+  "name": "horae-cli",
+  "version": "0.1.1",
+  "description": "GTD terminal task manager with time-datafication, tags, and pomodoro",
+  "main": "bin/horae.js",
+  "bin": {
+    "horae": "bin/horae.js",
+    "horae-cli": "bin/horae.js"
+  },
+  "scripts": {
+    "postinstall": "node lib/install.js",
+    "test": "node bin/horae.js --version"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhaohang1205/horae.git"
+  },
+  "keywords": [
+    "gtd",
+    "todo",
+    "tui",
+    "task-manager",
+    "cli",
+    "pomodoro",
+    "ratatui",
+    "rust"
+  ],
+  "author": "alex zhao <18658233987@163.com>",
+  "license": "GPL-3.0",
+  "bugs": {
+    "url": "https://github.com/zhaohang1205/horae/issues"
+  },
+  "homepage": "https://github.com/zhaohang1205/horae#readme",
+  "files": [
+    "bin/horae.js",
+    "lib/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

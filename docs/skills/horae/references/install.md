@@ -6,10 +6,11 @@
 
 ```text
 跑 scripts/preflight.sh 体检
-  ├─ Release 附带预编译二进制？ ──是──→ 【路径 A：预编译】首选，秒装零工具链
+  ├─ 机器有 Node.js / npm？ ─────是──→ 【路径 0：npm 安装】`npm i -g horae-cli`，免 Rust 工具链
+  ├─ Release 附带预编译二进制？ ──是──→ 【路径 A：预编译】秒装零工具链
   │                                    （注意：tag 版可能落后 main 分支）
-  ├─ 没有（如 v0.1.0 只有源码包）─┬→ 已有 Rust 1.89+ 与 C 编译器？
-  │                              ├─ 是 → 【路径 B：cargo install --git】装 main 最新
+  ├─ 没有（如仅源码包）─────────┬→ 已有 Rust 1.89+ 与 C 编译器？
+  │                              ├─ 是 → 【路径 B：cargo install】`cargo install horae` 装发布版，或 `--git` 装 main 最新
   │                              │       （国内网络走 Gitee 镜像加速）
   │                              └─ 否 → 先装 rustup + C 编译器，再走 B
   └─ 想审计源码 / 参与开发 ────────→ 【路径 C：git clone 构建】（国内可从 Gitee 克隆）
@@ -25,6 +26,19 @@
 | 所有路径必需 | github.com 或 gitee.com 可达；PATH 中有可用的 bin 目录（`~/.local/bin` 或 `~/.cargo/bin`） | |
 | 仅路径 B/C 必需 | **rustc ≥ 1.89**（MSRV）、cargo、git、**C 编译器（gcc/clang）** | rusqlite 用 bundled 特性，编译时要现场编译 SQLite C 源码——最小化系统常缺 cc，这是最常踩的隐藏前置 |
 | 可选（体验增强） | Nerd Font / libnotify / Syncthing / waybar / shell 补全 | 见下方"可选项对比表"，逐项询问用户 |
+
+## 路径 0：npm 安装（有 Node.js 时首选，免 Rust 工具链）
+
+```sh
+# 免安装体验
+npx horae-cli
+
+# 或全局安装（安装后直接使用 horae 命令）
+npm install -g horae-cli
+```
+
+- 自动识别当前操作系统与架构（Linux GNU/Musl、macOS Apple Silicon/Intel、Windows x64），并从 GitHub Release 拉取预编译二进制。
+- 国内网络受限时，支持设置镜像变量：`HORAE_MIRROR=https://ghproxy.net/https://github.com npm i -g horae-cli`。
 
 ## 路径 A：预编译二进制（可用时首选）
 
@@ -53,9 +67,14 @@ horae --version
 > 自 v0.1.1 起正式 Release 均附带全平台预编译二进制（2026-08 实测确认）。
 > 仅当最新 Release 又出现"只有源码包"的异常时，才需要退回路径 B。
 
-## 路径 B：cargo install --git（装 main 最新特性）
+## 路径 B：cargo install（Rust 开发者）
 
-**官方 GitHub 路径**：
+**crates.io 官方发布版**：
+```sh
+cargo install horae
+```
+
+**官方 GitHub main 分支**：
 ```sh
 cargo install --git https://github.com/zhaohang1205/horae
 ```

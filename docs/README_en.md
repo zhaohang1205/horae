@@ -22,11 +22,33 @@ Core idea: **time-datafication** — every state change is stamped with UTC-ms a
 
 ## Installation
 
-Requires Rust 1.89+; SQLite is bundled, no system dependencies.
+### Option 1: npm (Recommended, no Rust toolchain required)
+
+For any machine with Node.js installed; automatically downloads prebuilt binaries for Linux, macOS, and Windows:
 
 ```sh
+# Try instantly without installation
+npx horae-cli
+
+# Or install globally (provides the `horae` command)
+npm install -g horae-cli
+```
+
+### Option 2: Cargo (Rust official crates.io)
+
+Requires Rust 1.89+; SQLite is bundled, no extra system dependencies:
+
+```sh
+# Install latest release from crates.io
+cargo install horae
+
+# Or install the git main branch
 cargo install --git https://github.com/zhaohang1205/horae
-# or build from source:
+```
+
+### Option 3: Build from source
+
+```sh
 git clone https://github.com/zhaohang1205/horae.git && cd horae
 cargo build --release
 ```
