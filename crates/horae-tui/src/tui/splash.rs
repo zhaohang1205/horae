@@ -125,7 +125,11 @@ fn prompts(lang: Lang) -> &'static str {
     }
 }
 
-pub(super) fn show_splash(conn: &rusqlite::Connection) -> anyhow::Result<()> {
+pub(super) fn show_splash(
+    conn: &rusqlite::Connection,
+    mut lang: Lang,
+    icon_style: IconStyle,
+) -> anyhow::Result<Lang> {
     use crossterm::{
         cursor,
         event::{self, Event, KeyCode},
@@ -135,20 +139,9 @@ pub(super) fn show_splash(conn: &rusqlite::Connection) -> anyhow::Result<()> {
 
     let mut stdout = std::io::stdout();
 
-    // 从 settings 表恢复语言与图标风格。
-    let mut lang = match horae_core::repo::settings::get(conn, "lang")
-        .ok()
-        .flatten()
-        .as_deref()
-    {
-        Some("en") => Lang::En,
-        _ => Lang::Zh,
-    };
-    let icon_style = IconStyle::load(conn);
-
     // 先进入 raw mode 再画首帧，这样等待期间能收到 Resize / F6 事件并重绘。
     crossterm::terminal::enable_raw_mode()?;
-    let result = (|| -> anyhow::Result<()> {
+    let result = (|| -> anyhow::Result<Lang> {
         // 开屏绘制会多次移动输出位置，隐藏硬件光标避免用户看到跳动。
         crossterm::execute!(stdout, cursor::Hide)?;
         let (mut cols, mut rows) = terminal::size()?;
@@ -178,7 +171,7 @@ pub(super) fn show_splash(conn: &rusqlite::Connection) -> anyhow::Result<()> {
                         );
                         redraw = true;
                     }
-                    Event::Key(_) => return Ok(()),
+                    Event::Key(_) => return Ok(lang),
                     Event::Resize(c, r) => {
                         cols = c;
                         rows = r;

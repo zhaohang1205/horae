@@ -61,11 +61,36 @@ impl IconStyle {
                 _ => {}
             }
         }
-        if nerd_font_detected() {
+        let style = if nerd_font_detected() {
             Self::Nerd
         } else {
             Self::Ascii
+        };
+        let _ = horae_core::repo::settings::set(conn, "icons", style.key());
+        style
+    }
+
+    /// 从已缓存的 settings 映射表构造，未命中时回退自动探测并回写。
+    pub fn from_map(map: &std::collections::HashMap<String, String>, conn: &Connection) -> Self {
+        match std::env::var("HORAE_ICONS").as_deref() {
+            Ok("nerd") => return Self::Nerd,
+            Ok("ascii") => return Self::Ascii,
+            _ => {}
         }
+        if let Some(v) = map.get("icons") {
+            match v.as_str() {
+                "nerd" => return Self::Nerd,
+                "ascii" => return Self::Ascii,
+                _ => {}
+            }
+        }
+        let style = if nerd_font_detected() {
+            Self::Nerd
+        } else {
+            Self::Ascii
+        };
+        let _ = horae_core::repo::settings::set(conn, "icons", style.key());
+        style
     }
 
     /// 写回 settings 表的规范值。
@@ -77,17 +102,76 @@ impl IconStyle {
     }
 }
 
+static NERD_DETECTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
 fn nerd_font_detected() -> bool {
-    // fc-list 不存在 / 无法 spawn（Windows、精简容器等）时静默回退 ASCII。
-    match std::process::Command::new("fc-list").output() {
-        Ok(out) => {
-            out.status.success()
-                && String::from_utf8_lossy(&out.stdout)
-                    .to_ascii_lowercase()
-                    .contains("nerd")
+    *NERD_DETECTED.get_or_init(|| {
+        // 1. 快速路径：扫描标准字体目录（纯文件系统检查，微秒级，不 spawn 外部进程）
+        if fast_check_nerd_font() {
+            return true;
         }
-        Err(_) => false,
+        // 2. 回退路径：若快速路径未命中，调用 fc-list 探测（只查询 family 字段减少开销）
+        match std::process::Command::new("fc-list")
+            .args([":", "family"])
+            .output()
+        {
+            Ok(out) => {
+                out.status.success()
+                    && String::from_utf8_lossy(&out.stdout)
+                        .to_ascii_lowercase()
+                        .contains("nerd")
+            }
+            Err(_) => false,
+        }
+    })
+}
+
+pub(crate) fn fast_check_nerd_font() -> bool {
+    fn check_dir(p: &std::path::Path, depth: usize, max_depth: usize) -> bool {
+        if depth > max_depth {
+            return false;
+        }
+        if let Ok(entries) = std::fs::read_dir(p) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let s = name.to_string_lossy().to_ascii_lowercase();
+                if s.contains("nerd") || s.ends_with("-nf") {
+                    return true;
+                }
+                if let Ok(ft) = entry.file_type() {
+                    if ft.is_dir() && check_dir(&entry.path(), depth + 1, max_depth) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
+
+    let mut font_dirs = vec![
+        std::path::PathBuf::from("/usr/share/fonts"),
+        std::path::PathBuf::from("/usr/local/share/fonts"),
+        std::path::PathBuf::from("/Library/Fonts"),
+        std::path::PathBuf::from("/System/Library/Fonts"),
+    ];
+    if let Ok(home) = std::env::var("HOME") {
+        let home_path = std::path::PathBuf::from(home);
+        font_dirs.push(home_path.join(".local/share/fonts"));
+        font_dirs.push(home_path.join(".fonts"));
+        font_dirs.push(home_path.join("Library/Fonts"));
+    }
+    #[cfg(windows)]
+    {
+        if let Ok(windir) = std::env::var("WINDIR") {
+            font_dirs.push(std::path::PathBuf::from(windir).join("Fonts"));
+        }
+        if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
+            font_dirs
+                .push(std::path::PathBuf::from(localappdata).join("Microsoft\\Windows\\Fonts"));
+        }
+    }
+
+    font_dirs.iter().any(|d| check_dir(d, 0, 2))
 }
 
 /// 返回某图标在指定风格下的字形。Nerd 列沿用原 render.rs 的私有区字形；

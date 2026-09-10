@@ -17,3 +17,17 @@ pub fn set(conn: &Connection, key: &str, value: &str) -> Result<()> {
     )?;
     Ok(())
 }
+
+/// Read all setting values into a key-value map in a single query.
+pub fn get_all(conn: &Connection) -> Result<std::collections::HashMap<String, String>> {
+    let mut stmt = conn.prepare("SELECT key, value FROM settings")?;
+    let rows = stmt.query_map([], |r| {
+        Ok((r.get::<usize, String>(0)?, r.get::<usize, String>(1)?))
+    })?;
+    let mut map = std::collections::HashMap::new();
+    for row in rows {
+        let (k, v) = row?;
+        map.insert(k, v);
+    }
+    Ok(map)
+}

@@ -333,49 +333,37 @@ impl<'a> App<'a> {
     }
 
     pub(crate) fn new_with_mode(conn: &'a Connection, launch_mode: LaunchMode) -> Result<Self> {
-        // 从 settings 表恢复语言与主题。
-        let lang = match horae_core::repo::settings::get(conn, "lang")
-            .ok()
-            .flatten()
-            .as_deref()
-        {
+        // 一次性批量加载 settings 表，避免 10+ 次独立 SQL 往返开销。
+        let settings_map = horae_core::repo::settings::get_all(conn).unwrap_or_default();
+        let lang = match settings_map.get("lang").map(|s| s.as_str()) {
             Some("en") => horae_core::i18n::Lang::En,
             _ => horae_core::i18n::Lang::Zh,
         };
-        let theme = match horae_core::repo::settings::get(conn, "theme")
-            .ok()
-            .flatten()
-            .as_deref()
-        {
+        let theme = match settings_map.get("theme").map(|s| s.as_str()) {
             Some("latte") => crate::tui::theme::Theme::catppuccin_latte(),
             _ => crate::tui::theme::Theme::catppuccin_mocha(),
         };
-        let quotes = horae_core::repo::quotes::Quotes::load(conn);
-        let modules = horae_core::repo::modules::ModuleVisibility::load(conn);
-        let icon_style = crate::tui::icons::IconStyle::load(conn);
+        let quotes = horae_core::repo::quotes::Quotes {
+            enabled: matches!(settings_map.get("quotes").map(|s| s.as_str()), Some("1")),
+        };
+        let modules = horae_core::repo::modules::ModuleVisibility::from_map(&settings_map);
+        let icon_style = crate::tui::icons::IconStyle::from_map(&settings_map, conn);
         // 启动即快速录入：缺省视为关闭（settings 显式写 "1" 才开启）。
         let start_in_capture = match launch_mode {
             LaunchMode::Flash => true,
             LaunchMode::Normal => false,
             LaunchMode::Default => matches!(
-                horae_core::repo::settings::get(conn, "start_capture")
-                    .ok()
-                    .flatten()
-                    .as_deref(),
+                settings_map.get("start_capture").map(|s| s.as_str()),
                 Some("1")
             ),
         };
-        let completion_style = horae_core::repo::settings::get(conn, "completion_style")
-            .ok()
-            .flatten()
-            .map(|s| crate::tui::app::completion::CompletionStyle::from_key(&s))
+        let completion_style = settings_map
+            .get("completion_style")
+            .map(|s| crate::tui::app::completion::CompletionStyle::from_key(s))
             .unwrap_or_default();
         // 纯净录入无干扰：缺省视为开启（settings 显式写 "0" 才关闭）。
         let zen_capture = !matches!(
-            horae_core::repo::settings::get(conn, "zen_capture")
-                .ok()
-                .flatten()
-                .as_deref(),
+            settings_map.get("zen_capture").map(|s| s.as_str()),
             Some("0")
         );
         // 闪念录入即退出：缺省视为关闭（settings 显式写 "1" 才开启）。
@@ -383,19 +371,13 @@ impl<'a> App<'a> {
             LaunchMode::Flash => true,
             LaunchMode::Normal => false,
             LaunchMode::Default => matches!(
-                horae_core::repo::settings::get(conn, "flash_mode")
-                    .ok()
-                    .flatten()
-                    .as_deref(),
+                settings_map.get("flash_mode").map(|s| s.as_str()),
                 Some("1")
             ),
         };
         // 农历与节气提醒：缺省视为开启（settings 显式写 "0" 才关闭）。
         let lunar_enabled = !matches!(
-            horae_core::repo::settings::get(conn, "lunar_reminder")
-                .ok()
-                .flatten()
-                .as_deref(),
+            settings_map.get("lunar_reminder").map(|s| s.as_str()),
             Some("0")
         );
         let calendar_info = if lunar_enabled {
@@ -582,22 +564,25 @@ impl<'a> App<'a> {
                         .find(|n| command_in_path(n))
                 })
         });
-        match helper {
-            Some(cmd @ ("fcitx5-remote" | "fcitx-remote")) => {
-                let _ = std::process::Command::new(cmd).arg("-c").status();
-            }
-            Some("ibus") => {
-                let _ = std::process::Command::new("ibus")
-                    .args(["engine", "xkb:us::eng"])
-                    .status();
-            }
-            Some("im-select") => {
-                let _ = std::process::Command::new("im-select")
-                    .arg("com.apple.keylayout.ABC")
-                    .status();
-                let _ = std::process::Command::new("im-select").arg("1033").status();
-            }
-            _ => {}
+        if let Some(cmd) = helper {
+            // 在后台线程执行外部输入法切换指令，避免冷启动及模式切换阻塞主线程毫秒级延迟
+            std::thread::spawn(move || match cmd {
+                "fcitx5-remote" | "fcitx-remote" => {
+                    let _ = std::process::Command::new(cmd).arg("-c").status();
+                }
+                "ibus" => {
+                    let _ = std::process::Command::new("ibus")
+                        .args(["engine", "xkb:us::eng"])
+                        .status();
+                }
+                "im-select" => {
+                    let _ = std::process::Command::new("im-select")
+                        .arg("com.apple.keylayout.ABC")
+                        .status();
+                    let _ = std::process::Command::new("im-select").arg("1033").status();
+                }
+                _ => {}
+            });
         }
     }
 

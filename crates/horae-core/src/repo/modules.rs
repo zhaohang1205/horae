@@ -12,16 +12,9 @@ pub struct ModuleVisibility {
 }
 
 impl ModuleVisibility {
-    pub fn load(conn: &Connection) -> Self {
-        let get_bool = |key: &str| -> bool {
-            !matches!(
-                crate::repo::settings::get(conn, key)
-                    .ok()
-                    .flatten()
-                    .as_deref(),
-                Some("0")
-            )
-        };
+    pub fn from_map(map: &std::collections::HashMap<String, String>) -> Self {
+        let get_bool =
+            |key: &str| -> bool { !matches!(map.get(key).map(|s| s.as_str()), Some("0")) };
         Self {
             splash: get_bool("module_splash"),
             reference: get_bool("module_reference"),
@@ -31,6 +24,11 @@ impl ModuleVisibility {
             review: get_bool("module_review"),
             settings: get_bool("module_settings"),
         }
+    }
+
+    pub fn load(conn: &Connection) -> Self {
+        let map = crate::repo::settings::get_all(conn).unwrap_or_default();
+        Self::from_map(&map)
     }
 
     pub fn set_enabled(

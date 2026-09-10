@@ -118,7 +118,6 @@ pub fn run_with_mode(
     profile: Option<&str>,
     launch_mode: LaunchMode,
 ) -> Result<()> {
-    let mods = horae_core::repo::modules::ModuleVisibility::load(conn);
     // 先把真正耗时的初始化（加载数据、构建 App）做完——这一刻才是「启动完成」的时点。
     // 在此冻结启动用时，开屏读到的才是包含全部初始化成本的准确值，而非开屏前的 0ms。
     let mut app = App::new_with_mode(conn, launch_mode)?;
@@ -132,8 +131,10 @@ pub fn run_with_mode(
         .unwrap_or_default();
     let _ = horae_core::time::boot_elapsed_ms();
     // 闪念模式下跳过开屏页，实现极速就绪
-    if mods.splash && launch_mode != LaunchMode::Flash {
-        let _ = splash::show_splash(conn);
+    if app.modules.splash && launch_mode != LaunchMode::Flash {
+        if let Ok(new_lang) = splash::show_splash(conn, app.lang, app.icon_style) {
+            app.lang = new_lang;
+        }
     }
     enable_raw_mode()?;
     let mut stdout = io::stdout();
