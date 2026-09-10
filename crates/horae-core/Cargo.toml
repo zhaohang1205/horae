@@ -20,6 +20,9 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 sha2 = "0.10"
 hmac = "0.12"
 base64 = "0.22"
+prost = "0.14"
+tungstenite = { version = "0.30", default-features = false, features = ["rustls-tls-webpki-roots", "handshake", "url"] }
+url = "2"
 tempfile = { version = "3.27", optional = true }
 
 [dev-dependencies]

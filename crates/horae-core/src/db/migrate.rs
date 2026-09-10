@@ -78,6 +78,11 @@ pub fn run(conn: &mut Connection) -> anyhow::Result<()> {
         conn.execute_batch(sql13)?;
         conn.pragma_update(None, "user_version", 12)?;
     }
+    if current_version < 13 {
+        let sql14 = include_str!("../../migrations/0014_feishu_task_links.sql");
+        conn.execute_batch(sql14)?;
+        conn.pragma_update(None, "user_version", 13)?;
+    }
 
     Ok(())
 }
@@ -145,7 +150,7 @@ mod tests {
         let v: i32 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 12, "迁移版本推进到 12");
+        assert_eq!(v, 13, "迁移版本推进到 13");
 
         // 幂等：再次运行不改变任何值
         run(&mut conn).unwrap();
@@ -174,5 +179,20 @@ mod tests {
             })
             .unwrap();
         assert_eq!(c, 1);
+    }
+
+    #[test]
+    fn migration_0014_creates_feishu_task_links() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run(&mut conn).unwrap();
+
+        let table_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'task_feishu_links'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(table_exists, 1);
     }
 }

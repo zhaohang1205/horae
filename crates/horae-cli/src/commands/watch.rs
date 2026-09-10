@@ -77,6 +77,38 @@ pub fn run(conn: &Connection, args: WatchArgs) -> Result<()> {
         );
         return Ok(());
     }
+    // 若配置了飞书自建应用且启用了 WebSocket 长连接，则在后台拉起监听线程
+    let _ws_stop = if let Ok(cfg) = Config::load() {
+        if let Ok((_, p)) = cfg.resolve_profile(args.profile.as_deref()) {
+            if let Some(ref feishu_cfg) = p.feishu {
+                if feishu_cfg.is_app_configured() && feishu_cfg.ws_enabled {
+                    let app_id = feishu_cfg.app_id.clone().unwrap();
+                    let app_secret = feishu_cfg.resolve_app_secret().unwrap();
+                    let auth = std::sync::Arc::new(horae_core::feishu::FeishuAuth::new(
+                        app_id, app_secret,
+                    ));
+                    let client = horae_core::feishu::FeishuWsClient::new(auth);
+                    let stop = client.stop_handle();
+                    let thread_profile = args.profile.clone();
+                    std::thread::spawn(move || {
+                        if let Ok(conn) = horae_core::db::conn::open(thread_profile.as_deref()) {
+                            client.run(&conn);
+                        }
+                    });
+                    Some(stop)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     eprintln!(
         "horae watch running on {} (every {}s). Ctrl-C to stop.",
         args.dir.display(),
@@ -167,6 +199,15 @@ fn feishu_stage(conn: &Connection, dir: &Path, cfg: &Option<FeishuConfig>) -> Re
                 c,
                 &horae_core::feishu::UreqTransport,
             );
+            if c.is_app_configured() && c.task_sync {
+                let app_id = c.app_id.clone().unwrap();
+                let app_secret = c.resolve_app_secret().unwrap();
+                let auth =
+                    std::sync::Arc::new(horae_core::feishu::FeishuAuth::new(app_id, app_secret));
+                let engine = horae_core::feishu::sync::FeishuSyncEngineImpl::new(auth);
+                let _ = engine.pull_remote_tasks(conn);
+                let _ = engine.push_local_tasks(conn);
+            }
             Ok(pushed)
         }
         None => Ok(0),

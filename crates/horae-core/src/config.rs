@@ -64,8 +64,9 @@ fn default_ntfy_lead() -> u64 {
 /// 签名密钥沿用项目惯例——仅走环境变量，永不落盘。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeishuConfig {
-    /// 飞书群自定义机器人 Webhook 地址。
-    pub webhook_url: String,
+    /// 飞书群自定义机器人 Webhook 地址（用于单向群通知/每日简报）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_url: Option<String>,
     /// 签名加签密钥（Secret）。支持直接在 config.json 中配置，也支持通过 secret_env 引用环境变量。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret: Option<String>,
@@ -78,6 +79,28 @@ pub struct FeishuConfig {
     /// 每日晨报推送时间（如 "08:30"），可选；配置后守护进程每日定时推送 Today 任务简报。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daily_briefing: Option<String>,
+
+    // ── Phase 2 自建应用与长连接双向交互配置 ──
+    /// 飞书自建应用 App ID (如 cli_a1b2c3d4)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_id: Option<String>,
+    /// 飞书自建应用 App Secret
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_secret: Option<String>,
+    /// 读取 App Secret 的环境变量名 (如 FEISHU_APP_SECRET)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_secret_env: Option<String>,
+    /// 是否开启 WebSocket 长连接随手记与卡片交互，默认 true (当配置了 app_id 时)
+    #[serde(default = "default_true")]
+    pub ws_enabled: bool,
+
+    // ── Phase 2B 飞书原生任务同步配置 ──
+    /// 是否开启飞书官方任务 (Tasks v2) 双向同步，默认 false
+    #[serde(default)]
+    pub task_sync: bool,
+    /// 任务同步周期（分钟），默认 15
+    #[serde(default = "default_sync_interval")]
+    pub task_sync_interval_mins: u64,
 }
 
 impl FeishuConfig {
@@ -103,10 +126,47 @@ impl FeishuConfig {
         }
         None
     }
+
+    /// 解析飞书自建应用的 App Secret：
+    /// 1. 优先读取显式配置的 `app_secret`；
+    /// 2. 其次读取 `app_secret_env` 环境变量名对应的值；
+    /// 3. 若 `app_secret_env` 无法在环境变量中找到，智能回退使用该字符串。
+    pub fn resolve_app_secret(&self) -> Option<String> {
+        if let Some(sec) = &self.app_secret {
+            let trimmed = sec.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+        if let Some(env_val) = &self.app_secret_env {
+            let trimmed = env_val.trim();
+            if !trimmed.is_empty() {
+                if let Ok(val) = std::env::var(trimmed) {
+                    return Some(val);
+                }
+                return Some(trimmed.to_string());
+            }
+        }
+        None
+    }
+
+    /// 是否完整配置了自建应用（App ID 与 App Secret 皆具备）
+    pub fn is_app_configured(&self) -> bool {
+        self.app_id.as_ref().is_some_and(|id| !id.trim().is_empty())
+            && self.resolve_app_secret().is_some()
+    }
 }
 
 fn default_feishu_lead() -> u64 {
     10
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_sync_interval() -> u64 {
+    15
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

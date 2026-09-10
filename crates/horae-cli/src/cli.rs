@@ -477,6 +477,19 @@ pub enum FeishuAction {
     Due,
     /// Manually push today's task summary briefing
     Summary,
+    /// Start WebSocket long connection to listen for mobile captures and card actions
+    Listen,
+    /// Check Feishu App credentials, token refresh, and WebSocket gateway connectivity
+    Doctor,
+    /// Sync tasks with Feishu Tasks v2 (bidirectional by default)
+    Sync {
+        /// Only push local tasks to Feishu
+        #[arg(long)]
+        push: bool,
+        /// Only pull remote tasks from Feishu
+        #[arg(long)]
+        pull: bool,
+    },
 }
 
 #[cfg(test)]

@@ -406,7 +406,30 @@ fn feishu_help_lists_subcommands() {
         .success()
         .stdout(contains("test"))
         .stdout(contains("due"))
-        .stdout(contains("summary"));
+        .stdout(contains("summary"))
+        .stdout(contains("listen"))
+        .stdout(contains("doctor"))
+        .stdout(contains("sync"));
+}
+
+#[test]
+fn feishu_listen_errors_when_unconfigured() {
+    let env = env();
+    env.cmd()
+        .args(["feishu", "listen"])
+        .assert()
+        .failure()
+        .stderr(contains("未配置飞书"));
+}
+
+#[test]
+fn feishu_sync_errors_when_unconfigured() {
+    let env = env();
+    env.cmd()
+        .args(["feishu", "sync"])
+        .assert()
+        .failure()
+        .stderr(contains("未配置飞书"));
 }
 
 #[test]

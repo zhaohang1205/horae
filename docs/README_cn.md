@@ -77,8 +77,9 @@ horae show <task-id>                 # 查看完整时间线
 | `horae tags` | 标签库 |
 | `horae pomo start <id> \| stop \| daemon \| waybar` | 番茄钟（别名 `p`） |
 | `horae alarm waybar [slot] \| next [slot] [--limit N] [--all]` | 到期提醒 |
-| `horae watch [--dir PATH] [--interval S] [--once]` | 手机同步桥（Syncthing）+ ntfy 提醒推送 |
+| `horae watch [--dir PATH] [--interval S] [--once]` | 手机同步桥（Syncthing）+ ntfy/飞书提醒推送 + 长连接随手记 |
 | `horae ntfy test` | 发送一条 ntfy 测试推送，验证手机收到 |
+| `horae feishu <test\|due\|summary\|listen\|doctor\|sync>` | 飞书推送、免公网IP长连接随手记与原生任务同步 |
 | `horae profile <list\|new\|rename\|rm\|set-default> [--db PATH]` | 数据集（Profile）管理 |
 | `horae completions <shell>` | 生成 shell 补全 |
 
@@ -235,7 +236,61 @@ horae watch --dir ~/gtd-sync # 自定义同步目录
 
 4. 常驻 `horae watch`，到点任务的手机提醒即自动推送（仅带排程/截止时间的任务会推送；无时间的纯收件箱任务不推送）。ntfy 未配置时 `watch` 的该 stage 为空操作，对老用户零影响；单条推送失败不影响其它阶段，下一轮自动重试。
 
-> 提醒仅在电脑开机期间触发——关机时到期的任务，开机后补发。需要全程实时请参考 `horae serve` 中继（可选升级路径）。
+## 飞书打通（`horae feishu`）
+
+horae 深度打通飞书 (Feishu / Lark)，支持两大核心工作流：
+1. **轻量群机器人**：到期/逾期提醒卡片与每日 08:30 晨报推送。
+2. **企业自建应用 (免公网 IP)**：
+   - **随时随地随手记 (Capture Everywhere)**：在手机/桌面飞书私聊机器人发送自然语言待办（如 `写周报 @work tomorrow 18:00 !high`），本地 horae 秒级自动入库并记录 UTC-ms 审计流水。
+   - **交互卡片闭环**：机器人即刻回发卡片，点击卡片按钮【✅ 标为完成】或【📅 顺延1天】，移动端直接流转任务。
+   - **原生任务同步 (Tasks v2 API)**：将 horae 任务双向同步至飞书官方任务列表。
+
+### 1. 配置示例 (`~/.config/horae/config.json`)
+
+```json
+{
+  "default_profile": "default",
+  "profiles": {
+    "default": {
+      "db": "horae.db",
+      "feishu": {
+        "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/...",
+        "secret_env": "FEISHU_SECRET",
+        "lead_minutes": 10,
+        "daily_briefing": "08:30",
+        "app_id": "cli_axxxxxxxxxxxx",
+        "app_secret_env": "FEISHU_APP_SECRET",
+        "ws_enabled": true,
+        "task_sync": true
+      }
+    }
+  }
+}
+```
+
+- 安全建议：加签 Secret 和 App Secret 推荐配置为环境变量名（如 `FEISHU_SECRET` 与 `FEISHU_APP_SECRET`），密钥本身绝不落盘。
+
+### 2. 常用操作命令
+
+```sh
+# 环境体检与连通性自检（验证 App ID、Secret 与长连接网关）
+horae feishu doctor
+
+# 发送测试卡片验证 Webhook 通道
+horae feishu test
+
+# 手动推送当前到期任务或今日简报
+horae feishu due
+horae feishu summary
+
+# 启动 WebSocket 免公网 IP 长连接监听（前台测试）
+horae feishu listen
+
+# 手动与飞书官方任务 (Tasks v2) 对账同步
+horae feishu sync [--push | --pull]
+```
+
+> **提示**：在常驻运行 `horae watch` 时，只要配置了 `app_id` 与密钥，长连接随手记监听线程与官方任务同步将随后台守护进程自动拉起，无需额外单独启动进程！
 
 ## 开发
 

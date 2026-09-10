@@ -77,7 +77,8 @@ Task refs accept a full id, a unique id-prefix, or an exact title.
 | `horae tags` | List tags |
 | `horae pomo start <id> \| stop \| daemon \| waybar` | Pomodoro (alias `p`) |
 | `horae alarm waybar [slot] \| next [slot] [--limit N] [--all]` | Upcoming-task reminders |
-| `horae watch [--dir PATH] [--interval S] [--once]` | Phone bridge (Syncthing) |
+| `horae watch [--dir PATH] [--interval S] [--once]` | Phone bridge (Syncthing) + ntfy/Feishu push + WS capture |
+| `horae feishu <test\|due\|summary\|listen\|doctor\|sync>` | Feishu/Lark alerts, WebSocket captures & native task sync |
 | `horae profile <list\|new\|rename\|rm\|set-default> [--db PATH]` | Profile (data-set) management |
 | `horae completions <shell>` | Generate shell completions |
 
@@ -191,7 +192,59 @@ Folder protocol (phone writes, computer consumes):
 | `reminders/` | due/overdue task reminders (Syncthing pushes a file-change notice to the phone) |
 | `*.done` | receipts of consumed lines |
 
-Capture on the phone with any notes app pointed at this folder. Due reminders only fire while the computer is on (catch-up on boot after downtime). A later relay (`horae serve`) on any free PaaS unlocks real-time push — an optional upgrade path.
+## Feishu / Lark Integration (`horae feishu`)
+
+horae provides end-to-end integration with Feishu (Lark):
+1. **Webhook Bot**: Due/overdue task alert cards & daily 08:30 briefing summary cards.
+2. **Custom App (No Public IP Needed)**:
+   - **Capture Everywhere**: Send natural language quick-add tasks (e.g. `write report @work tomorrow 18:00 !high`) to your bot in private chat; horae captures it into SQLite within milliseconds with UTC-ms audit timeline.
+   - **Interactive Card Actions**: The bot replies with an interactive card. Click `[✅ Mark Done]` or `[📅 Postpone 1 Day]` directly on your phone to transition tasks.
+   - **Native Task Sync (Tasks v2 API)**: Bidirectional synchronization with Feishu's official Tasks system.
+
+### Configuration (`~/.config/horae/config.json`)
+
+```json
+{
+  "default_profile": "default",
+  "profiles": {
+    "default": {
+      "db": "horae.db",
+      "feishu": {
+        "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/...",
+        "secret_env": "FEISHU_SECRET",
+        "lead_minutes": 10,
+        "daily_briefing": "08:30",
+        "app_id": "cli_axxxxxxxxxxxx",
+        "app_secret_env": "FEISHU_APP_SECRET",
+        "ws_enabled": true,
+        "task_sync": true
+      }
+    }
+  }
+}
+```
+
+### Useful Commands
+
+```sh
+# Run diagnostics to check credentials and gateway connectivity
+horae feishu doctor
+
+# Send test card to verify webhook alerts
+horae feishu test
+
+# Manually scan and push due tasks or today's briefing
+horae feishu due
+horae feishu summary
+
+# Start WebSocket long connection listener in foreground
+horae feishu listen
+
+# Manually sync with Feishu Tasks v2
+horae feishu sync [--push | --pull]
+```
+
+> **Note**: When running `horae watch`, configuring `app_id` and secret will automatically spawn the WebSocket listener and task synchronizer inside the daemon.
 
 ## Development
 

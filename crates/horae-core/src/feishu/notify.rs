@@ -64,6 +64,11 @@ pub fn push_due(
 ) -> Result<usize> {
     fs::create_dir_all(dir)?;
 
+    let webhook_url = match &cfg.webhook_url {
+        Some(url) if !url.trim().is_empty() => url,
+        _ => return Ok(0),
+    };
+
     let all = tasks::list(
         conn,
         &tasks::ListFilter {
@@ -106,7 +111,7 @@ pub fn push_due(
                 }
             };
 
-            if let Err(e) = transport.send(&cfg.webhook_url, &payload) {
+            if let Err(e) = transport.send(webhook_url, &payload) {
                 eprintln!("飞书推送失败（{}）: {e:#}", t.id);
                 continue; // 失败不入 state，下一轮继续重试
             }
@@ -191,19 +196,28 @@ pub fn send_summary(
         })
         .collect();
 
+    let webhook_url = match &cfg.webhook_url {
+        Some(url) if !url.trim().is_empty() => url,
+        _ => return Ok(()),
+    };
+
     let card = build_summary_card(&today_tasks);
     let secret = cfg.resolve_secret();
     let payload = wrap_card_payload(card, secret.as_deref())?;
 
-    transport.send(&cfg.webhook_url, &payload)
+    transport.send(webhook_url, &payload)
 }
 
 /// 发送一条测试卡片，供 `horae feishu test` 验证连接。
 pub fn send_test(cfg: &FeishuConfig, transport: &dyn FeishuTransport) -> Result<()> {
+    let webhook_url = match &cfg.webhook_url {
+        Some(url) if !url.trim().is_empty() => url,
+        _ => anyhow::bail!("未配置 feishu.webhook_url（飞书群自定义机器人 Webhook 地址）"),
+    };
     let card = build_test_card();
     let secret = cfg.resolve_secret();
     let payload = wrap_card_payload(card, secret.as_deref())?;
-    transport.send(&cfg.webhook_url, &payload)
+    transport.send(webhook_url, &payload)
 }
 
 #[cfg(test)]
@@ -220,11 +234,17 @@ mod tests {
         let state_dir = tempfile::tempdir().unwrap();
 
         let cfg = FeishuConfig {
-            webhook_url: "https://open.feishu.cn/mock".into(),
+            webhook_url: Some("https://open.feishu.cn/mock".into()),
             secret: None,
             secret_env: None,
             lead_minutes: 10,
             daily_briefing: None,
+            app_id: None,
+            app_secret: None,
+            app_secret_env: None,
+            ws_enabled: true,
+            task_sync: false,
+            task_sync_interval_mins: 15,
         };
 
         // 创建一个 5 分钟后到期的任务 (符合 10 分钟提前量)
