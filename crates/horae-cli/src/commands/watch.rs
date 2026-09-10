@@ -8,7 +8,7 @@ use anyhow::Result;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use horae_core::config::{Config, NtfyConfig};
+use horae_core::config::{Config, FeishuConfig, NtfyConfig};
 use horae_core::model::task::{Status, Task};
 use horae_core::repo::tags;
 use horae_core::repo::tasks;
@@ -36,7 +36,7 @@ pub struct WatchArgs {
     pub dir: PathBuf,
     pub interval_secs: u64,
     pub once: bool,
-    /// 当前 profile 名（透传，用于读取该 profile 的 ntfy 配置）。
+    /// 当前 profile 名（透传，用于读取该 profile 的 ntfy / feishu 配置）。
     pub profile: Option<String>,
 }
 
@@ -48,6 +48,7 @@ pub struct ProcessSummary {
     pub reminders: usize,
     pub today_written: bool,
     pub ntfy_pushed: usize,
+    pub feishu_pushed: usize,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -71,8 +72,8 @@ pub fn run(conn: &Connection, args: WatchArgs) -> Result<()> {
     if args.once {
         let s = process_once(conn, &args.dir, args.profile.as_deref())?;
         println!(
-            "processed: {} captures, {} actions, {} reminders, {} ntfy",
-            s.captures, s.actions, s.reminders, s.ntfy_pushed
+            "processed: {} captures, {} actions, {} reminders, {} ntfy, {} feishu",
+            s.captures, s.actions, s.reminders, s.ntfy_pushed, s.feishu_pushed
         );
         return Ok(());
     }
@@ -94,7 +95,8 @@ pub fn run(conn: &Connection, args: WatchArgs) -> Result<()> {
 /// 2. 执行 `actions.txt` 的新操作行；
 /// 3. 到点/逾期的任务写 `reminders/*.md`；
 /// 4. 重写 `today.md` 活动任务快照；
-/// 5. 到点任务向 ntfy 推送手机提醒（未配置则空操作）。
+/// 5. 到点任务向 ntfy 推送手机提醒（未配置则空操作）；
+/// 6. 到点任务向飞书推送卡片提醒并按需发送每日晨报（未配置则空操作）。
 ///
 /// 各阶段独立容错：单个文件/阶段失败不阻断其余阶段（守护进程下一轮重试
 /// 失败的阶段），最后把首个错误上报给调用方。
@@ -127,15 +129,17 @@ pub fn process_once(
     stage!(reminders, write_reminders(conn, dir));
     stage!(today_written, write_today(conn, dir));
 
-    // 读取当前 profile 的 ntfy 配置；缺失/未配置时该 stage 为空操作。
-    let ntfy_cfg: Option<NtfyConfig> = match Config::load() {
+    // 读取当前 profile 的 ntfy 与 feishu 配置；缺失/未配置时对应 stage 为空操作。
+    let (ntfy_cfg, feishu_cfg): (Option<NtfyConfig>, Option<FeishuConfig>) = match Config::load() {
         Ok(cfg) => cfg
             .resolve_profile(profile)
             .ok()
-            .and_then(|(_, p)| p.ntfy.clone()),
-        Err(_) => None,
+            .map(|(_, p)| (p.ntfy.clone(), p.feishu.clone()))
+            .unwrap_or((None, None)),
+        Err(_) => (None, None),
     };
     stage!(ntfy_pushed, ntfy_stage(conn, dir, &ntfy_cfg));
+    stage!(feishu_pushed, feishu_stage(conn, dir, &feishu_cfg));
 
     match first_err {
         Some(e) => Err(e),
@@ -147,6 +151,24 @@ pub fn process_once(
 fn ntfy_stage(conn: &Connection, dir: &Path, cfg: &Option<NtfyConfig>) -> Result<usize> {
     match cfg {
         Some(c) => horae_core::ntfy::push_due(conn, dir, c, &horae_core::ntfy::UreqTransport),
+        None => Ok(0),
+    }
+}
+
+/// 飞书推送 stage：未配置直接返回 0；否则调用 [`horae_core::feishu::push_due`] 与每日晨报检查。
+fn feishu_stage(conn: &Connection, dir: &Path, cfg: &Option<FeishuConfig>) -> Result<usize> {
+    match cfg {
+        Some(c) => {
+            let pushed =
+                horae_core::feishu::push_due(conn, dir, c, &horae_core::feishu::UreqTransport)?;
+            let _ = horae_core::feishu::check_daily_briefing(
+                conn,
+                dir,
+                c,
+                &horae_core::feishu::UreqTransport,
+            );
+            Ok(pushed)
+        }
         None => Ok(0),
     }
 }
@@ -795,6 +817,7 @@ mod tests {
                         lead_minutes: 10,
                         tags: None,
                     }),
+                    feishu: None,
                 },
             );
             cfg.save().unwrap();

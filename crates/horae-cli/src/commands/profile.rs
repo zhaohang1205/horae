@@ -64,6 +64,7 @@ fn new(config: &mut Config, name: &str, db: Option<&str>) -> anyhow::Result<()> 
             db: db.to_string(),
             cloud: None,
             ntfy: None,
+            feishu: None,
         },
     );
     config.save()?;
@@ -129,6 +130,7 @@ mod tests {
                     token_env: None,
                 }),
                 ntfy: None,
+                feishu: None,
             },
         );
         assert!(config.profile("work").unwrap().cloud.is_some());
@@ -154,6 +156,7 @@ mod tests {
                     db: "profiles/p.db".to_string(),
                     cloud: None,
                     ntfy: None,
+                    feishu: None,
                 },
             );
             let path = config.db_path(config.profile("p").unwrap());

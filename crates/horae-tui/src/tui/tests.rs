@@ -4086,7 +4086,7 @@ fn organize_edit_does_not_expand_syntax_in_edit_area() {
     );
 
     // 验证测试每日任务（纯日期 00:00）
-    let midnight_time = horae_core::time::parse_time("2026-09-10").unwrap();
+    let midnight_time = horae_core::time::parse_time("2028-09-10").unwrap();
     let rec2 = tasks::create_capture(
         &conn,
         &CaptureInput {
@@ -4129,8 +4129,8 @@ fn organize_edit_does_not_expand_syntax_in_edit_area() {
         app.input
     );
     assert!(
-        app.input.contains("~2026-09-10"),
-        "零点时间应简洁显示日期 ~2026-09-10，实际为: {}",
+        app.input.contains("~2028-09-10"),
+        "零点时间应简洁显示日期 ~2028-09-10，实际为: {}",
         app.input
     );
     assert!(

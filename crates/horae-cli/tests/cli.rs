@@ -385,6 +385,30 @@ fn ntfy_rejects_unknown_action() {
         .stderr(contains("unknown ntfy action"));
 }
 
+// ---------------------------------------------------------------- feishu
+
+#[test]
+fn feishu_test_errors_when_unconfigured() {
+    let env = env();
+    env.cmd()
+        .args(["feishu", "test"])
+        .assert()
+        .failure()
+        .stderr(contains("未配置飞书"));
+}
+
+#[test]
+fn feishu_help_lists_subcommands() {
+    let env = env();
+    env.cmd()
+        .args(["feishu", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("test"))
+        .stdout(contains("due"))
+        .stdout(contains("summary"));
+}
+
 #[test]
 fn help_defaults_to_english() {
     let env = env();

@@ -31,6 +31,7 @@ impl<'a> App<'a> {
                 db: format!("profiles/{name}.db"),
                 cloud: None,
                 ntfy: None,
+                feishu: None,
             },
         );
         if config.save().is_err() {

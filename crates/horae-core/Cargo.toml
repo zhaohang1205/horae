@@ -17,6 +17,9 @@ anyhow = "1"
 thiserror = "1"
 dirs = "5"
 ureq = { version = "2", default-features = false, features = ["tls"] }
+sha2 = "0.10"
+hmac = "0.12"
+base64 = "0.22"
 tempfile = { version = "3.27", optional = true }
 
 [dev-dependencies]

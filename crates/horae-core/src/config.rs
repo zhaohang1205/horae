@@ -24,6 +24,9 @@ pub struct Profile {
     /// ntfy 手机提醒推送配置（可选；未配置则 watch 的 ntfy stage 为空操作）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ntfy: Option<NtfyConfig>,
+    /// 飞书消息与提醒推送配置（可选；未配置则 watch 的 feishu stage 为空操作）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feishu: Option<FeishuConfig>,
 }
 
 /// ntfy 推送配置：桌面 `watch` 守护进程在任务到点前（默认 10 分钟）向手机发
@@ -53,6 +56,56 @@ fn default_ntfy_priority() -> u8 {
 }
 
 fn default_ntfy_lead() -> u64 {
+    10
+}
+
+/// 飞书 (Feishu / Lark) 消息与提醒推送配置。
+/// 桌面 `watch` 守护进程在任务到点前（默认 10 分钟）向飞书 Webhook 机器人发送卡片消息。
+/// 签名密钥沿用项目惯例——仅走环境变量，永不落盘。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeishuConfig {
+    /// 飞书群自定义机器人 Webhook 地址。
+    pub webhook_url: String,
+    /// 签名加签密钥（Secret）。支持直接在 config.json 中配置，也支持通过 secret_env 引用环境变量。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret: Option<String>,
+    /// 读取签名加签密钥（Secret）的环境变量名（可选）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_env: Option<String>,
+    /// 提前多少分钟推送，默认 10。
+    #[serde(default = "default_feishu_lead")]
+    pub lead_minutes: u64,
+    /// 每日晨报推送时间（如 "08:30"），可选；配置后守护进程每日定时推送 Today 任务简报。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daily_briefing: Option<String>,
+}
+
+impl FeishuConfig {
+    /// 解析实际使用的 secret：
+    /// 1. 优先读取显式配置的 `secret`；
+    /// 2. 其次读取 `secret_env` 环境变量名对应的值；
+    /// 3. 若 `secret_env` 无法在环境变量中找到（例如用户把密钥直接写在了 secret_env 里），智能回退使用该字符串。
+    pub fn resolve_secret(&self) -> Option<String> {
+        if let Some(sec) = &self.secret {
+            let trimmed = sec.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+        if let Some(env_val) = &self.secret_env {
+            let trimmed = env_val.trim();
+            if !trimmed.is_empty() {
+                if let Ok(val) = std::env::var(trimmed) {
+                    return Some(val);
+                }
+                return Some(trimmed.to_string());
+            }
+        }
+        None
+    }
+}
+
+fn default_feishu_lead() -> u64 {
     10
 }
 
@@ -184,6 +237,7 @@ impl Default for Config {
                 db: DEFAULT_DB.to_string(),
                 cloud: None,
                 ntfy: None,
+                feishu: None,
             },
         );
         Self {
@@ -222,6 +276,7 @@ mod tests {
                 db: "profiles/work.db".to_string(),
                 cloud: None,
                 ntfy: None,
+                feishu: None,
             },
         );
         cfg.upsert_profile(
@@ -233,6 +288,7 @@ mod tests {
                     token_env: Some("HORAE_TURSO_TOKEN".to_string()),
                 }),
                 ntfy: None,
+                feishu: None,
             },
         );
         cfg.set_default("work").unwrap();
@@ -271,6 +327,7 @@ mod tests {
                     db: "profiles/p.db".to_string(),
                     cloud: None,
                     ntfy: None,
+                    feishu: None,
                 },
             );
             let path = config.db_path(config.profile("p").unwrap());

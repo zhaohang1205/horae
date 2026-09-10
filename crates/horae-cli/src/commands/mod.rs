@@ -7,6 +7,7 @@ mod alarm;
 mod backup;
 mod calendar;
 mod capture;
+mod feishu;
 mod focus;
 mod list;
 mod log;
@@ -199,6 +200,7 @@ fn run_inner(
         Command::Import { file, replace } => backup::run_import(conn, &file, replace),
         Command::Stats => stats::run(conn),
         Command::Ntfy { action } => ntfy::run(&action, profile),
+        Command::Feishu { action } => feishu::run(conn, action, profile),
         Command::Focus { start } => focus::run(conn, start),
         Command::Log { message } => log::run(conn, &message),
         Command::Completions { .. } => {

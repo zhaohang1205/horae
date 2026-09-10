@@ -353,6 +353,18 @@ pub enum Command {
         #[arg(value_name = "ACTION", help = "test (send a sample push)")]
         action: String,
     },
+    /// Push notifications and briefings to Feishu / Lark (requires `feishu` config in the profile)
+    #[command(
+        long_about = "Send task reminders and daily briefings to Feishu (Lark) via group bot Webhook. \
+        Configure the `feishu` block in your profile (webhook_url, optional secret_env, lead_minutes, daily_briefing). \
+        The `watch` daemon pushes an interactive card when a timed task comes due; \
+        `feishu test` fires a sample card so you can confirm your devices receive it.",
+        after_help = "Examples:\n  horae feishu test\n  horae feishu due\n  horae feishu summary\n  horae --profile work feishu test"
+    )]
+    Feishu {
+        #[command(subcommand)]
+        action: FeishuAction,
+    },
     /// Watch a Syncthing-shared folder (phone <-> computer bridge)
     #[command(
         long_about = "Watch a folder synced with the phone (e.g. via Syncthing) and reconcile \
@@ -455,6 +467,16 @@ pub enum ProfileAction {
     Rm { name: String },
     /// Set the default profile used when --profile is not given
     SetDefault { name: String },
+}
+
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum FeishuAction {
+    /// Send a sample test card to verify Feishu connection
+    Test,
+    /// Manually scan and push due tasks right now
+    Due,
+    /// Manually push today's task summary briefing
+    Summary,
 }
 
 #[cfg(test)]

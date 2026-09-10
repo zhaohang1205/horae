@@ -1,6 +1,7 @@
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod feishu;
 pub mod i18n;
 pub mod lunar;
 pub mod model;
