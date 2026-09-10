@@ -235,11 +235,7 @@ fn splash_layout(cols: u16, rows: u16, logo_h: u16) -> SplashLayout {
     };
     let banner_h = banner_pad_top + logo_h + banner_pad_bot;
 
-    let footer_y = if rows >= 24 {
-        rows.saturating_sub(2)
-    } else {
-        rows.saturating_sub(1)
-    };
+    let footer_y = rows.saturating_sub(1);
 
     let card_width = if cols >= 67 {
         16
@@ -266,7 +262,7 @@ fn splash_layout(cols: u16, rows: u16, logo_h: u16) -> SplashLayout {
 
     let avail = footer_y.saturating_sub(content_h + if show_prompt { 2 } else { 0 });
     let top_margin = if rows >= 24 {
-        (avail * 2 / 5).max(1)
+        (avail * 2 / 5).max(1) + 1
     } else {
         avail / 2
     };
@@ -456,15 +452,34 @@ fn draw_frame_with<W: std::io::Write>(
         write_centered(out, cols, py, "\x1b[5m", prompt, OVERLAY0)?;
     }
 
-    // 6. 底部信息行：版本、Rust Built、作者、启动耗时
-    let mut footer = format!(
-        "v{}  ·  RUST BUILT  ·  by zhaohang1205",
-        env!("CARGO_PKG_VERSION")
-    );
-    if let Some(ms) = boot_ms {
-        footer.push_str(&format!("  ·  {ms}ms"));
-    }
-    write_centered(out, cols, lay.footer_y, "", &footer, OVERLAY0)?;
+    // 6. 底部信息行：版本，作者（github链接），rust built
+    let version = format!("v{}", env!("CARGO_PKG_VERSION"));
+    let author_plain = "by zhaohang1205 (github.com/zhaohang1205)";
+    let rust_built = "RUST BUILT";
+
+    let visible_footer = if cols >= 68 {
+        format!("{version}  ·  {author_plain}  ·  {rust_built}")
+    } else if cols >= 52 {
+        format!("{version}  ·  github.com/zhaohang1205  ·  {rust_built}")
+    } else {
+        format!("{version}  ·  zhaohang1205  ·  {rust_built}")
+    };
+
+    let full_footer = if cols >= 68 {
+        let osc8_link =
+            "\x1b]8;;https://github.com/zhaohang1205\x1b\\github.com/zhaohang1205\x1b]8;;\x1b\\";
+        format!("{version}  ·  by zhaohang1205 ({osc8_link})  ·  {rust_built}")
+    } else if cols >= 52 {
+        let osc8_link =
+            "\x1b]8;;https://github.com/zhaohang1205\x1b\\github.com/zhaohang1205\x1b]8;;\x1b\\";
+        format!("{version}  ·  {osc8_link}  ·  {rust_built}")
+    } else {
+        format!("{version}  ·  zhaohang1205  ·  {rust_built}")
+    };
+
+    let start_x = center_x(cols, visible_footer.width() as u16);
+    out.execute(cursor::MoveTo(start_x, lay.footer_y))?;
+    write!(out, "{}{full_footer}\x1b[0m", fg(OVERLAY0))?;
 
     Ok(())
 }
@@ -499,12 +514,12 @@ mod splash_tests {
     #[test]
     fn splash_layout_centers_block() {
         let lay = splash_layout(80, 24, 9);
-        assert_eq!(lay.banner_y, 1);
-        assert_eq!(lay.subtitle_y, 13);
-        assert_eq!(lay.slogan_y, 14);
-        assert_eq!(lay.cards_y, Some(16));
-        assert_eq!(lay.prompt_y, Some(20));
-        assert_eq!(lay.footer_y, 22);
+        assert_eq!(lay.banner_y, 2);
+        assert_eq!(lay.subtitle_y, 14);
+        assert_eq!(lay.slogan_y, 15);
+        assert_eq!(lay.cards_y, Some(17));
+        assert_eq!(lay.prompt_y, Some(21));
+        assert_eq!(lay.footer_y, 23);
         assert_eq!(lay.card_width, 16);
     }
 
@@ -516,26 +531,29 @@ mod splash_tests {
         assert!(s.contains("█"), "应绘制 HORAE 艺术字");
         assert!(s.contains(BRAND_SUBTITLE), "应绘制品牌副标题");
         assert!(s.contains("RUST BUILT"), "应包含 RUST BUILT 标识");
+        assert!(s.contains("by zhaohang1205"), "应包含作者信息");
+        assert!(s.contains("github.com/zhaohang1205"), "应包含 github 链接");
         assert!(s.contains("<10s"), "应绘制特性卡片");
         assert!(!s.contains("\x1b_G"), "不应包含任何 Kitty 图形协议控制指令");
     }
 
     #[test]
     fn draw_frame_shows_boot_ms_bilingual() {
-        // 打点后底部版本行与卡片应携带启动用时
+        // 打点后卡片应携带启动用时
         for lang in [Lang::Zh, Lang::En] {
             let mut buf = std::io::Cursor::new(Vec::new());
             draw_frame_with(&mut buf, 80, 24, lang, Some(42), IconStyle::Nerd).unwrap();
             let s = String::from_utf8(buf.into_inner()).unwrap();
             assert!(s.contains("by zhaohang1205"), "版本行应存在");
-            assert!(s.contains("42ms"), "{lang:?} 应显示「42ms」");
+            assert!(s.contains("42ms"), "{lang:?} 卡片应显示「42ms」");
+            assert!(s.contains("RUST BUILT"), "应包含 RUST BUILT");
         }
     }
 
     #[test]
     fn draw_frame_supports_ascii_icon_style() {
         let mut buf = std::io::Cursor::new(Vec::new());
-        draw_frame_with(&mut buf, 80, 24, Lang::En, Some(3), IconStyle::Nerd).unwrap();
+        draw_frame_with(&mut buf, 80, 24, Lang::En, Some(3), IconStyle::Ascii).unwrap();
         let s = String::from_utf8(buf.into_inner()).unwrap();
         assert!(s.contains("startup"), "英文卡片应显示 startup");
         assert!(s.contains("Ideas in. Time accounted."));
