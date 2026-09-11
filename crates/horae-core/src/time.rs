@@ -16,13 +16,39 @@ pub fn mark_boot() {
     let _ = BOOT.set(std::time::Instant::now());
 }
 
-/// 首次查询 [`boot_elapsed_ms`] 时的快照；此后恒定返回同一值。
-static BOOT_MS: std::sync::OnceLock<Option<u128>> = std::sync::OnceLock::new();
+/// 首次查询启动耗时时的 Duration 快照；此后恒定返回同一值。
+static BOOT_DURATION: std::sync::OnceLock<Option<std::time::Duration>> = std::sync::OnceLock::new();
+
+/// 距 [`mark_boot`] 的时间跨度；未打点（如单测直接构造）时为 `None`。
+/// 每次进程只计算一次：首次调用即快照，重绘等后续调用拿到同一值。
+pub fn boot_elapsed() -> Option<std::time::Duration> {
+    *BOOT_DURATION.get_or_init(|| BOOT.get().map(|t| t.elapsed()))
+}
 
 /// 距 [`mark_boot`] 的毫秒数；未打点（如单测直接构造）时为 `None`。
-/// 每次进程只计算一次：首次调用即快照，重绘等后续调用拿到同一值。
+/// 保持向后兼容。
 pub fn boot_elapsed_ms() -> Option<u128> {
-    *BOOT_MS.get_or_init(|| BOOT.get().map(|t| t.elapsed().as_millis()))
+    boot_elapsed().map(|d| d.as_millis())
+}
+
+/// 格式化启动耗时，支持亚毫秒（真实微秒转小数）精度显示：
+/// - < 10ms: 显示真实 1 位小数毫秒，如 `0.4ms`、`1.2ms`
+/// - 10ms ~ 999ms: 显示整数毫秒，如 `12ms`
+/// - >= 1000ms: 显示 1 位小数秒，如 `1.2s`
+pub fn format_boot_elapsed(duration: std::time::Duration) -> String {
+    let micros = duration.as_micros();
+    if micros < 10_000 {
+        let ms = micros as f64 / 1_000.0;
+        if ms < 0.05 {
+            "<0.1ms".to_string()
+        } else {
+            format!("{ms:.1}ms")
+        }
+    } else if micros < 1_000_000 {
+        format!("{}ms", duration.as_millis())
+    } else {
+        format!("{:.1}s", duration.as_secs_f64())
+    }
 }
 
 /// Local-day boundaries in UTC ms for a day offset (0 = today, 1 = tomorrow).
@@ -622,6 +648,21 @@ mod tests {
     fn boot_elapsed_snapshot_is_stable() {
         // 启动用时只计算一次：重复查询应返回同一快照值。
         std::thread::sleep(std::time::Duration::from_millis(5));
+        assert_eq!(boot_elapsed(), boot_elapsed());
         assert_eq!(boot_elapsed_ms(), boot_elapsed_ms());
+    }
+
+    #[test]
+    fn format_boot_elapsed_cases() {
+        use std::time::Duration;
+        assert_eq!(format_boot_elapsed(Duration::from_micros(20)), "<0.1ms");
+        assert_eq!(format_boot_elapsed(Duration::from_micros(390)), "0.4ms");
+        assert_eq!(format_boot_elapsed(Duration::from_micros(800)), "0.8ms");
+        assert_eq!(format_boot_elapsed(Duration::from_micros(1200)), "1.2ms");
+        assert_eq!(format_boot_elapsed(Duration::from_micros(1300)), "1.3ms");
+        assert_eq!(format_boot_elapsed(Duration::from_micros(9900)), "9.9ms");
+        assert_eq!(format_boot_elapsed(Duration::from_millis(12)), "12ms");
+        assert_eq!(format_boot_elapsed(Duration::from_millis(42)), "42ms");
+        assert_eq!(format_boot_elapsed(Duration::from_millis(1500)), "1.5s");
     }
 }

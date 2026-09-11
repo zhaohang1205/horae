@@ -145,15 +145,10 @@ pub(super) fn show_splash(
         // 开屏绘制会多次移动输出位置，隐藏硬件光标避免用户看到跳动。
         crossterm::execute!(stdout, cursor::Hide)?;
         let (mut cols, mut rows) = terminal::size()?;
+        // 首帧绘制前获得耗时快照并冻结（包含全部初始化与终端就绪开销）
+        let boot_duration = horae_core::time::boot_elapsed();
         loop {
-            draw_frame_with(
-                &mut stdout,
-                cols,
-                rows,
-                lang,
-                horae_core::time::boot_elapsed_ms(),
-                icon_style,
-            )?;
+            draw_frame_with(&mut stdout, cols, rows, lang, boot_duration, icon_style)?;
             stdout.flush()?;
             let mut redraw = false;
             while !redraw {
@@ -308,7 +303,7 @@ fn draw_frame_with<W: std::io::Write>(
     cols: u16,
     rows: u16,
     lang: Lang,
-    boot_ms: Option<u128>,
+    boot_duration: Option<std::time::Duration>,
     icon_style: IconStyle,
 ) -> anyhow::Result<()> {
     use crossterm::{cursor, ExecutableCommand};
@@ -389,8 +384,8 @@ fn draw_frame_with<W: std::io::Write>(
             IconStyle::Ascii => ("*", "+", "@", "&"),
         };
 
-        let boot_str = boot_ms
-            .map(|ms| format!("{ms}ms"))
+        let boot_str = boot_duration
+            .map(horae_core::time::format_boot_elapsed)
             .unwrap_or_else(|| "3ms".to_string());
         let val_time = tr!(lang, "time", "time");
         let val_gtd = tr!(lang, "gtd", "gtd");
@@ -540,21 +535,53 @@ mod splash_tests {
 
     #[test]
     fn draw_frame_shows_boot_ms_bilingual() {
+        use std::time::Duration;
         // 打点后卡片应携带启动用时
         for lang in [Lang::Zh, Lang::En] {
             let mut buf = std::io::Cursor::new(Vec::new());
-            draw_frame_with(&mut buf, 80, 24, lang, Some(42), IconStyle::Nerd).unwrap();
+            draw_frame_with(
+                &mut buf,
+                80,
+                24,
+                lang,
+                Some(Duration::from_millis(42)),
+                IconStyle::Nerd,
+            )
+            .unwrap();
             let s = String::from_utf8(buf.into_inner()).unwrap();
             assert!(s.contains("by zhaohang1205"), "版本行应存在");
             assert!(s.contains("42ms"), "{lang:?} 卡片应显示「42ms」");
             assert!(s.contains("RUST BUILT"), "应包含 RUST BUILT");
         }
+
+        // 亚毫秒耗时应显示真实的浮点毫秒
+        let mut buf = std::io::Cursor::new(Vec::new());
+        draw_frame_with(
+            &mut buf,
+            80,
+            24,
+            Lang::Zh,
+            Some(Duration::from_micros(800)),
+            IconStyle::Nerd,
+        )
+        .unwrap();
+        let s = String::from_utf8(buf.into_inner()).unwrap();
+        assert!(s.contains("0.8ms"), "亚毫秒耗时应显示「0.8ms」");
     }
 
     #[test]
     fn draw_frame_supports_ascii_icon_style() {
+        use std::time::Duration;
         let mut buf = std::io::Cursor::new(Vec::new());
-        draw_frame_with(&mut buf, 80, 24, Lang::En, Some(3), IconStyle::Ascii).unwrap();
+        draw_frame_with(
+            &mut buf,
+            80,
+            24,
+            Lang::En,
+            Some(Duration::from_millis(3)),
+            IconStyle::Ascii,
+        )
+        .unwrap();
         let s = String::from_utf8(buf.into_inner()).unwrap();
         assert!(s.contains("startup"), "英文卡片应显示 startup");
         assert!(s.contains("Ideas in. Time accounted."));

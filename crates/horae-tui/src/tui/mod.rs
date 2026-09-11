@@ -129,12 +129,14 @@ pub fn run_with_mode(
                 .map(|c| c.default_profile)
         })
         .unwrap_or_default();
-    let _ = horae_core::time::boot_elapsed_ms();
-    // 闪念模式下跳过开屏页，实现极速就绪
+    // 闪念模式下跳过开屏页，实现极速就绪；有开屏页时在首帧绘制时冻结真实用时
     if app.modules.splash && launch_mode != LaunchMode::Flash {
         if let Ok(new_lang) = splash::show_splash(conn, app.lang, app.icon_style) {
             app.lang = new_lang;
         }
+    } else {
+        // 未开启开屏页时，在此冻结启动用时快照
+        let _ = horae_core::time::boot_elapsed();
     }
     enable_raw_mode()?;
     let mut stdout = io::stdout();
