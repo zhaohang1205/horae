@@ -13,6 +13,39 @@ pub(crate) const VOICE_MAX_SECS: u64 = 30;
 /// WAV RIFF 头部最小字节数（小于等于该值说明无有效采样数据）。
 const MIN_WAV_BYTES: u64 = 44;
 
+/// 默认录音源是否被静音。
+///
+/// 静音不会让 `pw-record` 失败——它照样写出一段合法但全为零的 WAV，转写模型
+/// 于是从静音里"幻听"出几句无关的话，默默粘进输入框。用户看到的现象是
+/// "麦克风在闪，但什么都没录进去"。
+///
+/// `@DEFAULT_AUDIO_SOURCE@` / `@DEFAULT_SOURCE@` 会跟随用户切换默认设备，
+/// 因此不需要知道具体设备名。两个工具都不可用时返回 false：宁可放行，
+/// 也不要在没法判断的情况下拦住用户。
+fn default_capture_source_muted() -> bool {
+    if let Ok(out) = Command::new("wpctl")
+        .args(["get-volume", "@DEFAULT_AUDIO_SOURCE@"])
+        .output()
+    {
+        if out.status.success() {
+            return String::from_utf8_lossy(&out.stdout).contains("MUTED");
+        }
+    }
+
+    if let Ok(out) = Command::new("pactl")
+        .args(["get-source-mute", "@DEFAULT_SOURCE@"])
+        .output()
+    {
+        if out.status.success() {
+            return String::from_utf8_lossy(&out.stdout)
+                .to_ascii_lowercase()
+                .contains("yes");
+        }
+    }
+
+    false
+}
+
 pub(crate) struct VoiceRecording {
     pub(crate) child: Child,
     pub(crate) wav_path: PathBuf,
@@ -39,6 +72,22 @@ impl<'a> App<'a> {
         // 若已有录音在运行，先安全终止并清理
         if self.voice_recording.is_some() {
             self.cancel_voice_recording();
+        }
+
+        // 静音时录出来的是全零采样，转写只会得到幻听出来的字。与其让用户
+        // 以为录上了，不如直接说明原因并拦住，避免把垃圾文本写进待办。
+        if default_capture_source_muted() {
+            let icon = self.icon(Icon::Voice);
+            self.set_toast(
+                tr!(
+                    self.lang,
+                    "{} 默认麦克风已静音，录音只会得到静音。请先按键盘麦克风静音键或点状态栏麦克风图标解除",
+                    "{} Default microphone is muted, so recording would capture silence. Unmute it first",
+                    icon
+                ),
+                false,
+            );
+            return Ok(());
         }
         let wav_path =
             std::env::temp_dir().join(format!("horae_tui_voice_{}.wav", std::process::id()));
