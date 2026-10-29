@@ -83,7 +83,7 @@ impl<'a> App<'a> {
             self.set_mode(Mode::Normal);
             self.visual_start_idx = None;
             self.selected_ids.clear();
-            self.status_message = tr!(self.lang, "已退出可视模式", "Exited visual mode").into();
+            self.status_message.clear();
             {
                 let r = self.reload();
                 self.note(r);
@@ -98,7 +98,7 @@ impl<'a> App<'a> {
             }
         } else if !self.selected_ids.is_empty() {
             self.selected_ids.clear();
-            self.status_message = tr!(self.lang, "已清除选择", "Selection cleared").into();
+            self.status_message.clear();
         } else {
             self.hide_pomo_banner = true;
             self.status_message.clear();
@@ -359,8 +359,7 @@ impl<'a> App<'a> {
                     self.set_mode(Mode::Normal);
                     self.visual_start_idx = None;
                     self.selected_ids.clear();
-                    self.status_message =
-                        tr!(self.lang, "已退出可视模式", "Exited visual mode").into();
+                    self.status_message.clear();
                 } else {
                     self.set_mode(Mode::Visual);
                     self.visual_start_idx = Some(self.selected);

@@ -9,15 +9,21 @@ pub fn to_status(conn: &Connection, id: &str, to: &str) -> Result<()> {
     let parsed_status: horae_core::model::task::Status =
         to.parse().map_err(|e| anyhow::anyhow!("{}", e))?;
     let t = tasks::transition(conn, &id, parsed_status)?;
-    println!("{} -> {}", &t.id[..t.id.len().min(8)], t.status);
+    let short = &t.id[..t.id.len().min(8)];
+    if parsed_status == horae_core::model::task::Status::Done
+        && t.rrule.is_some()
+        && t.status != horae_core::model::task::Status::Done
+    {
+        let next_str = time::format_local(t.scheduled_start_at.or(t.due_at));
+        println!(
+            "{short} -> {} (recurring: checked in, next at {next_str})",
+            t.status
+        );
+    } else {
+        println!("{short} -> {}", t.status);
+    }
     if to == "done" {
         let _ = crate::commands::notify::completed_feedback(conn);
-    }
-    if to == "next" {
-        let missing_time = t.due_at.is_none() && t.scheduled_start_at.is_none();
-        if missing_time {
-            println!("  tip: 建议补充时间 — `horae schedule <id> --start <时间>`");
-        }
     }
     Ok(())
 }
@@ -42,6 +48,12 @@ pub fn schedule(
         None => None,
     };
     let t = tasks::schedule(conn, &id, start_ms, end_ms, rrule.map(|s| s.to_string()))?;
+    if t.rrule.is_none() && time::is_past(start_ms, time::now_ms()) {
+        eprintln!(
+            "warning: 时间已过 ({})，任务已处于逾期状态",
+            time::format_local(Some(start_ms))
+        );
+    }
     println!(
         "scheduled {} at {}",
         &t.id[..t.id.len().min(8)],

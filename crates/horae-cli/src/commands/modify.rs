@@ -192,6 +192,24 @@ pub fn run(conn: &Connection, args: ModifyArgs) -> Result<()> {
     }
 
     let updated = tasks::modify(conn, &id, &input)?;
+    let now = time::now_ms();
+    if updated.rrule.is_none() {
+        let newly_set_time = match input.scheduled_start_at {
+            Some(Some(ms)) => Some(ms),
+            _ => match input.due_at {
+                Some(Some(ms)) => Some(ms),
+                _ => None,
+            },
+        };
+        if let Some(ms) = newly_set_time {
+            if time::is_past(ms, now) {
+                eprintln!(
+                    "warning: 时间已过 ({})，任务已处于逾期状态",
+                    time::format_local(Some(ms))
+                );
+            }
+        }
+    }
 
     if args.json {
         let tags = horae_core::repo::tags::get_task_tags(conn, &id)?;

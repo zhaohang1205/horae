@@ -443,17 +443,20 @@ impl<'a> AppRender for App<'a> {
         } else {
             String::new()
         };
+        let mut filter_suffix = String::new();
+        if let Some(ref tf) = self.tag_filter {
+            filter_suffix.push_str(&format!(" [@{}]", tf));
+        }
+        if !self.search_query.is_empty() {
+            filter_suffix.push_str(&format!(" [/{}]", self.search_query));
+        }
         let title = tr!(
             self.lang,
             " 任务 · {}{}{} ",
             " Tasks · {}{}{} ",
             super::view_label(self.lang, self.view),
             lunar_suffix,
-            if let Some(ref tf) = self.tag_filter {
-                format!(" [@{}]", tf)
-            } else {
-                String::new()
-            }
+            filter_suffix
         );
         let list = List::new(items)
             .block(
@@ -480,6 +483,45 @@ impl<'a> AppRender for App<'a> {
                 Style::default().bg(self.theme.hl_bg)
             });
         f.render_stateful_widget(list, area, &mut self.list_state);
+
+        if self.items.is_empty() && area.height >= 4 && area.width >= 8 {
+            let empty_hint = if self.tag_filter.is_some() || !self.search_query.is_empty() {
+                tr!(
+                    self.lang,
+                    "没有匹配过滤条件的任务 · 按 Esc 清除过滤",
+                    "No tasks match filter · Press Esc to clear"
+                )
+            } else {
+                match self.view {
+                    View::Inbox => tr!(
+                        self.lang,
+                        "收件箱为空 · 按 a 捕获新想法",
+                        "Inbox is empty · Press a to capture"
+                    ),
+                    View::Archived => tr!(self.lang, "归档箱为空", "Archive is empty"),
+                    View::Quotes => tr!(
+                        self.lang,
+                        "暂无金句 · 录入时加 @quote 或在任务上按 \"",
+                        "No quotes yet · Add @quote or press \" on a task"
+                    ),
+                    _ => tr!(self.lang, "此处暂无任务", "No tasks here"),
+                }
+            };
+            let hint_rect = Rect {
+                x: area.x + 2,
+                y: area.y + area.height / 2,
+                width: area.width.saturating_sub(4),
+                height: 1,
+            };
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    empty_hint,
+                    Style::default().fg(self.theme.text_dim),
+                )))
+                .alignment(Alignment::Center),
+                hint_rect,
+            );
+        }
     }
 
     /// GTD 工作流与决策树视图（中心面板）。

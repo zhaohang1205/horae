@@ -180,6 +180,18 @@ pub fn run(conn: &Connection, mut args: CaptureArgs) -> Result<()> {
         }
     }
 
+    let now = time::now_ms();
+    if t.rrule.is_none() {
+        if let Some(ms) = t.scheduled_start_at.or(t.due_at) {
+            if time::is_past(ms, now) {
+                eprintln!(
+                    "warning: 时间已过 ({})，任务已处于逾期状态",
+                    time::format_local(Some(ms))
+                );
+            }
+        }
+    }
+
     if args.json {
         println!("{}", serde_json::to_string_pretty(&t)?);
     } else {
@@ -189,23 +201,30 @@ pub fn run(conn: &Connection, mut args: CaptureArgs) -> Result<()> {
             t.title,
             t.status
         );
-        if args.natural {
-            let mut details = Vec::new();
-            if let Some(s) = t.scheduled_start_at {
-                details.push(format!("scheduled: {}", time::format_local(Some(s))));
-            }
-            if let Some(d) = t.due_at {
-                details.push(format!("due: {}", time::format_local(Some(d))));
-            }
-            if let Some(ref rr) = t.rrule {
-                details.push(format!("rrule: {rr}"));
-            }
-            if let Some(ref p) = t.priority {
-                details.push(format!("priority: {p}"));
-            }
-            if !details.is_empty() {
-                println!("  parsed -> {}", details.join(" | "));
-            }
+        let mut details = Vec::new();
+        if let Some(s) = t.scheduled_start_at {
+            details.push(format!("scheduled: {}", time::format_local(Some(s))));
+        }
+        if let Some(d) = t.due_at {
+            details.push(format!("due: {}", time::format_local(Some(d))));
+        }
+        if let Some(ref rr) = t.rrule {
+            details.push(format!("rrule: {rr}"));
+        }
+        if let Some(ref p) = t.priority {
+            details.push(format!("priority: {p}"));
+        }
+        if !input.tag_names.is_empty() {
+            let tags_s = input
+                .tag_names
+                .iter()
+                .map(|tg| format!("@{tg}"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            details.push(format!("tags: {tags_s}"));
+        }
+        if !details.is_empty() {
+            println!("  parsed -> {}", details.join(" | "));
         }
     }
     Ok(())

@@ -119,7 +119,7 @@ fn drive_tui() {
     app.handle_key(key('l')).unwrap();
     assert!(app.pane == Pane::Center, "l 把焦点移回中栏");
 
-    // 4) 收集后自动跳回 Inbox（a 在非 Inbox 选择上 = 新建捕获）
+    // 4) 在非 Inbox 视图收集：停留在当前视图，通过 Toast 提示去向
     app.handle_key(key('2')).unwrap(); // Next 视图
     app.handle_key(key('a')).unwrap();
     let s = norm(&frame("6-capture-mode", &mut term, &mut app, &mut out));
@@ -132,9 +132,10 @@ fn drive_tui() {
         app.handle_key(key(c)).unwrap();
     }
     app.handle_key(kc(KeyCode::Enter)).unwrap();
+    assert_eq!(app.view, View::Next, "收集后停留在当前视图");
     let s = norm(&frame("7-after-capture", &mut term, &mut app, &mut out));
-    assert!(s.contains("Buymilk"), "新收集的任务出现");
-    assert!(s.contains("·收件箱"), "收集后跳到 Inbox");
+    assert!(s.contains("Buymilk→收件箱"), "Toast 提示任务去向");
+    app.handle_key(key('1')).unwrap(); // 切回 Inbox 继续后续编辑测试
 
     // 5) 回车 -> 组织/编辑模式：一句话补全 @标签 ~时间 *周期
     app.handle_key(kc(KeyCode::Enter)).unwrap();
@@ -187,16 +188,20 @@ fn drive_tui() {
     assert!(s.contains("每周回顾"), "回顾向导");
     app.handle_key(kc(KeyCode::Esc)).unwrap(); // Cancel wizard
 
-    // 8) 在非 inbox 视图收集后自动跳回 Inbox
+    // 8) 在非 inbox 视图收集后停留在当前视图并提示去向
     app.handle_key(key('3')).unwrap();
     app.handle_key(key('a')).unwrap();
     for c in "Captured from waiting".chars() {
         app.handle_key(key(c)).unwrap();
     }
     app.handle_key(kc(KeyCode::Enter)).unwrap();
-    let s = norm(&frame("19-capture-jump", &mut term, &mut app, &mut out));
-    assert!(s.contains("·收件箱"), "从 waiting 视图收集后跳到 Inbox");
-    assert!(s.contains("Capturedfromwaiting"));
+    assert_eq!(app.view, View::Waiting, "从 waiting 视图收集后留在当前视图");
+    let s = norm(&frame("19-capture-stay", &mut term, &mut app, &mut out));
+    assert!(
+        s.contains("Capturedfromwaiting→收件箱"),
+        "Toast 提示去往收件箱"
+    );
+    app.handle_key(key('1')).unwrap(); // 切到 Inbox 编辑刚录入的任务
 
     // 9) 一句话编辑：加标签 + 排程
     app.handle_key(kc(KeyCode::Enter)).unwrap(); // 组织编辑器（= e 全量编辑）
@@ -5755,4 +5760,182 @@ fn test_voice_recording_security_permissions() {
         app.cancel_voice_recording();
         assert!(!wav_path.exists());
     }
+}
+
+#[test]
+fn capture_stays_in_current_view_and_names_destination() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+    app.set_view(View::Next);
+
+    // 1. 普通捕获：停留在 Next 视图，Toast 指明去往收件箱
+    app.handle_key(key('a')).unwrap();
+    for c in "Buy coffee".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+    assert_eq!(app.view, View::Next, "捕获后保持在当前视图");
+    assert!(
+        app.status_message.contains("→ 收件箱"),
+        "Toast 应指明去向收件箱，实际: {}",
+        app.status_message
+    );
+
+    // 2. 带排程时间的捕获：停留在 Next 视图，Toast 指明去往计划并展示解析时间
+    app.handle_key(key('a')).unwrap();
+    for c in "Team sync ~tomorrow 15:00".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+    assert_eq!(app.view, View::Next, "排程捕获后保持在当前视图");
+    assert!(
+        app.status_message.contains("→ 计划 ·") && app.status_message.contains("15:00"),
+        "Toast 应指明去向计划与时间，实际: {}",
+        app.status_message
+    );
+}
+
+#[test]
+fn capture_past_time_shows_overdue_warning() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    // 1. 过去时间（非循环）：提示逾期警告
+    app.handle_key(key('a')).unwrap();
+    for c in "Missed call ~2020-01-01 09:00".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+    assert!(
+        app.status_message.contains("⚠ 时间已过"),
+        "过去时间应触发逾期警告，实际: {}",
+        app.status_message
+    );
+    assert_eq!(
+        app.toast.as_ref().map(|t| t.kind),
+        Some(crate::tui::app::ToastKind::Warning)
+    );
+
+    // 2. 循环任务即便锚点在过去也不报逾期警告
+    app.handle_key(key('a')).unwrap();
+    for c in "Daily standup ~2020-01-01 09:00 *d".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+    assert!(
+        !app.status_message.contains("⚠ 时间已过"),
+        "循环任务不应报过去时间警告，实际: {}",
+        app.status_message
+    );
+}
+
+#[test]
+fn empty_list_renders_contextual_hint() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+    let mut term = Terminal::new(TestBackend::new(100, 28)).unwrap();
+
+    // 1. 空收件箱提示按 a 捕获
+    app.set_view(View::Inbox);
+    term.draw(|f| app.render(f)).unwrap();
+    let s = norm(&snap(&term));
+    assert!(
+        s.contains("收件箱为空·按a捕获新想法"),
+        "空收件箱应渲染引导提示，实际:\n{s}"
+    );
+
+    // 2. 开启搜索过滤后为空：提示按 Esc 清除过滤，且标题展示 [/nonexistent]
+    app.search_query = "nonexistent".to_string();
+    app.refresh().unwrap();
+    term.clear().unwrap();
+    term.draw(|f| app.render(f)).unwrap();
+    let s_filtered = norm(&snap(&term));
+    assert!(
+        s_filtered.contains("没有匹配过滤条件的任务·按Esc清除过滤"),
+        "过滤为空应提示按 Esc 清除，实际:\n{s_filtered}"
+    );
+    assert!(
+        s_filtered.contains("[/nonexistent]"),
+        "列表标题应显示当前搜索词，实际:\n{s_filtered}"
+    );
+}
+
+#[test]
+fn status_message_expires_and_error_persists_until_keypress() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+    let mut term = Terminal::new(TestBackend::new(100, 28)).unwrap();
+
+    // 1. 普通 Info 消息在超过 3 秒后渲染自动过期并清空
+    app.flash(crate::tui::app::ToastKind::Info, "普通提示消息");
+    if let Some(ref mut t) = app.toast {
+        t.created_at_ms -= 4000;
+    }
+    term.draw(|f| app.render(f)).unwrap();
+    assert!(
+        app.status_message.is_empty() && app.toast.is_none(),
+        "过期 Info Toast 应自动清除并恢复状态栏"
+    );
+
+    // 2. Error 级别消息跨时间保留，直到下一次按键才清除
+    app.flash(crate::tui::app::ToastKind::Error, "操作失败: 磁盘已满");
+    if let Some(ref mut t) = app.toast {
+        t.created_at_ms -= 60_000;
+    }
+    term.draw(|f| app.render(f)).unwrap();
+    assert_eq!(
+        app.status_message, "操作失败: 磁盘已满",
+        "Error Toast 不因时间流逝而自动消失"
+    );
+    app.handle_key(key('j')).unwrap();
+    assert!(
+        app.status_message.is_empty() && app.toast.is_none(),
+        "用户按下任意键后清除旧 Error Toast"
+    );
+}
+
+#[test]
+fn archived_view_blocks_rearchive_and_edit_with_hint() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let t = tasks::create_capture(
+        &conn,
+        &CaptureInput {
+            title: "Old task".to_string(),
+            status: task::Status::Inbox,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    tasks::archive(&conn, &t.id).unwrap();
+
+    let mut app = app_normal(&conn);
+    app.set_view(View::Archived);
+
+    // 1. 在归档箱按 Enter 提示不可编辑及如何恢复
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+    assert_eq!(app.mode, Mode::Normal);
+    assert!(
+        app.status_message.contains("归档任务不可编辑"),
+        "应提示归档任务不可编辑，实际: {}",
+        app.status_message
+    );
+
+    // 2. 在归档箱按 A 不再进入二次归档确认，而是提示已在归档箱中
+    app.handle_key(key('A')).unwrap();
+    assert_eq!(app.mode, Mode::Normal);
+    assert!(
+        app.status_message.contains("已在归档箱中"),
+        "应提示已在归档箱中，实际: {}",
+        app.status_message
+    );
 }

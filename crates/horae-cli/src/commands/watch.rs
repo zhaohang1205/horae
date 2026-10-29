@@ -163,12 +163,17 @@ pub fn process_once(
 
     // 读取当前 profile 的 ntfy 与 feishu 配置；缺失/未配置时对应 stage 为空操作。
     let (ntfy_cfg, feishu_cfg): (Option<NtfyConfig>, Option<FeishuConfig>) = match Config::load() {
-        Ok(cfg) => cfg
-            .resolve_profile(profile)
-            .ok()
-            .map(|(_, p)| (p.ntfy.clone(), p.feishu.clone()))
-            .unwrap_or((None, None)),
-        Err(_) => (None, None),
+        Ok(cfg) => match cfg.resolve_profile(profile) {
+            Ok((_, p)) => (p.ntfy.clone(), p.feishu.clone()),
+            Err(e) => {
+                eprintln!("watch: profile error: {e:#}");
+                (None, None)
+            }
+        },
+        Err(e) => {
+            eprintln!("watch: config error: {e:#}");
+            (None, None)
+        }
     };
     stage!(ntfy_pushed, ntfy_stage(conn, dir, &ntfy_cfg));
     stage!(feishu_pushed, feishu_stage(conn, dir, &feishu_cfg));
@@ -193,20 +198,28 @@ fn feishu_stage(conn: &Connection, dir: &Path, cfg: &Option<FeishuConfig>) -> Re
         Some(c) => {
             let pushed =
                 horae_core::feishu::push_due(conn, dir, c, &horae_core::feishu::UreqTransport)?;
-            let _ = horae_core::feishu::check_daily_briefing(
+            if let Err(e) = horae_core::feishu::check_daily_briefing(
                 conn,
                 dir,
                 c,
                 &horae_core::feishu::UreqTransport,
-            );
+            ) {
+                eprintln!("watch: feishu daily briefing error: {e:#}");
+            }
             if c.is_app_configured() && c.task_sync {
-                let app_id = c.app_id.clone().unwrap();
-                let app_secret = c.resolve_app_secret().unwrap();
+                let app_id = c.app_id.clone().unwrap_or_default();
+                let app_secret = c
+                    .resolve_app_secret()
+                    .ok_or_else(|| anyhow::anyhow!("feishu app_secret is not configured"))?;
                 let auth =
                     std::sync::Arc::new(horae_core::feishu::FeishuAuth::new(app_id, app_secret));
                 let engine = horae_core::feishu::sync::FeishuSyncEngineImpl::new(auth);
-                let _ = engine.pull_remote_tasks(conn);
-                let _ = engine.push_local_tasks(conn);
+                if let Err(e) = engine.pull_remote_tasks(conn) {
+                    eprintln!("watch: feishu pull error: {e:#}");
+                }
+                if let Err(e) = engine.push_local_tasks(conn) {
+                    eprintln!("watch: feishu push error: {e:#}");
+                }
             }
             Ok(pushed)
         }

@@ -1,5 +1,5 @@
 use super::short_id;
-use crate::tui::app::{App, Mode, View};
+use crate::tui::app::{App, Mode, ToastKind, View};
 use anyhow::Result;
 use horae_core::model::task;
 use horae_core::repo::tasks::CaptureInput;
@@ -135,15 +135,25 @@ impl<'a> App<'a> {
         let quick_add = horae_core::parser::parse_quick_add(raw_input);
         if let Some(id) = self.organizing_id.take() {
             // Inbox 滞留任务再编辑：与 capture 同一句话编辑器
-            let Ok(task) = tasks::get(self.conn, &id) else {
-                self.reload()?;
-                return Ok(());
+            let task = match tasks::get(self.conn, &id) {
+                Ok(t) => t,
+                Err(e) => {
+                    self.flash(
+                        ToastKind::Error,
+                        tr!(self.lang, "读取任务失败: {}", "Failed to load task: {}", e),
+                    );
+                    self.reload()?;
+                    return Ok(());
+                }
             };
             let start_ms = match &quick_add.time_str {
                 Some(t) => match time::parse_time(t) {
                     Ok(ms) => Some(ms),
                     Err(e) => {
-                        self.status_message = tr!(self.lang, "时间无效: {}", "bad time: {}", e);
+                        self.flash(
+                            ToastKind::Error,
+                            tr!(self.lang, "时间无效: {}", "bad time: {}", e),
+                        );
                         self.reload()?;
                         return Ok(());
                     }
@@ -153,11 +163,15 @@ impl<'a> App<'a> {
             // 循环有效性校验。
             if let Some(rr) = &quick_add.rrule {
                 if !horae_core::parser::rrule_valid(rr) {
-                    self.status_message = tr!(self.lang, "循环无效: {}", "bad rrule: {}", rr);
+                    self.flash(
+                        ToastKind::Error,
+                        tr!(self.lang, "循环无效: {}", "bad rrule: {}", rr),
+                    );
                     self.reload()?;
                     return Ok(());
                 }
             }
+            let rrule_for_warn = quick_add.rrule.clone();
             let mut ok = true;
             if !quick_add.title.is_empty() {
                 ok &= self.note(tasks::rename(self.conn, &id, &quick_add.title));
@@ -229,7 +243,60 @@ impl<'a> App<'a> {
                 }
             }
             if ok {
-                self.status_message = tr!(self.lang, "已组织 {}", "organized {}", short_id(&id));
+                if is_quote {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "✓ 已组织 {} → 金句",
+                            "✓ organized {} → Quotes",
+                            short_id(&id)
+                        ),
+                        true,
+                    );
+                } else if let Some(start) = start_ms {
+                    let fmt_time = time::format_quick_time(start);
+                    if rrule_for_warn.is_none() && time::is_past(start, time::now_ms()) {
+                        self.flash(
+                            ToastKind::Warning,
+                            tr!(
+                                self.lang,
+                                "⚠ 时间已过 ({})，已组织 {} → 计划（当前逾期）",
+                                "⚠ Past time ({}), organized {} → Scheduled (overdue)",
+                                fmt_time,
+                                short_id(&id)
+                            ),
+                        );
+                    } else if task.status == task::Status::Inbox
+                        || task.status == task::Status::Scheduled
+                    {
+                        self.set_toast(
+                            tr!(
+                                self.lang,
+                                "✓ 已组织 {} → 计划 · {}",
+                                "✓ organized {} → Scheduled · {}",
+                                short_id(&id),
+                                fmt_time
+                            ),
+                            true,
+                        );
+                    } else {
+                        self.set_toast(
+                            tr!(
+                                self.lang,
+                                "✓ 已组织 {} · {}",
+                                "✓ organized {} · {}",
+                                short_id(&id),
+                                fmt_time
+                            ),
+                            true,
+                        );
+                    }
+                } else {
+                    self.set_toast(
+                        tr!(self.lang, "✓ 已组织 {}", "✓ organized {}", short_id(&id)),
+                        true,
+                    );
+                }
             }
             self.reload()?;
         } else {
@@ -241,17 +308,24 @@ impl<'a> App<'a> {
                 match time::parse_time(ts) {
                     Ok(ms) => parsed_start = Some(ms),
                     Err(e) => {
-                        self.status_message = tr!(self.lang, "时间无效: {}", "bad time: {}", e);
+                        self.flash(
+                            ToastKind::Error,
+                            tr!(self.lang, "时间无效: {}", "bad time: {}", e),
+                        );
                         return Ok(());
                     }
                 }
             }
             if let Some(rr) = &rrule {
                 if !horae_core::parser::rrule_valid(rr) {
-                    self.status_message = tr!(self.lang, "循环无效: {}", "bad rrule: {}", rr);
+                    self.flash(
+                        ToastKind::Error,
+                        tr!(self.lang, "循环无效: {}", "bad rrule: {}", rr),
+                    );
                     return Ok(());
                 }
             }
+            let rrule_is_none = rrule.is_none();
             let tag_names = quick_add.tags;
             // @quote 路由：捕获输入含金句标签 → 直接创建为 reference + @quote，
             // 自动进入金句视图，不落收件箱。~time/*rrule 让位给金句。
@@ -292,8 +366,8 @@ impl<'a> App<'a> {
                 self.set_toast(
                     tr!(
                         self.lang,
-                        "✓ 已加入金句: {} (按 u 撤销)",
-                        "✓ added to quotes: {} (press u to undo)",
+                        "✓ 已加入金句: {} → 金句 (按 u 撤销)",
+                        "✓ added to quotes: {} → Quotes (press u to undo)",
                         created_title
                     ),
                     true,
@@ -304,17 +378,44 @@ impl<'a> App<'a> {
                 } else {
                     true
                 };
-                self.set_view(View::Inbox);
+                self.reload()?;
                 if scheduled_ok {
-                    self.set_toast(
-                        tr!(
-                            self.lang,
-                            "✓ 已捕获: {} (按 u 撤销)",
-                            "✓ captured: {} (press u to undo)",
-                            created_title
-                        ),
-                        true,
-                    );
+                    if let Some(start) = parsed_start {
+                        let fmt_time = time::format_quick_time(start);
+                        if rrule_is_none && time::is_past(start, time::now_ms()) {
+                            self.flash(
+                                ToastKind::Warning,
+                                tr!(
+                                    self.lang,
+                                    "⚠ 时间已过 ({})，已排程: {} → 计划（当前逾期） (按 u 撤销)",
+                                    "⚠ Past time ({}), scheduled: {} → Scheduled (overdue) (press u to undo)",
+                                    fmt_time,
+                                    created_title
+                                ),
+                            );
+                        } else {
+                            self.set_toast(
+                                tr!(
+                                    self.lang,
+                                    "✓ 已排程: {} → 计划 · {} (按 u 撤销)",
+                                    "✓ scheduled: {} → Scheduled · {} (press u to undo)",
+                                    created_title,
+                                    fmt_time
+                                ),
+                                true,
+                            );
+                        }
+                    } else {
+                        self.set_toast(
+                            tr!(
+                                self.lang,
+                                "✓ 已捕获: {} → 收件箱 (按 u 撤销)",
+                                "✓ captured: {} → Inbox (press u to undo)",
+                                created_title
+                            ),
+                            true,
+                        );
+                    }
                 }
             }
         }
@@ -332,18 +433,34 @@ impl<'a> App<'a> {
             }
 
             let mut count = 0;
+            let mut first_err: Option<anyhow::Error> = None;
             for id in ids {
-                if tags::add_tag_to_task(self.conn, &id, name).is_ok() {
-                    count += 1;
+                match tags::add_tag_to_task(self.conn, &id, name) {
+                    Ok(_) => count += 1,
+                    Err(e) => {
+                        if first_err.is_none() {
+                            first_err = Some(e);
+                        }
+                    }
                 }
             }
-            self.status_message = tr!(
-                self.lang,
-                "已为 {} 项添加标签 +{}",
-                "tagged {} items with +{}",
-                count,
-                name
-            );
+            if count > 0 {
+                self.set_toast(
+                    tr!(
+                        self.lang,
+                        "已为 {} 项添加标签 +{}",
+                        "tagged {} items with +{}",
+                        count,
+                        name
+                    ),
+                    true,
+                );
+            } else if let Some(e) = first_err {
+                self.flash(
+                    ToastKind::Error,
+                    tr!(self.lang, "添加标签失败: {}", "Failed to add tag: {}", e),
+                );
+            }
             self.selected_ids.clear();
             self.visual_start_idx = None;
             self.reload()?;
@@ -375,11 +492,38 @@ impl<'a> App<'a> {
                 Ok(start_ms) => {
                     tasks::schedule(self.conn, &row.id, start_ms, None, None)?;
                     let t = tasks::transition(self.conn, &row.id, task::Status::Waiting)?;
-                    self.status_message =
-                        tr!(self.lang, "{} -> 等待中", "{} -> waiting", short_id(&t.id));
+                    let fmt_time = time::format_quick_time(start_ms);
+                    if time::is_past(start_ms, time::now_ms()) {
+                        self.flash(
+                            ToastKind::Warning,
+                            tr!(
+                                self.lang,
+                                "⚠ 时间已过 ({})，{} -> 等待中（已逾期）",
+                                "⚠ Past time ({}), {} -> waiting (overdue)",
+                                fmt_time,
+                                short_id(&t.id)
+                            ),
+                        );
+                    } else {
+                        self.set_toast(
+                            tr!(
+                                self.lang,
+                                "{} -> 等待中 · {}",
+                                "{} -> waiting · {}",
+                                short_id(&t.id),
+                                fmt_time
+                            ),
+                            true,
+                        );
+                    }
                     self.reload()?;
                 }
-                Err(e) => self.status_message = tr!(self.lang, "时间无效: {}", "bad time: {}", e),
+                Err(e) => {
+                    self.flash(
+                        ToastKind::Error,
+                        tr!(self.lang, "时间无效: {}", "bad time: {}", e),
+                    );
+                }
             }
         }
         Ok(())
@@ -388,9 +532,7 @@ impl<'a> App<'a> {
     pub(super) fn confirm_checklist_adding(&mut self, input: &str) -> Result<()> {
         if !input.is_empty() {
             if let Some(row) = self.items.get(self.selected).cloned() {
-                if tasks::add_checklist_item(self.conn, &row.id, input).is_ok() {
-                    self.status_message = tr!(self.lang, "检查单 +1", "Checklist +1").to_string();
-                }
+                self.note(tasks::add_checklist_item(self.conn, &row.id, input));
                 self.load_detail();
             }
         }
@@ -401,8 +543,11 @@ impl<'a> App<'a> {
 
     pub(super) fn confirm_creating_tag(&mut self, input: &str) -> Result<()> {
         let name = input.trim().trim_start_matches('@');
-        if !name.is_empty() && tags::find_or_create_tag(self.conn, name).is_ok() {
-            self.status_message = tr!(self.lang, "已创建标签: {}", "created tag: {}", name);
+        if !name.is_empty() && self.note(tags::find_or_create_tag(self.conn, name)) {
+            self.set_toast(
+                tr!(self.lang, "已创建标签: {}", "created tag: {}", name),
+                true,
+            );
             self.refresh()?;
         }
         self.set_mode(Mode::Normal);
@@ -427,12 +572,14 @@ impl<'a> App<'a> {
     pub(super) fn confirm_pomo_config(&mut self, input: &str) -> Result<()> {
         let parts: Vec<&str> = input.split(';').map(|s| s.trim()).collect();
         if !(3..=4).contains(&parts.len()) {
-            self.status_message = tr!(
-                self.lang,
-                "格式需包含3或4项 (工作;短休;长休[;长休周期])",
-                "need 3 or 4 parts (work;short;long[;interval])"
-            )
-            .into();
+            self.flash(
+                ToastKind::Error,
+                tr!(
+                    self.lang,
+                    "格式需包含3或4项 (工作;短休;长休[;长休周期])",
+                    "need 3 or 4 parts (work;short;long[;interval])"
+                ),
+            );
             self.set_mode(Mode::Normal);
             self.input.clear();
             return Ok(());
@@ -454,32 +601,39 @@ impl<'a> App<'a> {
                 pomo.config.short_break_mins = s;
                 pomo.config.long_break_mins = l;
                 pomo.config.long_break_interval = i;
-                if horae_core::repo::pomodoro::save_state(&pomo).is_ok() {
-                    self.status_message = tr!(
-                        self.lang,
-                        "🍅 番茄钟配置已更新: 工作 {}m / 短休 {}m / 长休 {}m / 长休周期 {} 个",
-                        "🍅 Pomo config updated: work {}m / short {}m / long {}m / interval {}",
-                        w,
-                        s,
-                        l,
-                        i
+                if self.note(horae_core::repo::pomodoro::save_state(&pomo)) {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "🍅 番茄钟配置已更新: 工作 {}m / 短休 {}m / 长休 {}m / 长休周期 {} 个",
+                            "🍅 Pomo config updated: work {}m / short {}m / long {}m / interval {}",
+                            w,
+                            s,
+                            l,
+                            i
+                        ),
+                        true,
                     );
                 }
             } else {
-                self.status_message = tr!(
-                    self.lang,
-                    "时长与周期必须大于0",
-                    "lengths & interval must be > 0"
-                )
-                .into();
+                self.flash(
+                    ToastKind::Error,
+                    tr!(
+                        self.lang,
+                        "时长与周期必须大于0",
+                        "lengths & interval must be > 0"
+                    ),
+                );
             }
         } else {
-            self.status_message = tr!(
-                self.lang,
-                "配置格式错误 (示例: 25;5;15;4)",
-                "invalid format (e.g. 25;5;15;4)"
-            )
-            .into();
+            self.flash(
+                ToastKind::Error,
+                tr!(
+                    self.lang,
+                    "配置格式错误 (示例: 25;5;15;4)",
+                    "invalid format (e.g. 25;5;15;4)"
+                ),
+            );
         }
         self.set_mode(Mode::Normal);
         self.input.clear();

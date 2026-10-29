@@ -197,7 +197,7 @@ fn run_app(
                 || app.pomo.phase != horae_core::model::pomodoro::Phase::Idle
                 || app.voice_recording.is_some()
                 || app.voice_transcribing
-                || app.toast.is_some()
+                || app.has_expiring_toast()
             {
                 dirty = true;
             }

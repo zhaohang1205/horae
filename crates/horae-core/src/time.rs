@@ -522,6 +522,11 @@ fn parse_optional_time(s: &str, default: NaiveTime) -> Result<NaiveTime> {
     NaiveTime::parse_from_str(&s, "%H:%M").map_err(|_| anyhow!("invalid time: '{}'", s))
 }
 
+/// 判断目标时间戳是否已早于当前时刻（预留 60 秒宽限，避免 `~now` 或同分钟内录入被误判为逾期）。
+pub fn is_past(target_ms: i64, now_ms: i64) -> bool {
+    target_ms.saturating_add(60_000) < now_ms
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -715,5 +720,14 @@ mod tests {
         assert_eq!(format_boot_elapsed(Duration::from_millis(12)), "12ms");
         assert_eq!(format_boot_elapsed(Duration::from_millis(42)), "42ms");
         assert_eq!(format_boot_elapsed(Duration::from_millis(1500)), "1.5s");
+    }
+
+    #[test]
+    fn is_past_respects_grace_window() {
+        let now = 1_700_000_000_000i64;
+        assert!(!is_past(now, now), "当前时刻不算逾期");
+        assert!(!is_past(now - 30_000, now), "60 秒宽限内不算逾期");
+        assert!(is_past(now - 61_000, now), "超过 60 秒宽限视为已过去");
+        assert!(!is_past(now + 60_000, now), "未来时刻不算逾期");
     }
 }

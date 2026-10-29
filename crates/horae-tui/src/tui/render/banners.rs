@@ -1,4 +1,4 @@
-use crate::tui::app::{App, Mode};
+use crate::tui::app::{App, Mode, Toast, ToastKind};
 use crate::tui::icons::Icon;
 use crate::tui::keys::status_strip;
 use ratatui::{
@@ -162,26 +162,53 @@ impl<'a> App<'a> {
             .constraints([Constraint::Min(0), Constraint::Length(7)])
             .split(area);
 
-        // 内容区三态：消息(支持 Toast 高亮) > F2 关闭提示 > 全局键条。
+        // 内容区三态：消息(支持分级 Toast 与自动过期) > F2 关闭提示 > 全局键条。
         let mut content_spans: Vec<Span> = Vec::new();
         let now_ms = horae_core::time::now_ms();
-        let is_active_toast = self.toast.as_ref().is_some_and(|t| {
-            now_ms - t.created_at_ms < t.duration_ms && t.message == self.status_message
-        });
+        let is_persistent_mode = matches!(
+            self.mode,
+            Mode::Visual
+                | Mode::ConfirmArchive
+                | Mode::ConfirmPurge
+                | Mode::ConfirmProfileDelete
+                | Mode::Capturing
+        );
+
+        if self.status_message.is_empty() {
+            self.toast = None;
+        } else if !is_persistent_mode {
+            if self
+                .toast
+                .as_ref()
+                .is_none_or(|t| t.message != self.status_message)
+            {
+                self.toast = Some(Toast {
+                    message: self.status_message.clone(),
+                    created_at_ms: now_ms,
+                    duration_ms: 3000,
+                    kind: ToastKind::Info,
+                });
+            }
+            if self.toast.as_ref().is_some_and(|t| {
+                t.kind != ToastKind::Error
+                    && now_ms.saturating_sub(t.created_at_ms) >= t.duration_ms
+            }) {
+                self.toast = None;
+                self.status_message.clear();
+            }
+        }
 
         if !self.status_message.is_empty() {
-            let (fg, bold) = if is_active_toast {
-                let is_success = self.toast.as_ref().is_none_or(|t| t.is_success);
-                (
-                    if is_success {
-                        self.theme.text_success
-                    } else {
-                        self.theme.accent
-                    },
-                    Modifier::BOLD,
-                )
-            } else {
-                (self.theme.status_fg, Modifier::empty())
+            let (fg, bold) = match self
+                .toast
+                .as_ref()
+                .filter(|t| t.message == self.status_message)
+                .map(|t| t.kind)
+            {
+                Some(ToastKind::Success) => (self.theme.text_success, Modifier::BOLD),
+                Some(ToastKind::Warning) => (self.theme.accent, Modifier::BOLD),
+                Some(ToastKind::Error) => (self.theme.text_urgent, Modifier::BOLD),
+                Some(ToastKind::Info) | None => (self.theme.status_fg, Modifier::empty()),
             };
             content_spans.push(Span::styled(
                 format!(" {}", self.status_message),

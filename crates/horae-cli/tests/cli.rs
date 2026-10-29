@@ -801,3 +801,46 @@ fn sound_command_status_toggle_and_persistence() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("Disabled") || stdout.contains("已关闭"));
 }
+
+#[test]
+fn cli_feedback_past_time_warning_and_recurring_done_hint() {
+    let env = env();
+
+    // 1. 普通 capture（不带 --natural）也应展示解析出的排程时间与标签，过去时间向 stderr 告警
+    let out = env
+        .cmd()
+        .args(["capture", "Retro meeting ~2020-01-01 09:00 @work !high"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stdout.contains("parsed ->") && stdout.contains("scheduled:") && stdout.contains("@work"),
+        "capture 应输出解析详情，实际 stdout: {stdout}"
+    );
+    assert!(
+        stderr.contains("warning: 时间已过"),
+        "过去时间应向 stderr 输出逾期警告，实际 stderr: {stderr}"
+    );
+
+    // 2. horae next 不再打印冗余的「建议补充时间」tip
+    let plain_id = capture(&env, &["Plain next item"]);
+    let next_out = env.cmd().args(["next", &plain_id]).output().unwrap();
+    assert!(next_out.status.success());
+    let next_stdout = String::from_utf8_lossy(&next_out.stdout);
+    assert!(
+        !next_stdout.contains("建议补充时间"),
+        "next 不应打印说教式时间提示，实际: {next_stdout}"
+    );
+
+    // 3. horae done 作用于循环任务时明确说明已打卡并展示下一周期时间
+    let rec_id = capture(&env, &["Daily reading ~tomorrow 09:00 *d"]);
+    let done_out = env.cmd().args(["done", &rec_id]).output().unwrap();
+    assert!(done_out.status.success());
+    let done_stdout = String::from_utf8_lossy(&done_out.stdout);
+    assert!(
+        done_stdout.contains("recurring: checked in, next at"),
+        "循环任务完成应提示推进到下一周期，实际: {done_stdout}"
+    );
+}

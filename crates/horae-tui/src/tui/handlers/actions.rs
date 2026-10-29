@@ -1,6 +1,6 @@
 use super::short_id;
 use super::AppHandlers;
-use crate::tui::app::{App, Mode, View};
+use crate::tui::app::{App, Mode, ToastKind, View};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use horae_core::model::task;
@@ -36,11 +36,6 @@ impl<'a> App<'a> {
             }
             KeyCode::Char('b') | KeyCode::Char('B') => {
                 self.sound_enabled = !self.sound_enabled;
-                let _ = horae_core::repo::settings::set(
-                    self.conn,
-                    "sound_enabled",
-                    if self.sound_enabled { "1" } else { "0" },
-                );
                 self.status_message = if self.sound_enabled {
                     tr!(
                         self.lang,
@@ -56,6 +51,7 @@ impl<'a> App<'a> {
                     )
                     .into()
                 };
+                self.save_setting("sound_enabled", if self.sound_enabled { "1" } else { "0" });
             }
             KeyCode::Char('p') | KeyCode::Char('P') => {
                 if !self.password_enabled {
@@ -122,7 +118,10 @@ impl<'a> App<'a> {
                         let new_notes = std::fs::read_to_string(&temp_path).unwrap_or_default();
                         let _ = std::fs::remove_file(&temp_path);
                         if let Err(e) = result {
-                            self.status_message = format!("editor error: {}", e);
+                            self.flash(
+                                ToastKind::Error,
+                                tr!(self.lang, "编辑器错误: {}", "Editor error: {}", e),
+                            );
                         } else if new_notes != task.notes {
                             self.note(tasks::update_notes(self.conn, &task.id, &new_notes));
                         }
@@ -261,12 +260,21 @@ impl<'a> App<'a> {
                 };
                 if let Some(tid) = target_id {
                     if let Ok(task) = horae_core::repo::tasks::get(self.conn, &tid) {
-                        if let Some(item) = task.checklist.iter().find(|i| !i.done) {
+                        if task.checklist.is_empty() {
+                            self.flash(
+                                ToastKind::Info,
+                                tr!(
+                                    self.lang,
+                                    "当前任务暂无检查单 · 按 + 添加子项",
+                                    "No checklist items yet · Press + to add steps"
+                                ),
+                            );
+                        } else if let Some(item) = task.checklist.iter().find(|i| !i.done) {
                             let item_id = item.id.clone();
                             let item_title = item.title.clone();
-                            if let Ok(Some(_)) = horae_core::repo::tasks::toggle_checklist_item(
+                            if self.note(horae_core::repo::tasks::toggle_checklist_item(
                                 self.conn, &tid, &item_id,
-                            ) {
+                            )) {
                                 self.push_undo(crate::tui::app::UndoAction::ChecklistToggled {
                                     task_id: tid.clone(),
                                     item_id,
@@ -364,6 +372,15 @@ impl<'a> App<'a> {
                         );
                     }
                     self.load_detail();
+                } else {
+                    self.flash(
+                        ToastKind::Info,
+                        tr!(
+                            self.lang,
+                            "没有可专注的任务 · 请先选择或创建一条任务",
+                            "No task to focus on · Select or capture a task first"
+                        ),
+                    );
                 }
             }
             KeyCode::Char('S') => {
@@ -386,8 +403,19 @@ impl<'a> App<'a> {
         ) {
             return Ok(false);
         }
-        // 归档箱视图：D / Delete 触发永久删除（带确认）。A 仍走归档逻辑。
-        if self.view == View::Archived && matches!(key.code, KeyCode::Char('D') | KeyCode::Delete) {
+        // 归档箱视图：D / Delete 触发永久删除（带确认）；按 A 提示已在归档箱中。
+        if self.view == View::Archived {
+            if key.code == KeyCode::Char('A') {
+                self.flash(
+                    ToastKind::Info,
+                    tr!(
+                        self.lang,
+                        "已在归档箱中 · 按 u 恢复，按 D 永久删除",
+                        "Already archived · Press u to restore, or D to purge"
+                    ),
+                );
+                return Ok(true);
+            }
             let mut ids = vec![];
             if !self.selected_ids.is_empty() {
                 ids.extend(self.selected_ids.iter().cloned());
@@ -413,13 +441,17 @@ impl<'a> App<'a> {
                 let tag_name = row.title.trim_start_matches('@');
                 match tags::delete_tag(self.conn, tag_name) {
                     Ok(_) => {
-                        self.status_message =
-                            tr!(self.lang, "已删除标签 @{}", "Tag @{} deleted", tag_name);
+                        self.set_toast(
+                            tr!(self.lang, "已删除标签 @{}", "Tag @{} deleted", tag_name),
+                            true,
+                        );
                         self.refresh()?;
                     }
                     Err(e) => {
-                        self.status_message =
-                            tr!(self.lang, "删除失败: {}", "Delete failed: {}", e);
+                        self.flash(
+                            ToastKind::Error,
+                            tr!(self.lang, "删除失败: {}", "Delete failed: {}", e),
+                        );
                     }
                 }
             }

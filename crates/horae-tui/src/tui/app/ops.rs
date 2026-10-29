@@ -19,14 +19,43 @@ impl<'a> App<'a> {
             .into();
             return Ok(());
         }
-        if matches!(self.view, View::Tags | View::Archived | View::Settings) {
+        if self.view == View::Archived {
+            self.flash(
+                super::ToastKind::Warning,
+                tr!(
+                    self.lang,
+                    "归档任务不可编辑 · 按 u 恢复后编辑",
+                    "Archived tasks cannot be edited · Press u to restore"
+                ),
+            );
+            return Ok(());
+        }
+        if self.view == View::Tags {
+            self.flash(
+                super::ToastKind::Info,
+                tr!(
+                    self.lang,
+                    "标签视图不支持编辑 · 按 f 过滤标签，或按 D 删除标签",
+                    "Cannot edit here · Press f to filter by tag, or D to delete"
+                ),
+            );
+            return Ok(());
+        }
+        if matches!(self.view, View::Settings | View::Workflow) {
             return Ok(());
         }
         let Some(row) = self.items.get(self.selected).cloned() else {
             return Ok(());
         };
-        let Ok(task) = tasks::get(self.conn, &row.id) else {
-            return Ok(());
+        let task = match tasks::get(self.conn, &row.id) {
+            Ok(t) => t,
+            Err(e) => {
+                self.flash(
+                    super::ToastKind::Error,
+                    tr!(self.lang, "读取任务失败: {}", "Failed to load task: {}", e),
+                );
+                return Ok(());
+            }
         };
         self.organizing_id = Some(task.id.clone());
         self.input = self.task_to_quick_add(&task);
@@ -122,7 +151,17 @@ impl<'a> App<'a> {
 
         if ids.len() == 1 {
             let id = &ids[0];
-            if let Ok(task) = tasks::get(self.conn, id) {
+            let task = match tasks::get(self.conn, id) {
+                Ok(t) => t,
+                Err(e) => {
+                    self.flash(
+                        super::ToastKind::Error,
+                        tr!(self.lang, "读取任务失败: {}", "Failed to load task: {}", e),
+                    );
+                    return Ok(());
+                }
+            };
+            {
                 if task.status == to {
                     self.set_toast(
                         tr!(
@@ -199,27 +238,45 @@ impl<'a> App<'a> {
             }
         } else {
             let mut records = Vec::new();
+            let mut skipped = 0usize;
+            let mut first_err: Option<anyhow::Error> = None;
             for id in &ids {
-                if let Ok(task) = tasks::get(self.conn, id) {
-                    if task.status != to && task.status != task::Status::Scheduled {
-                        let prev_status = task.status;
-                        if tasks::transition(self.conn, id, to).is_ok() {
-                            records.push((id.clone(), prev_status, to));
-                            if let Ok(pomo) = horae_core::repo::pomodoro::get_state() {
-                                if pomo.task_id.as_deref() == Some(id)
-                                    && matches!(
-                                        to,
-                                        task::Status::Done
-                                            | task::Status::Waiting
-                                            | task::Status::Someday
-                                    )
-                                {
-                                    let _ = horae_core::pomo::stop(
-                                        Some(self.conn),
-                                        to == task::Status::Done,
-                                    );
+                match tasks::get(self.conn, id) {
+                    Ok(task) => {
+                        if task.status != to && task.status != task::Status::Scheduled {
+                            let prev_status = task.status;
+                            match tasks::transition(self.conn, id, to) {
+                                Ok(_) => {
+                                    records.push((id.clone(), prev_status, to));
+                                    if let Ok(pomo) = horae_core::repo::pomodoro::get_state() {
+                                        if pomo.task_id.as_deref() == Some(id)
+                                            && matches!(
+                                                to,
+                                                task::Status::Done
+                                                    | task::Status::Waiting
+                                                    | task::Status::Someday
+                                            )
+                                        {
+                                            let _ = horae_core::pomo::stop(
+                                                Some(self.conn),
+                                                to == task::Status::Done,
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    if first_err.is_none() {
+                                        first_err = Some(e);
+                                    }
                                 }
                             }
+                        } else {
+                            skipped += 1;
+                        }
+                    }
+                    Err(e) => {
+                        if first_err.is_none() {
+                            first_err = Some(e);
                         }
                     }
                 }
@@ -227,17 +284,50 @@ impl<'a> App<'a> {
             let count = records.len();
             if !records.is_empty() {
                 self.push_undo(super::UndoAction::BulkStatusChange { records });
+                if skipped > 0 {
+                    self.flash(
+                        super::ToastKind::Warning,
+                        tr!(
+                            self.lang,
+                            "批量 {} {} 项，跳过 {} 项 (按 u 撤销)",
+                            "Bulk {} {} items, skipped {} (press u to undo)",
+                            to,
+                            count,
+                            skipped
+                        ),
+                    );
+                } else {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "批量 {} {} 项 (按 u 撤销)",
+                            "Bulk {} {} items (press u to undo)",
+                            to,
+                            count
+                        ),
+                        true,
+                    );
+                }
+            } else if let Some(e) = first_err {
+                self.flash(
+                    super::ToastKind::Error,
+                    tr!(
+                        self.lang,
+                        "批量操作失败: {}",
+                        "Bulk operation failed: {}",
+                        e
+                    ),
+                );
+            } else {
+                self.flash(
+                    super::ToastKind::Warning,
+                    tr!(
+                        self.lang,
+                        "未变更任何任务（所选任务已是该状态或为排程任务）",
+                        "No tasks changed (already in target status or scheduled)"
+                    ),
+                );
             }
-            self.set_toast(
-                tr!(
-                    self.lang,
-                    "批量 {} {} 项 (按 u 撤销)",
-                    "Bulk {} {} items (press u to undo)",
-                    to,
-                    count
-                ),
-                true,
-            );
         }
 
         if !self.selected_ids.is_empty() {
@@ -269,36 +359,56 @@ impl<'a> App<'a> {
         }
         let mut added = 0;
         let mut removed = 0;
+        let mut first_err: Option<anyhow::Error> = None;
         for id in &ids {
             match self.quotes.toggle_tag(self.conn, id) {
                 Ok(Some(true)) => added += 1,
                 Ok(Some(false)) => removed += 1,
-                _ => {}
+                Ok(None) => {}
+                Err(e) => {
+                    if first_err.is_none() {
+                        first_err = Some(e);
+                    }
+                }
             }
         }
-        self.status_message = if added > 0 && removed == 0 {
-            tr!(
-                self.lang,
-                "已加入金句 ({} 项)",
-                "added to quotes ({} item(s))",
-                added
-            )
+        if added > 0 && removed == 0 {
+            self.set_toast(
+                tr!(
+                    self.lang,
+                    "已加入金句 ({} 项)",
+                    "added to quotes ({} item(s))",
+                    added
+                ),
+                true,
+            );
         } else if removed > 0 && added == 0 {
-            tr!(
-                self.lang,
-                "已移出金句 ({} 项)",
-                "removed from quotes ({} item(s))",
-                removed
-            )
-        } else {
-            tr!(
-                self.lang,
-                "金句: +{} / -{}",
-                "quotes: +{} / -{}",
-                added,
-                removed
-            )
-        };
+            self.set_toast(
+                tr!(
+                    self.lang,
+                    "已移出金句 ({} 项)",
+                    "removed from quotes ({} item(s))",
+                    removed
+                ),
+                true,
+            );
+        } else if added > 0 || removed > 0 {
+            self.set_toast(
+                tr!(
+                    self.lang,
+                    "金句: +{} / -{}",
+                    "quotes: +{} / -{}",
+                    added,
+                    removed
+                ),
+                true,
+            );
+        } else if let Some(e) = first_err {
+            self.flash(
+                super::ToastKind::Error,
+                tr!(self.lang, "金句操作失败: {}", "Quote toggle failed: {}", e),
+            );
+        }
         if !self.selected_ids.is_empty() {
             self.set_mode(Mode::Normal);
             self.selected_ids.clear();
@@ -308,16 +418,16 @@ impl<'a> App<'a> {
         Ok(())
     }
 
-    /// 弹出/更新瞬时 Toast 通知（3 秒自动淡出）。
+    /// 弹出/更新瞬时 Toast 通知（3 秒自动淡出；失败分支走 Warning）。
     pub(crate) fn set_toast(&mut self, message: impl Into<String>, is_success: bool) {
-        let msg = message.into();
-        self.status_message = msg.clone();
-        self.toast = Some(super::Toast {
-            message: msg,
-            created_at_ms: horae_core::time::now_ms(),
-            duration_ms: 3000,
-            is_success,
-        });
+        self.flash(
+            if is_success {
+                super::ToastKind::Success
+            } else {
+                super::ToastKind::Warning
+            },
+            message,
+        );
     }
 
     /// 压入一步可撤销操作。
@@ -397,8 +507,16 @@ impl<'a> App<'a> {
                 from_status,
                 title,
             } => match tasks::unarchive(self.conn, task_id) {
-                Ok(_) => {
-                    let _ = tasks::transition(self.conn, task_id, *from_status);
+                Ok(restored) => {
+                    if restored.status != *from_status {
+                        if let Err(e) = tasks::transition(self.conn, task_id, *from_status) {
+                            self.set_toast(
+                                tr!(self.lang, "撤销失败: {}", "Undo failed: {}", e),
+                                false,
+                            );
+                            return Ok(false);
+                        }
+                    }
                     self.set_toast(
                         tr!(
                             self.lang,
@@ -425,9 +543,12 @@ impl<'a> App<'a> {
             super::UndoAction::BulkArchive { records } => {
                 let mut count = 0;
                 for (id, from_status) in records {
-                    if tasks::unarchive(self.conn, id).is_ok() {
-                        let _ = tasks::transition(self.conn, id, *from_status);
-                        count += 1;
+                    if let Ok(restored) = tasks::unarchive(self.conn, id) {
+                        if restored.status == *from_status
+                            || tasks::transition(self.conn, id, *from_status).is_ok()
+                        {
+                            count += 1;
+                        }
                     }
                 }
                 if count > 0 {
@@ -453,45 +574,99 @@ impl<'a> App<'a> {
                 }
             }
             super::UndoAction::Unarchive { task_id, title } => {
-                let _ = tasks::archive(self.conn, task_id);
-                self.set_toast(
-                    tr!(
-                        self.lang,
-                        "⤺ 已撤销: 重新归档「{}」",
-                        "⤺ Undone: re-archived '{}'",
-                        title
-                    ),
-                    true,
-                );
+                match tasks::archive(self.conn, task_id) {
+                    Ok(_) => {
+                        self.set_toast(
+                            tr!(
+                                self.lang,
+                                "⤺ 已撤销: 重新归档「{}」",
+                                "⤺ Undone: re-archived '{}'",
+                                title
+                            ),
+                            true,
+                        );
+                    }
+                    Err(e) => {
+                        self.set_toast(
+                            tr!(
+                                self.lang,
+                                "撤销失败: 任务不存在或已删除 ({})",
+                                "Undo failed: task not found or deleted ({})",
+                                e
+                            ),
+                            false,
+                        );
+                        return Ok(false);
+                    }
+                }
             }
             super::UndoAction::Created { task_id, title } => {
-                let _ = tasks::archive(self.conn, task_id);
-                self.set_toast(
-                    tr!(
-                        self.lang,
-                        "⤺ 已撤销: 删除新建的「{}」",
-                        "⤺ Undone: deleted created '{}'",
-                        title
-                    ),
-                    true,
-                );
+                match tasks::archive(self.conn, task_id) {
+                    Ok(_) => {
+                        self.set_toast(
+                            tr!(
+                                self.lang,
+                                "⤺ 已撤销: 删除新建的「{}」",
+                                "⤺ Undone: deleted created '{}'",
+                                title
+                            ),
+                            true,
+                        );
+                    }
+                    Err(e) => {
+                        self.set_toast(
+                            tr!(
+                                self.lang,
+                                "撤销失败: 任务不存在或已删除 ({})",
+                                "Undo failed: task not found or deleted ({})",
+                                e
+                            ),
+                            false,
+                        );
+                        return Ok(false);
+                    }
+                }
             }
             super::UndoAction::ChecklistToggled {
                 task_id,
                 item_id,
                 item_title,
-            } => {
-                let _ = tasks::toggle_checklist_item(self.conn, task_id, item_id);
-                self.set_toast(
-                    tr!(
-                        self.lang,
-                        "⤺ 已撤销: 切换检查单「{}」",
-                        "⤺ Undone: toggled checklist '{}'",
-                        item_title
-                    ),
-                    true,
-                );
-            }
+            } => match tasks::toggle_checklist_item(self.conn, task_id, item_id) {
+                Ok(Some(_)) => {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "⤺ 已撤销: 切换检查单「{}」",
+                            "⤺ Undone: toggled checklist '{}'",
+                            item_title
+                        ),
+                        true,
+                    );
+                }
+                Ok(None) => {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "撤销失败: 检查项不存在",
+                            "Undo failed: checklist item not found"
+                        ),
+                        false,
+                    );
+                    return Ok(false);
+                }
+                Err(e) => {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "撤销失败: 任务不存在或已删除 ({})",
+                            "Undo failed: task not found or deleted ({})",
+                            e
+                        ),
+                        false,
+                    );
+                    return Ok(false);
+                }
+            },
         }
 
         self.redo_stack.push(action);
@@ -567,18 +742,31 @@ impl<'a> App<'a> {
                 task_id,
                 from_status: _,
                 title,
-            } => {
-                let _ = tasks::archive(self.conn, task_id);
-                self.set_toast(
-                    tr!(
-                        self.lang,
-                        "↷ 已重做: 归档「{}」",
-                        "↷ Redone: archived '{}'",
-                        title
-                    ),
-                    true,
-                );
-            }
+            } => match tasks::archive(self.conn, task_id) {
+                Ok(_) => {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "↷ 已重做: 归档「{}」",
+                            "↷ Redone: archived '{}'",
+                            title
+                        ),
+                        true,
+                    );
+                }
+                Err(e) => {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "重做失败: 任务不存在或已删除 ({})",
+                            "Redo failed: task not found or deleted ({})",
+                            e
+                        ),
+                        false,
+                    );
+                    return Ok(false);
+                }
+            },
             super::UndoAction::BulkArchive { records } => {
                 let mut count = 0;
                 for (id, _) in records {
@@ -666,18 +854,42 @@ impl<'a> App<'a> {
                 task_id,
                 item_id,
                 item_title,
-            } => {
-                let _ = tasks::toggle_checklist_item(self.conn, task_id, item_id);
-                self.set_toast(
-                    tr!(
-                        self.lang,
-                        "↷ 已重做: 切换检查单「{}」",
-                        "↷ Redone: toggled checklist '{}'",
-                        item_title
-                    ),
-                    true,
-                );
-            }
+            } => match tasks::toggle_checklist_item(self.conn, task_id, item_id) {
+                Ok(Some(_)) => {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "↷ 已重做: 切换检查单「{}」",
+                            "↷ Redone: toggled checklist '{}'",
+                            item_title
+                        ),
+                        true,
+                    );
+                }
+                Ok(None) => {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "重做失败: 检查项不存在",
+                            "Redo failed: checklist item not found"
+                        ),
+                        false,
+                    );
+                    return Ok(false);
+                }
+                Err(e) => {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "重做失败: 任务不存在或已删除 ({})",
+                            "Redo failed: task not found or deleted ({})",
+                            e
+                        ),
+                        false,
+                    );
+                    return Ok(false);
+                }
+            },
         }
 
         self.undo_stack.push(action);

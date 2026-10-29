@@ -187,12 +187,20 @@ pub(crate) enum Popup {
     },
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ToastKind {
+    Success,
+    Info,
+    Warning,
+    Error,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Toast {
     pub message: String,
     pub created_at_ms: i64,
     pub duration_ms: i64,
-    pub is_success: bool,
+    pub kind: ToastKind,
 }
 
 #[derive(Clone, Debug)]
@@ -621,13 +629,58 @@ impl<'a> App<'a> {
         }
     }
 
+    /// 弹出带分级生命周期的提示：
+    /// - `Success` / `Info`：3 秒后淡出；
+    /// - `Warning`：5 秒后淡出；
+    /// - `Error`：保留到用户下一次按键，绝不自动消失。
+    pub(crate) fn flash(&mut self, kind: ToastKind, message: impl Into<String>) {
+        let msg = message.into();
+        self.status_message = msg.clone();
+        let duration_ms = match kind {
+            ToastKind::Success | ToastKind::Info => 3000,
+            ToastKind::Warning => 5000,
+            ToastKind::Error => i64::MAX,
+        };
+        self.toast = Some(Toast {
+            message: msg,
+            created_at_ms: horae_core::time::now_ms(),
+            duration_ms,
+            kind,
+        });
+    }
+
+    /// 是否存在需要随时间自动淡出的 Toast（供事件循环决定是否持续重绘）。
+    pub(crate) fn has_expiring_toast(&self) -> bool {
+        self.toast
+            .as_ref()
+            .is_some_and(|t| t.kind != ToastKind::Error)
+    }
+
+    /// 持久化一项设置到 `settings` 表；若写入失败则发出 Warning 提示。
+    pub(crate) fn save_setting(&mut self, key: &str, value: &str) {
+        if let Err(e) = horae_core::repo::settings::set(self.conn, key, value) {
+            self.flash(
+                ToastKind::Warning,
+                tr!(
+                    self.lang,
+                    "设置未能保存，下次启动将恢复原值: {}",
+                    "Failed to save setting (will reset next launch): {}",
+                    e
+                ),
+            );
+        }
+    }
+
     /// 执行用户触发的操作：失败时把错误写入状态栏并返回 `false`，供调用方据此
     /// 跳过后续成功提示（避免错误被成功文案覆盖），而不是静默吞掉。
     pub(crate) fn note<T>(&mut self, r: anyhow::Result<T>) -> bool {
         match r {
             Ok(_) => true,
             Err(e) => {
-                self.status_message = format!("err: {}", e);
+                self.flash(
+                    ToastKind::Error,
+                    tr!(self.lang, "操作失败: {}", "Operation failed: {}", e),
+                );
                 false
             }
         }
@@ -737,9 +790,18 @@ impl<'a> App<'a> {
         self.selected = 0;
         self.workflow_scroll = 0;
         self.workflow_side_scroll = 0;
+        self.toast = None;
         self.status_message.clear();
         if let Err(e) = self.refresh() {
-            self.status_message = format!("err: {}", e);
+            self.flash(
+                ToastKind::Error,
+                tr!(
+                    self.lang,
+                    "刷新视图失败: {}",
+                    "Failed to refresh view: {}",
+                    e
+                ),
+            );
         }
         self.load_detail();
     }

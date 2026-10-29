@@ -9,7 +9,7 @@
 //! confirm_input 路由、restore_selected）是一个整体，留在本文件；
 //! 各子模块通过 `pub(super)` 方法供其调用。
 
-use super::app::{App, Mode, View};
+use super::app::{App, Mode, ToastKind, View};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use horae_core::repo::tasks;
@@ -33,6 +33,16 @@ impl<'a> AppHandlers for App<'a> {
             return Ok(());
         }
 
+        // Error 级别提示保留到用户下一次按键，在新按键到来时清除旧错误。
+        if self
+            .toast
+            .as_ref()
+            .is_some_and(|t| t.kind == ToastKind::Error)
+        {
+            self.toast = None;
+            self.status_message.clear();
+        }
+
         if self.locked {
             return self.handle_lock_screen_key(key);
         }
@@ -53,61 +63,78 @@ impl<'a> AppHandlers for App<'a> {
                             self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
                         }
                         KeyCode::Char(' ') => {
+                            let mut persist_err: Option<anyhow::Error> = None;
                             match idx {
                                 0 => {
-                                    let _ = self.modules.set_enabled(
+                                    if let Err(e) = self.modules.set_enabled(
                                         self.conn,
                                         "module_splash",
                                         !self.modules.splash,
-                                    );
+                                    ) {
+                                        persist_err = Some(e);
+                                    }
                                 }
                                 1 => {
-                                    let _ = self.modules.set_enabled(
+                                    if let Err(e) = self.modules.set_enabled(
                                         self.conn,
                                         "module_reference",
                                         !self.modules.reference,
-                                    );
+                                    ) {
+                                        persist_err = Some(e);
+                                    }
                                 }
                                 2 => {
-                                    let _ = self.modules.set_enabled(
+                                    if let Err(e) = self.modules.set_enabled(
                                         self.conn,
                                         "module_done",
                                         !self.modules.done,
-                                    );
+                                    ) {
+                                        persist_err = Some(e);
+                                    }
                                 }
                                 3 => {
-                                    let _ = self.modules.set_enabled(
+                                    if let Err(e) = self.modules.set_enabled(
                                         self.conn,
                                         "module_archived",
                                         !self.modules.archived,
-                                    );
+                                    ) {
+                                        persist_err = Some(e);
+                                    }
                                 }
                                 4 => {
-                                    let _ = self.modules.set_enabled(
+                                    if let Err(e) = self.modules.set_enabled(
                                         self.conn,
                                         "module_tags",
                                         !self.modules.tags,
-                                    );
+                                    ) {
+                                        persist_err = Some(e);
+                                    }
                                 }
                                 5 => {
-                                    let _ = self.quotes.toggle_enabled(self.conn);
+                                    if let Err(e) = self.quotes.toggle_enabled(self.conn) {
+                                        persist_err = Some(e);
+                                    }
                                     if !self.quotes.enabled && self.view == View::Quotes {
                                         self.set_view(View::Inbox);
                                     }
                                 }
                                 6 => {
-                                    let _ = self.modules.set_enabled(
+                                    if let Err(e) = self.modules.set_enabled(
                                         self.conn,
                                         "module_review",
                                         !self.modules.review,
-                                    );
+                                    ) {
+                                        persist_err = Some(e);
+                                    }
                                 }
                                 7 => {
-                                    let _ = self.modules.set_enabled(
+                                    if let Err(e) = self.modules.set_enabled(
                                         self.conn,
                                         "module_settings",
                                         !self.modules.settings,
-                                    );
+                                    ) {
+                                        persist_err = Some(e);
+                                    }
                                     if !self.modules.settings && self.view == View::Settings {
                                         self.set_view(View::Inbox);
                                     }
@@ -118,17 +145,12 @@ impl<'a> AppHandlers for App<'a> {
                                         IconStyle::Nerd => IconStyle::Ascii,
                                         IconStyle::Ascii => IconStyle::Nerd,
                                     };
-                                    let _ = horae_core::repo::settings::set(
-                                        self.conn,
-                                        "icons",
-                                        self.icon_style.key(),
-                                    );
+                                    self.save_setting("icons", self.icon_style.key());
                                 }
                                 9 => {
                                     // 启动即快速录入：翻转并持久化到 settings 表。
                                     self.start_in_capture = !self.start_in_capture;
-                                    let _ = horae_core::repo::settings::set(
-                                        self.conn,
+                                    self.save_setting(
                                         "start_capture",
                                         if self.start_in_capture { "1" } else { "0" },
                                     );
@@ -140,8 +162,7 @@ impl<'a> AppHandlers for App<'a> {
                                         CompletionStyle::Reference => CompletionStyle::Speed,
                                         CompletionStyle::Speed => CompletionStyle::Reference,
                                     };
-                                    let _ = horae_core::repo::settings::set(
-                                        self.conn,
+                                    self.save_setting(
                                         "completion_style",
                                         self.completion_style.key(),
                                     );
@@ -149,8 +170,7 @@ impl<'a> AppHandlers for App<'a> {
                                 11 => {
                                     // 纯净录入无干扰：翻转并持久化到 settings 表。
                                     self.zen_capture = !self.zen_capture;
-                                    let _ = horae_core::repo::settings::set(
-                                        self.conn,
+                                    self.save_setting(
                                         "zen_capture",
                                         if self.zen_capture { "1" } else { "0" },
                                     );
@@ -158,8 +178,7 @@ impl<'a> AppHandlers for App<'a> {
                                 12 => {
                                     // 闪念录入即退出：翻转并持久化到 settings 表。
                                     self.flash_mode = !self.flash_mode;
-                                    let _ = horae_core::repo::settings::set(
-                                        self.conn,
+                                    self.save_setting(
                                         "flash_mode",
                                         if self.flash_mode { "1" } else { "0" },
                                     );
@@ -167,8 +186,7 @@ impl<'a> AppHandlers for App<'a> {
                                 13 => {
                                     // 农历与节气提醒：翻转并持久化到 settings 表。
                                     self.lunar_enabled = !self.lunar_enabled;
-                                    let _ = horae_core::repo::settings::set(
-                                        self.conn,
+                                    self.save_setting(
                                         "lunar_reminder",
                                         if self.lunar_enabled { "1" } else { "0" },
                                     );
@@ -183,8 +201,7 @@ impl<'a> AppHandlers for App<'a> {
                                 14 => {
                                     // 提示音效：翻转并持久化到 settings 表。
                                     self.sound_enabled = !self.sound_enabled;
-                                    let _ = horae_core::repo::settings::set(
-                                        self.conn,
+                                    self.save_setting(
                                         "sound_enabled",
                                         if self.sound_enabled { "1" } else { "0" },
                                     );
@@ -214,6 +231,17 @@ impl<'a> AppHandlers for App<'a> {
                                     }
                                 }
                                 _ => {}
+                            }
+                            if let Some(e) = persist_err {
+                                self.flash(
+                                    ToastKind::Warning,
+                                    tr!(
+                                        self.lang,
+                                        "设置未能保存，下次启动将恢复原值: {}",
+                                        "Failed to save setting (will reset next launch): {}",
+                                        e
+                                    ),
+                                );
                             }
                             self.popup = Some(crate::tui::app::Popup::ModuleToggles(idx));
                             let r = self.reload();
@@ -608,13 +636,21 @@ impl<'a> AppHandlers for App<'a> {
         }
         let mut count = 0;
         let mut restored_titles = Vec::new();
+        let mut first_err: Option<anyhow::Error> = None;
         for id in &ids {
             let title = tasks::get(self.conn, id)
                 .map(|t| t.title)
                 .unwrap_or_default();
-            if tasks::unarchive(self.conn, id).is_ok() {
-                count += 1;
-                restored_titles.push((id.clone(), title));
+            match tasks::unarchive(self.conn, id) {
+                Ok(_) => {
+                    count += 1;
+                    restored_titles.push((id.clone(), title));
+                }
+                Err(e) => {
+                    if first_err.is_none() {
+                        first_err = Some(e);
+                    }
+                }
             }
         }
         for (id, title) in restored_titles {
@@ -625,7 +661,7 @@ impl<'a> AppHandlers for App<'a> {
                 tr!(self.lang, "✓ 已恢复 {}", "✓ restored {}", short_id(&ids[0])),
                 true,
             );
-        } else {
+        } else if count > 0 {
             self.set_toast(
                 tr!(
                     self.lang,
@@ -634,6 +670,11 @@ impl<'a> AppHandlers for App<'a> {
                     count
                 ),
                 true,
+            );
+        } else if let Some(e) = first_err {
+            self.flash(
+                ToastKind::Error,
+                tr!(self.lang, "恢复失败: {}", "Restore failed: {}", e),
             );
         }
         if !self.selected_ids.is_empty() {
@@ -654,7 +695,8 @@ impl<'a> App<'a> {
                     self.lock_input.clear();
                     self.lock_error = None;
                     self.status_message = tr!(self.lang, "已解锁", "Unlocked").to_string();
-                    let _ = self.reload();
+                    let r = self.reload();
+                    self.note(r);
                 } else {
                     self.lock_input.clear();
                     self.lock_error = Some(
@@ -737,7 +779,8 @@ impl<'a> App<'a> {
                         "Password protection enabled"
                     )
                     .to_string();
-                    let _ = self.reload();
+                    let r = self.reload();
+                    self.note(r);
                     return Ok(());
                 } else {
                     *error = Some(
@@ -804,7 +847,8 @@ impl<'a> App<'a> {
                         "Password protection disabled"
                     )
                     .to_string();
-                    let _ = self.reload();
+                    let r = self.reload();
+                    self.note(r);
                     return Ok(());
                 }
                 _ => {
@@ -889,7 +933,8 @@ impl<'a> App<'a> {
                             "Password updated successfully"
                         )
                         .to_string();
-                        let _ = self.reload();
+                        let r = self.reload();
+                        self.note(r);
                         return Ok(());
                     } else {
                         *error = Some(

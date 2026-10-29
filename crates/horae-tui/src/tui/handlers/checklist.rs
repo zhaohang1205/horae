@@ -87,7 +87,7 @@ impl<'a> App<'a> {
                 if let Some(item) = task.checklist.get(cur) {
                     let item_id = item.id.clone();
                     let title = item.title.clone();
-                    if tasks::toggle_checklist_item(self.conn, &row.id, &item_id).is_ok() {
+                    if self.note(tasks::toggle_checklist_item(self.conn, &row.id, &item_id)) {
                         self.push_undo(crate::tui::app::UndoAction::ChecklistToggled {
                             task_id: row.id.clone(),
                             item_id,
@@ -117,7 +117,7 @@ impl<'a> App<'a> {
             if let Ok(task) = tasks::get(self.conn, &row.id) {
                 if let Some(item) = task.checklist.get(cur) {
                     let item_id = item.id.clone();
-                    if tasks::delete_checklist_item(self.conn, &row.id, &item_id).is_ok() {
+                    if self.note(tasks::delete_checklist_item(self.conn, &row.id, &item_id)) {
                         let len = task.checklist.len().saturating_sub(1);
                         if len == 0 {
                             self.checklist_cursor = None;
@@ -125,8 +125,6 @@ impl<'a> App<'a> {
                         } else {
                             self.checklist_cursor = Some(cur.min(len - 1));
                         }
-                        self.status_message =
-                            tr!(self.lang, "已删除检查项", "Checklist item deleted").to_string();
                         self.load_detail();
                     }
                 }
@@ -143,11 +141,16 @@ impl<'a> App<'a> {
                 if let Some(item) = task.checklist.get(cur) {
                     let item_id = item.id.clone();
                     let max = task.checklist.len().saturating_sub(1) as isize;
-                    if tasks::move_checklist_item(self.conn, &row.id, &item_id, dir)
-                        .unwrap_or(false)
-                    {
-                        self.checklist_cursor = Some((cur as isize + dir).clamp(0, max) as usize);
-                        self.load_detail();
+                    match tasks::move_checklist_item(self.conn, &row.id, &item_id, dir) {
+                        Ok(true) => {
+                            self.checklist_cursor =
+                                Some((cur as isize + dir).clamp(0, max) as usize);
+                            self.load_detail();
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
+                            self.note::<()>(Err(e));
+                        }
                     }
                 }
             }
@@ -180,7 +183,6 @@ impl<'a> App<'a> {
                     let item_id = item.id.clone();
                     if !input.trim().is_empty() {
                         tasks::rename_checklist_item(self.conn, &row.id, &item_id, input.trim())?;
-                        self.status_message = tr!(self.lang, "已改名", "Renamed").to_string();
                     }
                 }
             }
