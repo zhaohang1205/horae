@@ -36,7 +36,7 @@ pub(crate) fn pad_right(s: &str, width: usize) -> String {
 }
 
 /// 检查可执行文件是否存在于 PATH 中（不 spawn 进程，避免探测副作用）。
-fn command_in_path(name: &str) -> bool {
+pub(crate) fn command_in_path(name: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {
         return false;
     };

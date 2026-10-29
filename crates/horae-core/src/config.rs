@@ -232,7 +232,7 @@ impl Config {
         let json = serde_json::to_string_pretty(self)?;
         crate::fs_util::write_private_file(&tmp, json)?;
         fs::rename(&tmp, &path)?;
-        let _ = crate::fs_util::ensure_private_file(&path);
+        crate::fs_util::ensure_private_file(&path)?;
         Ok(())
     }
 

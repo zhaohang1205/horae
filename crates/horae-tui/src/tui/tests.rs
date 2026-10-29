@@ -5681,11 +5681,25 @@ fn test_voice_capture_cancel_and_flow() {
     let wav_path =
         std::env::temp_dir().join(format!("test_horae_voice_{}.wav", std::process::id()));
     std::fs::write(&wav_path, b"test").unwrap();
+    #[cfg(unix)]
+    let (wav_file, dir_id, file_id) = {
+        use std::os::unix::fs::MetadataExt;
+        let f = std::fs::File::open(&wav_path).unwrap();
+        let fm = f.metadata().unwrap();
+        let dm = std::fs::symlink_metadata(wav_path.parent().unwrap()).unwrap();
+        (f, (dm.dev(), dm.ino()), (fm.dev(), fm.ino()))
+    };
     app.voice_recording = Some(crate::tui::app::voice::VoiceRecording {
         child: dummy_child,
         wav_path: wav_path.clone(),
         started_at: std::time::Instant::now(),
         cleanup_wav: true,
+        #[cfg(unix)]
+        _wav_file: wav_file,
+        #[cfg(unix)]
+        dir_identity: dir_id,
+        #[cfg(unix)]
+        file_identity: file_id,
     });
     assert!(app.is_voice_recording());
 
@@ -5759,6 +5773,102 @@ fn test_voice_recording_security_permissions() {
         let wav_path = rec.wav_path.clone();
         app.cancel_voice_recording();
         assert!(!wav_path.exists());
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn test_voice_recording_both_recorder_reopen_paths() {
+    use std::os::unix::fs::MetadataExt;
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+
+    // 1. Test pw-record backend reopen path
+    if crate::tui::app::command_in_path("pw-record") {
+        std::env::set_var("HORAE_RECORDER_BACKEND", "pw-record");
+        let mut app = app_normal(&conn);
+        let res = app.start_voice_recording();
+        assert!(res.is_ok());
+        if let Some(ref rec) = app.voice_recording {
+            assert!(rec.wav_path.exists());
+            assert_eq!(
+                rec.dir_identity.0,
+                std::fs::symlink_metadata(rec.wav_path.parent().unwrap())
+                    .unwrap()
+                    .dev()
+            );
+            assert_eq!(
+                rec.file_identity.0,
+                std::fs::symlink_metadata(&rec.wav_path).unwrap().dev()
+            );
+        }
+        app.cancel_voice_recording();
+    }
+
+    // 2. Test arecord backend reopen path
+    if crate::tui::app::command_in_path("arecord") {
+        std::env::set_var("HORAE_RECORDER_BACKEND", "arecord");
+        let mut app = app_normal(&conn);
+        let res = app.start_voice_recording();
+        assert!(res.is_ok());
+        if let Some(ref rec) = app.voice_recording {
+            assert!(rec.wav_path.exists());
+            assert_eq!(
+                rec.dir_identity.0,
+                std::fs::symlink_metadata(rec.wav_path.parent().unwrap())
+                    .unwrap()
+                    .dev()
+            );
+            assert_eq!(
+                rec.file_identity.0,
+                std::fs::symlink_metadata(&rec.wav_path).unwrap().dev()
+            );
+        }
+        app.cancel_voice_recording();
+    }
+
+    std::env::remove_var("HORAE_RECORDER_BACKEND");
+}
+
+#[test]
+#[cfg(unix)]
+fn test_voice_recording_detects_directory_and_file_substitution() {
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+
+    // 1. Directory substitution detection
+    let mut app = app_normal(&conn);
+    let res = app.start_voice_recording();
+    if res.is_ok() && app.voice_recording.is_some() {
+        if let Some(ref mut rec) = app.voice_recording {
+            // Tamper with dir_identity to simulate directory substitution
+            rec.dir_identity = (rec.dir_identity.0, rec.dir_identity.1 + 1);
+        }
+        // finish_voice_recording must detect the substitution, reject the file, and abort
+        let finish_res = app.finish_voice_recording();
+        assert!(finish_res.is_ok());
+        assert!(!app.voice_transcribing);
+        assert!(
+            app.status_message.contains("安全检查失败")
+                || app.status_message.contains("Security check failed")
+        );
+    }
+
+    // 2. File substitution detection
+    let mut app2 = app_normal(&conn);
+    let res2 = app2.start_voice_recording();
+    if res2.is_ok() && app2.voice_recording.is_some() {
+        if let Some(ref mut rec) = app2.voice_recording {
+            // Tamper with file_identity to simulate file substitution
+            rec.file_identity = (rec.file_identity.0, rec.file_identity.1 + 1);
+        }
+        let finish_res = app2.finish_voice_recording();
+        assert!(finish_res.is_ok());
+        assert!(!app2.voice_transcribing);
+        assert!(
+            app2.status_message.contains("安全检查失败")
+                || app2.status_message.contains("Security check failed")
+        );
     }
 }
 

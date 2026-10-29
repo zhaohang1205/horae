@@ -78,7 +78,7 @@ impl<T: Default + Serialize + DeserializeOwned> JsonStateStore<T> {
         let tmp = self.path.with_extension("json.tmp");
         crate::fs_util::write_private_file(&tmp, content)?;
         std::fs::rename(&tmp, &self.path)?;
-        let _ = crate::fs_util::ensure_private_file(&self.path);
+        crate::fs_util::ensure_private_file(&self.path)?;
         Ok(())
     }
 
