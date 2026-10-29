@@ -40,26 +40,66 @@ impl<'a> App<'a> {
         if self.voice_recording.is_some() {
             self.cancel_voice_recording();
         }
-        let wav_path =
-            std::env::temp_dir().join(format!("horae_tui_voice_{}.wav", std::process::id()));
+
+        // 1. 获取专属私有目录 (Unix 0700)，隔离多用户共享临时目录风险
+        let voice_dir = horae_core::fs_util::private_temp_dir("voice")?;
+
+        // 2. 使用高熵随机 UUID v4 作为文件名，杜绝 PID 枚举预测与文件抢占劫持
+        let wav_path = voice_dir.join(format!("horae_tui_voice_{}.wav", uuid::Uuid::new_v4()));
         let _ = std::fs::remove_file(&wav_path);
+
+        // 3. 显式以 0600 (rw-------) 权限预创建目标文件
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            let _ = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&wav_path)?;
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&wav_path)?;
+        }
+
         let Some(wav_str) = wav_path.to_str() else {
             anyhow::bail!("invalid temp wav path");
         };
 
+        // 4. 为录音子进程设置 umask 0077，确保即使底层工具重写/新建文件也严格保持 0600 权限
+        #[cfg(unix)]
+        let spawn_recorder = |mut cmd: Command| -> std::io::Result<Child> {
+            use std::os::unix::process::CommandExt;
+            unsafe {
+                cmd.pre_exec(|| {
+                    libc::umask(0o077);
+                    Ok(())
+                });
+            }
+            cmd.spawn()
+        };
+        #[cfg(not(unix))]
+        let spawn_recorder = |mut cmd: Command| -> std::io::Result<Child> { cmd.spawn() };
+
         // 优先使用 PipeWire 原生 pw-record，降级使用 ALSA arecord
         let child = if super::command_in_path("pw-record") {
-            Command::new("pw-record")
-                .args(["--rate", "16000", "--channels", "1", wav_str])
+            let mut cmd = Command::new("pw-record");
+            cmd.args(["--rate", "16000", "--channels", "1", wav_str])
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
+                .stderr(Stdio::null());
+            spawn_recorder(cmd)
         } else {
-            Command::new("arecord")
-                .args(["-q", "-r", "16000", "-f", "S16_LE", "-c", "1", wav_str])
+            let mut cmd = Command::new("arecord");
+            cmd.args(["-q", "-r", "16000", "-f", "S16_LE", "-c", "1", wav_str])
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
+                .stderr(Stdio::null());
+            spawn_recorder(cmd)
         };
 
         match child {
@@ -82,6 +122,7 @@ impl<'a> App<'a> {
                 );
             }
             Err(e) => {
+                let _ = std::fs::remove_file(&wav_path);
                 self.set_toast(
                     tr!(
                         self.lang,
@@ -134,6 +175,9 @@ impl<'a> App<'a> {
         // 交由转写流程管理 wav_path 的删除，避免 Drop 提前删掉音频文件
         rec.cleanup_wav = false;
         drop(rec);
+
+        // 录音子进程退出后二次确保 WAV 文件保持 0600 私有访问权限
+        let _ = horae_core::fs_util::ensure_private_file(&wav_path);
 
         if !wav_path.exists()
             || std::fs::metadata(&wav_path).map(|m| m.len()).unwrap_or(0) <= MIN_WAV_BYTES

@@ -5664,3 +5664,37 @@ fn test_voice_capture_cancel_and_flow() {
     app.handle_key(kc(KeyCode::Esc)).unwrap();
     assert_eq!(app.mode, Mode::Normal);
 }
+
+#[test]
+#[cfg(unix)]
+fn test_voice_recording_security_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    let res = app.start_voice_recording();
+    assert!(res.is_ok());
+
+    if let Some(ref rec) = app.voice_recording {
+        let parent = rec.wav_path.parent().unwrap();
+        let parent_meta = std::fs::symlink_metadata(parent).unwrap();
+        assert_eq!(parent_meta.permissions().mode() & 0o777, 0o700);
+
+        let file_meta = std::fs::symlink_metadata(&rec.wav_path).unwrap();
+        assert_eq!(file_meta.permissions().mode() & 0o777, 0o600);
+
+        let file_name = rec.wav_path.file_name().unwrap().to_str().unwrap();
+        assert!(file_name.starts_with("horae_tui_voice_"));
+        assert!(file_name.ends_with(".wav"));
+        // Ensure UUID is present, not predictable PID
+        let id_part = file_name
+            .trim_start_matches("horae_tui_voice_")
+            .trim_end_matches(".wav");
+        assert!(uuid::Uuid::parse_str(id_part).is_ok());
+
+        let wav_path = rec.wav_path.clone();
+        app.cancel_voice_recording();
+        assert!(!wav_path.exists());
+    }
+}
