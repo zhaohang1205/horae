@@ -159,7 +159,8 @@ impl<'a> App<'a> {
                     let r = self.restore_selected();
                     self.note(r);
                 } else {
-                    let _ = self.undo()?;
+                    let r = self.undo();
+                    self.note(r);
                 }
             }
             KeyCode::Char('r')
@@ -167,7 +168,8 @@ impl<'a> App<'a> {
                     .modifiers
                     .contains(crossterm::event::KeyModifiers::CONTROL) =>
             {
-                let _ = self.redo()?;
+                let r = self.redo();
+                self.note(r);
             }
             KeyCode::Enter => self.open_organize()?,
             _ => return Ok(false),

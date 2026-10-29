@@ -345,19 +345,24 @@ impl<'a> App<'a> {
                 from,
                 to: _,
                 title,
-            } => {
-                let _ = tasks::transition(self.conn, task_id, *from)?;
-                self.set_toast(
-                    tr!(
-                        self.lang,
-                        "⤺ 已撤销: 恢复「{}」为 {}",
-                        "⤺ Undone: restored '{}' to {}",
-                        title,
-                        crate::tui::status_cn(self.lang, *from)
-                    ),
-                    true,
-                );
-            }
+            } => match tasks::transition(self.conn, task_id, *from) {
+                Ok(_) => {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "⤺ 已撤销: 恢复「{}」为 {}",
+                            "⤺ Undone: restored '{}' to {}",
+                            title,
+                            crate::tui::status_cn(self.lang, *from)
+                        ),
+                        true,
+                    );
+                }
+                Err(e) => {
+                    self.set_toast(tr!(self.lang, "撤销失败: {}", "Undo failed: {}", e), false);
+                    return Ok(false);
+                }
+            },
             super::UndoAction::BulkStatusChange { records } => {
                 let mut count = 0;
                 for (id, from, _) in records {
@@ -365,33 +370,58 @@ impl<'a> App<'a> {
                         count += 1;
                     }
                 }
-                self.set_toast(
-                    tr!(
-                        self.lang,
-                        "⤺ 已撤销: 恢复 {} 个任务的状态",
-                        "⤺ Undone: restored status for {} tasks",
-                        count
-                    ),
-                    true,
-                );
+                if count > 0 {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "⤺ 已撤销: 恢复 {} 个任务的状态",
+                            "⤺ Undone: restored status for {} tasks",
+                            count
+                        ),
+                        true,
+                    );
+                } else {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "撤销失败: 任务不存在或状态冲突",
+                            "Undo failed: tasks not found or status conflict"
+                        ),
+                        false,
+                    );
+                    return Ok(false);
+                }
             }
             super::UndoAction::Archive {
                 task_id,
                 from_status,
                 title,
-            } => {
-                tasks::unarchive(self.conn, task_id)?;
-                let _ = tasks::transition(self.conn, task_id, *from_status);
-                self.set_toast(
-                    tr!(
-                        self.lang,
-                        "⤺ 已撤销: 移出归档「{}」",
-                        "⤺ Undone: unarchived '{}'",
-                        title
-                    ),
-                    true,
-                );
-            }
+            } => match tasks::unarchive(self.conn, task_id) {
+                Ok(_) => {
+                    let _ = tasks::transition(self.conn, task_id, *from_status);
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "⤺ 已撤销: 移出归档「{}」",
+                            "⤺ Undone: unarchived '{}'",
+                            title
+                        ),
+                        true,
+                    );
+                }
+                Err(e) => {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "撤销失败: 任务不存在或已删除 ({})",
+                            "Undo failed: task not found or deleted ({})",
+                            e
+                        ),
+                        false,
+                    );
+                    return Ok(false);
+                }
+            },
             super::UndoAction::BulkArchive { records } => {
                 let mut count = 0;
                 for (id, from_status) in records {
@@ -400,15 +430,27 @@ impl<'a> App<'a> {
                         count += 1;
                     }
                 }
-                self.set_toast(
-                    tr!(
-                        self.lang,
-                        "⤺ 已撤销: 移出归档 {} 项",
-                        "⤺ Undone: unarchived {} items",
-                        count
-                    ),
-                    true,
-                );
+                if count > 0 {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "⤺ 已撤销: 移出归档 {} 项",
+                            "⤺ Undone: unarchived {} items",
+                            count
+                        ),
+                        true,
+                    );
+                } else {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "撤销失败: 任务不存在或已删除",
+                            "Undo failed: tasks not found or deleted"
+                        ),
+                        false,
+                    );
+                    return Ok(false);
+                }
             }
             super::UndoAction::Unarchive { task_id, title } => {
                 let _ = tasks::archive(self.conn, task_id);
@@ -474,19 +516,24 @@ impl<'a> App<'a> {
                 from: _,
                 to,
                 title,
-            } => {
-                let _ = tasks::transition(self.conn, task_id, *to)?;
-                self.set_toast(
-                    tr!(
-                        self.lang,
-                        "↷ 已重做: 将「{}」流转为 {}",
-                        "↷ Redone: moved '{}' to {}",
-                        title,
-                        crate::tui::status_cn(self.lang, *to)
-                    ),
-                    true,
-                );
-            }
+            } => match tasks::transition(self.conn, task_id, *to) {
+                Ok(_) => {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "↷ 已重做: 将「{}」流转为 {}",
+                            "↷ Redone: moved '{}' to {}",
+                            title,
+                            crate::tui::status_cn(self.lang, *to)
+                        ),
+                        true,
+                    );
+                }
+                Err(e) => {
+                    self.set_toast(tr!(self.lang, "重做失败: {}", "Redo failed: {}", e), false);
+                    return Ok(false);
+                }
+            },
             super::UndoAction::BulkStatusChange { records } => {
                 let mut count = 0;
                 for (id, _, to) in records {
@@ -494,15 +541,27 @@ impl<'a> App<'a> {
                         count += 1;
                     }
                 }
-                self.set_toast(
-                    tr!(
-                        self.lang,
-                        "↷ 已重做: 批量流转 {} 项",
-                        "↷ Redone: bulk transitioned {} items",
-                        count
-                    ),
-                    true,
-                );
+                if count > 0 {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "↷ 已重做: 批量流转 {} 项",
+                            "↷ Redone: bulk transitioned {} items",
+                            count
+                        ),
+                        true,
+                    );
+                } else {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "重做失败: 任务不存在或状态冲突",
+                            "Redo failed: tasks not found or status conflict"
+                        ),
+                        false,
+                    );
+                    return Ok(false);
+                }
             }
             super::UndoAction::Archive {
                 task_id,
@@ -527,39 +586,81 @@ impl<'a> App<'a> {
                         count += 1;
                     }
                 }
-                self.set_toast(
-                    tr!(
-                        self.lang,
-                        "↷ 已重做: 批量归档 {} 项",
-                        "↷ Redone: bulk archived {} items",
-                        count
-                    ),
-                    true,
-                );
+                if count > 0 {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "↷ 已重做: 批量归档 {} 项",
+                            "↷ Redone: bulk archived {} items",
+                            count
+                        ),
+                        true,
+                    );
+                } else {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "重做失败: 任务不存在或已删除",
+                            "Redo failed: tasks not found or deleted"
+                        ),
+                        false,
+                    );
+                    return Ok(false);
+                }
             }
             super::UndoAction::Unarchive { task_id, title } => {
-                tasks::unarchive(self.conn, task_id)?;
-                self.set_toast(
-                    tr!(
-                        self.lang,
-                        "↷ 已重做: 移出归档「{}」",
-                        "↷ Redone: unarchived '{}'",
-                        title
-                    ),
-                    true,
-                );
+                match tasks::unarchive(self.conn, task_id) {
+                    Ok(_) => {
+                        self.set_toast(
+                            tr!(
+                                self.lang,
+                                "↷ 已重做: 移出归档「{}」",
+                                "↷ Redone: unarchived '{}'",
+                                title
+                            ),
+                            true,
+                        );
+                    }
+                    Err(e) => {
+                        self.set_toast(
+                            tr!(
+                                self.lang,
+                                "重做失败: 任务不存在或已删除 ({})",
+                                "Redo failed: task not found or deleted ({})",
+                                e
+                            ),
+                            false,
+                        );
+                        return Ok(false);
+                    }
+                }
             }
             super::UndoAction::Created { task_id, title } => {
-                tasks::unarchive(self.conn, task_id)?;
-                self.set_toast(
-                    tr!(
-                        self.lang,
-                        "↷ 已重做: 恢复新建的「{}」",
-                        "↷ Redone: recreated '{}'",
-                        title
-                    ),
-                    true,
-                );
+                match tasks::unarchive(self.conn, task_id) {
+                    Ok(_) => {
+                        self.set_toast(
+                            tr!(
+                                self.lang,
+                                "↷ 已重做: 恢复新建的「{}」",
+                                "↷ Redone: recreated '{}'",
+                                title
+                            ),
+                            true,
+                        );
+                    }
+                    Err(e) => {
+                        self.set_toast(
+                            tr!(
+                                self.lang,
+                                "重做失败: 任务不存在或已删除 ({})",
+                                "Redo failed: task not found or deleted ({})",
+                                e
+                            ),
+                            false,
+                        );
+                        return Ok(false);
+                    }
+                }
             }
             super::UndoAction::ChecklistToggled {
                 task_id,

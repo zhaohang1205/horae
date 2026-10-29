@@ -3840,6 +3840,64 @@ fn undo_and_redo_status_transitions() {
 }
 
 #[test]
+fn undo_archive_and_undo_after_purge_does_not_crash() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    let t = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "Task to archive".to_string(),
+            status: task::Status::Next,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    app.set_view(View::Next);
+    app.refresh().unwrap();
+    app.selected = 0;
+
+    // 1. 按 D 触发归档确认，按 y 确认归档
+    app.handle_key(key('D')).unwrap();
+    assert_eq!(app.mode, Mode::ConfirmArchive);
+    app.handle_key(key('y')).unwrap();
+    assert_eq!(app.mode, Mode::Normal);
+    let task_archived = horae_core::repo::tasks::get(&conn, &t.id).unwrap();
+    assert!(task_archived.archived_at.is_some());
+
+    // 2. 按 u 撤销归档，验证任务成功恢复
+    app.handle_key(key('u')).unwrap();
+    let task_restored = horae_core::repo::tasks::get(&conn, &t.id).unwrap();
+    assert!(task_restored.archived_at.is_none());
+    assert_eq!(task_restored.status, task::Status::Next);
+
+    // 3. 再次归档并永久删除（模拟任务已被外部或归档箱清理的情景）
+    app.handle_key(key('D')).unwrap();
+    app.handle_key(key('y')).unwrap();
+    horae_core::repo::tasks::purge(&conn, &t.id).unwrap();
+
+    // 4. 在任务已被物理删除的情况下按 u，应用绝不能抛错导致主循环退出，而是优雅给出 Toast 提示
+    let res = app.handle_key(key('u'));
+    assert!(res.is_ok(), "按 u 绝不能抛出致命 Err 导致 TUI 退出");
+    assert!(
+        app.toast
+            .as_ref()
+            .map(|t| t.message.contains("撤销失败"))
+            .unwrap_or(false),
+        "应提示撤销失败 Toast"
+    );
+
+    // 5. Ctrl+r 重做同样优雅处理不崩溃
+    let mut ctrl_r = key('r');
+    ctrl_r.modifiers = crossterm::event::KeyModifiers::CONTROL;
+    let redo_res = app.handle_key(ctrl_r);
+    assert!(redo_res.is_ok(), "Ctrl+r 绝不能抛出致命 Err 导致 TUI 退出");
+}
+
+#[test]
 fn pomodoro_in_focus_checklist_space_toggle_and_undo() {
     horae_core::repo::state::set_test_override();
     let mut conn = Connection::open(":memory:").unwrap();
