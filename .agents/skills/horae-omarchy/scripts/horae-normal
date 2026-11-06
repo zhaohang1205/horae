@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Launch Horae in normal interactive TUI mode
+sleep 0.05
+HORAE_BIN="${HORAE_BIN:-$(command -v horae || echo "$HOME/.cargo/bin/horae")}"
+exec "$HORAE_BIN" -n "$@"

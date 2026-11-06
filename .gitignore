@@ -1,4 +1,9 @@
 /target
 Cargo.lock.bak
 
+# Local documentation & assets workbench (not tracked by git)
+notebooks/
+*.ipynb
+.ipynb_checkpoints/
+
 

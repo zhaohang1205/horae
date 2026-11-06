@@ -1097,7 +1097,7 @@ dependencies = [
 
 [[package]]
 name = "horae"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1118,7 +1118,7 @@ dependencies = [
 
 [[package]]
 name = "horae-core"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "base64",
@@ -1141,7 +1141,7 @@ dependencies = [
 
 [[package]]
 name = "horae-tui"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "chrono",

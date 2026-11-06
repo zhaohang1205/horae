@@ -1,6 +1,6 @@
 [package]
 name = "horae"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 rust-version = "1.89"
 license = "GPL-3.0"
@@ -16,8 +16,8 @@ name = "horae"
 path = "src/main.rs"
 
 [dependencies]
-horae-core = { path = "../horae-core", version = "0.2.5" }
-horae-tui = { path = "../horae-tui", version = "0.2.5" }
+horae-core = { path = "../horae-core", version = "0.2.6" }
+horae-tui = { path = "../horae-tui", version = "0.2.6" }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 anyhow = "1"
@@ -30,7 +30,7 @@ crossterm = "0.29"
 unicode-width = "0.2"
 
 [dev-dependencies]
-horae-core = { path = "../horae-core", version = "0.2.5", features = ["test-util"] }
+horae-core = { path = "../horae-core", version = "0.2.6", features = ["test-util"] }
 assert_cmd = "2"
 predicates = "3"
 tempfile = "3.27"

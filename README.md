@@ -1,37 +1,45 @@
 # horae
 
+<div align="center">
+
 > **Idea → captured in under 10 seconds. Written in Rust.**  
 > Sub-second startup · reactive completions as you type · one-line syntax · full GTD · no account
 
-<p>
-  <a href="https://github.com/zhaohang1205/horae/actions/workflows/ci.yml"><img src="https://github.com/zhaohang1205/horae/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/zhaohang1205/horae/actions/workflows/release.yml"><img src="https://github.com/zhaohang1205/horae/actions/workflows/release.yml/badge.svg" alt="Release"></a>
-  <a href="https://crates.io/crates/horae"><img src="https://img.shields.io/crates/v/horae.svg" alt="Crates.io"></a>
-  <a href="https://crates.io/crates/horae"><img src="https://img.shields.io/crates/d/horae.svg" alt="Downloads"></a>
-  <a href="https://www.npmjs.com/package/horae-cli"><img src="https://img.shields.io/npm/v/horae-cli.svg" alt="npm"></a>
-  <a href="https://www.npmjs.com/package/horae-cli"><img src="https://img.shields.io/npm/dm/horae-cli.svg" alt="npm downloads"></a>
-  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/MSRV-1.89-orange.svg" alt="MSRV 1.89"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue.svg" alt="License"></a>
-  <a href="https://github.com/zhaohang1205/horae"><img src="https://img.shields.io/github/stars/zhaohang1205/horae?style=social" alt="GitHub Stars"></a>
-</p>
+[![CI](https://github.com/zhaohang1205/horae/actions/workflows/ci.yml/badge.svg)](https://github.com/zhaohang1205/horae/actions/workflows/ci.yml)
+[![Release](https://github.com/zhaohang1205/horae/actions/workflows/release.yml/badge.svg)](https://github.com/zhaohang1205/horae/actions/workflows/release.yml)
+[![Crates.io](https://img.shields.io/crates/v/horae.svg)](https://crates.io/crates/horae)
+[![Downloads](https://img.shields.io/crates/d/horae.svg)](https://crates.io/crates/horae)
+[![npm](https://img.shields.io/npm/v/horae-cli.svg)](https://www.npmjs.com/package/horae-cli)
+[![npm downloads](https://img.shields.io/npm/dm/horae-cli.svg)](https://www.npmjs.com/package/horae-cli)
+[![MSRV 1.89](https://img.shields.io/badge/MSRV-1.89-orange.svg)](https://www.rust-lang.org)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+[![GitHub Stars](https://img.shields.io/github/stars/zhaohang1205/horae?style=social)](https://github.com/zhaohang1205/horae)
+
+[English](README.md) · [简体中文](README_CN.md)
+
+</div>
+
+---
 
 ## The capture experience
 
 Most task managers make you pay a tax every time you capture: switch app, wait for it to load, find the input field, pick a project, set a date, close the dialog. **horae eliminates that tax entirely.**
 
-```
+```sh
 $ horae -f
 ```
 
 That's it. Flash mode opens **directly on the input line** — no splash screen, no list view, no navigation.
 Start typing and the cursor is already blinking. Fill in the task, press Enter. Done. The window closes.
 
-```
+```text
 dentist appointment ~fri 14:00 @health !high ↵
 ✓ captured  (#a3f)                              [horae exits]
 ```
 
 **Time from idea to captured: under 10 seconds.**
+
+<!-- Demo GIF placeholder: assets/screenshots/hero-capture.gif -->
 
 ### Why so fast?
 
@@ -41,7 +49,7 @@ horae is a **Rust binary with ~2 ms of startup overhead** — the font probe rea
 
 Type `@`, `~`, `*`, or `!` and a completion panel appears instantly — no Tab, no delay.
 
-```
+```text
 dentist appointment ~fr█
                     ┌──────────────────────────┐
                     │ ~fri    → this Friday     │  ← highlighted
@@ -57,9 +65,11 @@ Two completion styles (toggle under `F7`):
 - **Reference** — token, meaning and a syntax example shown side-by-side
 - **Speed** — compact list with ghost text inlined directly in the input
 
+<!-- Completion modes screenshot placeholder: assets/screenshots/completion-modes.png -->
+
 ### The full syntax, on one line
 
-```
+```text
 buy milk @home ~today 18:00 *2w[1,3] !high
 │         │     │            │        └─ priority
 │         │     │            └────────── recurrence: every 2 weeks, Mon+Wed
@@ -72,18 +82,20 @@ Tokens can be in any order. Full-width punctuation (`＠ ～ ＊ ！`) is accept
 
 ---
 
-|  | **horae** | Taskwarrior | todo.txt |
-|--|--|--|--|
-| Startup overhead | **~2 ms** (Rust binary) | ~50–200 ms | ~0 ms (shell) |
-| Input → captured | **< 10 s** (flash mode) | ~30 s | ~15 s |
-| Reactive completions | **✅ auto-popup** | ❌ | ❌ |
-| TUI | ✅ ratatui, keyboard-driven | ⚠️ separate project | ❌ |
-| Recurring habits | ✅ RRULE engine built-in | ✅ | ❌ |
-| Pomodoro | ✅ daemon + waybar | ❌ | ❌ |
-| Phone push | ✅ ntfy / Syncthing | ❌ | ❌ |
-| Install without Rust | ✅ `npx horae-cli` | ⚠️ package manager | ✅ |
-| Storage | SQLite (single file) | proprietary text | plain text |
-| Offline / no account | ✅ | ✅ | ✅ |
+### Feature matrix
+
+| Feature / Metric | **horae** | Taskwarrior | todo.txt |
+|---|---|---|---|
+| **Startup overhead** | **~2 ms** (Rust binary) | ~50–200 ms | ~0 ms (shell) |
+| **Input → captured** | **< 10 s** (flash mode) | ~30 s | ~15 s |
+| **Reactive completions** | **✅ auto-popup** | ❌ | ❌ |
+| **TUI** | **✅ ratatui, keyboard-driven** | ⚠️ separate project | ❌ |
+| **Recurring habits** | **✅ RRULE engine built-in** | ✅ | ❌ |
+| **Pomodoro** | **✅ daemon + waybar** | ❌ | ❌ |
+| **Phone push** | **✅ ntfy / Syncthing** | ❌ | ❌ |
+| **Install without Rust** | **✅ `npx horae-cli`** | ⚠️ package manager | ✅ |
+| **Storage** | **SQLite (single file)** | proprietary text | plain text |
+| **Offline / no account** | **✅** | ✅ | ✅ |
 
 A GTD task manager built in Rust: one binary with an embedded SQLite database, a CLI, and a [ratatui](https://ratatui.rs) TUI. No server, no account, no telemetry — everything lives in `~/.config/horae/`.
 
@@ -91,6 +103,7 @@ Nothing about a task is ever lost: every status change, reschedule and check-in 
 
 中文手册：[README_CN.md](README_CN.md)
 
+---
 
 ## Contents
 
@@ -105,6 +118,8 @@ Nothing about a task is ever lost: every status change, reschedule and check-in 
 - [Pomodoro](#pomodoro)
 - [Calendar](#calendar)
 - [Quotes](#quotes)
+- [Password protection](#password-protection)
+- [Sound effects](#sound-effects)
 - [Profiles](#profiles)
 - [Phone capture and notifications](#phone-capture-and-notifications)
 - [Backup](#backup)
@@ -112,25 +127,30 @@ Nothing about a task is ever lost: every status change, reschedule and check-in 
 - [Contributing](#contributing)
 - [License](#license)
 
+---
+
 ## Install
 
-**npm** — prebuilt binaries, no Rust toolchain required:
+### npm (Prebuilt binaries, no Rust toolchain needed)
 
 ```sh
-npx horae-cli              # run without installing
+npx horae-cli              # run instantly without installing
 npm install -g horae-cli   # install globally
 ```
 
-**Cargo** — requires Rust 1.89+; SQLite is bundled, no C dependencies:
+### Cargo (Rust 1.89+, SQLite bundled)
 
 ```sh
 cargo install horae
 cargo install --git https://github.com/zhaohang1205/horae   # latest main
 ```
 
-Inside China the Gitee mirror is faster: `cargo install --git https://gitee.com/zhao-hang1205/hora.git`.
+Inside China the Gitee mirror is faster:
+```sh
+cargo install --git https://gitee.com/zhao-hang1205/hora.git
+```
 
-**From source:**
+### From source
 
 ```sh
 git clone https://github.com/zhaohang1205/horae.git
@@ -140,8 +160,12 @@ cargo build --release      # binary: target/release/horae
 
 Two things worth knowing before the first run:
 
-- Icons are Nerd Font glyphs. On startup `horae` probes installed fonts and falls back to plain ASCII if none is found, so you never see tofu boxes. Force a style with `HORAE_ICONS=nerd|ascii`.
-- Desktop notifications use native D-Bus notifications (`org.freedesktop.Notifications`) and are Linux-only (avoiding command-line argument leakage). On Windows the TUI alarms, the pomodoro timer and ntfy pushes still work; data is stored under `%APPDATA%\horae\`.
+- **Icons**: Icons are Nerd Font glyphs. On startup `horae` probes installed fonts and falls back to plain ASCII if none is found, so you never see tofu boxes. Force a style with `HORAE_ICONS=nerd|ascii`.
+
+> [!NOTE]
+> Desktop notifications use native D-Bus notifications (`org.freedesktop.Notifications`) and are Linux-only (avoiding command-line argument leakage). On Windows the TUI alarms, the pomodoro timer and ntfy pushes still work; data is stored under `%APPDATA%\horae\`.
+
+---
 
 ## Quick start
 
@@ -156,18 +180,35 @@ horae                      # open the TUI
 
 Commands that take a task accept a **full id**, a **unique id prefix** (git-style), or a **unique exact title**; an ambiguous title is an error rather than a guess. Archived tasks can only be addressed by id.
 
+---
+
 ## Capture
 
 Getting a thought out of your head is the one interaction you repeat hundreds of times a day, so it is the path `horae` optimizes hardest. Four ways in, all accepting the same one-line syntax:
 
 | Situation | Command | Notes |
 | --- | --- | --- |
-| Already in a shell | `horae capture "buy milk @home ~today 18:00"` (`c`) | quotes are optional: `horae c buy milk @home` works |
-| Want a box, not a terminal argument | `horae -f` / `horae flash` (`f`) | opens straight on the input line; Enter saves and exits, Esc drops into the list instead |
-| Already in the TUI | `a` | capture without leaving the current view |
-| Text is on the clipboard | `horae capture --clip` | short text becomes the title; long text keeps its first ~30 characters as the title and stores the rest in notes |
+| **Already in a shell** | `horae capture "buy milk @home ~today 18:00"` (`c`) | quotes are optional: `horae c buy milk @home` works |
+| **Want a box, not a CLI argument** | `horae -f` / `horae flash` (`f`) | opens straight on the input line; Enter saves and exits, Esc drops into the list instead |
+| **Already in the TUI** | `a` | capture without leaving the current view |
+| **Text is on clipboard** | `horae capture --clip` | short text becomes title; long text keeps first ~30 chars as title and puts rest in notes |
 
 Pasting into the TUI works the same way: paste in any list view and it opens the input line with that text already in it.
+
+> [!TIP]
+> Zen capture mode (on by default) hides surrounding chrome while you type. In CLI capture, quotes are optional for straightforward titles: `horae c buy milk @home` works directly.
+
+### Natural language & voice capture
+
+Beyond the structured one-line syntax, `horae` supports free-form natural language and voice dictation in both English and Chinese:
+
+```sh
+horae voice "review pull request tomorrow at 3pm urgent @work"
+horae v "call mom tomorrow at 3pm urgent @calls"
+echo "remind me to join team standup every monday at 9am" | horae voice
+```
+
+The parsing engine automatically cleans spoken noise (e.g. "remind me to", "schedule"), extracts time entities (e.g. "tomorrow at 3pm", "in 30 minutes"), detects priority keywords (e.g. "urgent", "critical", "asap" → `!high`), extracts recurrence rules (e.g. "every monday"), and infers semantic tag categories (work, home, errands, learning, calls). You can also pass `--natural` (`-N`) to `horae capture`.
 
 ### Speed
 
@@ -196,11 +237,13 @@ Toggles under `F7` in the TUI, persisted per database:
 
 | Setting | Default | Effect |
 | --- | --- | --- |
-| Start in capture | off | launching `horae` lands on the input line instead of a list — this is what `horae -f` does for one run |
-| Flash mode | off | Enter saves and exits instead of returning to the list |
-| Zen capture | on | hide list chrome while typing |
-| Completion style | Reference | card vs. compact list with ghost text |
-| Password mode | off | require password authentication to open app or view data; press L in TUI to lock screen |
+| **Start in capture** | off | launching `horae` lands on the input line instead of a list — this is what `horae -f` does for one run |
+| **Flash mode** | off | Enter saves and exits instead of returning to the list |
+| **Zen capture** | on | hide list chrome while typing |
+| **Completion style** | Reference | card vs. compact list with ghost text |
+| **Password mode** | off | require password authentication to open app or view data; press L in TUI to lock screen |
+
+---
 
 ## Concepts
 
@@ -214,12 +257,17 @@ A freshly captured task lands in `Inbox`. Clarifying it moves it to one of the a
 
 ### Archive vs. purge
 
-- **Archive** (`horae archive`, aliases `rm` / `delete`) is a soft delete: it sets `archived_at` and an archive reason, keeps the task and its timeline, and is undone with `horae restore`.
+- **Archive** (`horae archive`, aliases `rm` / `delete`) is a soft delete: it sets `archived_at` and an archive reason, keeps the task and its timeline, and is undone with `horae restore` (or pressing `u`).
 - **Purge** (`horae purge`) is a hard delete and only works on already-archived tasks. It removes the task together with its events, tags and child rows, and logs nothing — there is no undo.
+
+> [!CAUTION]
+> `horae purge` (and the `D` key inside the Archive view) permanently deletes a task and its entire timeline history with no recovery possible.
 
 ### Effective due
 
 Sorting, filtering, alarms and the daily summary all use the *effective* due, not the raw `due_at` column. For a recurring task that is the most recently missed occurrence if one is outstanding, otherwise the next one. For everything else it is `due_at`, falling back to `scheduled_start_at`.
+
+---
 
 ## Quick-add syntax
 
@@ -235,9 +283,7 @@ buy milk @home ~today 18:00 *2w[1,3] !high
 - `*2w[1,3]` — recurrence rule
 - `!high` — priority
 
-Tokens can appear in any order.
-
-Full-width punctuation (`＠ ～ ＊ ！ ［ ］ ：`) is accepted too, so a Chinese IME does not have to switch to half-width.
+Tokens can appear in any order. Full-width punctuation (`＠ ～ ＊ ！ ［ ］ ：`) is accepted too, so a Chinese IME does not have to switch to half-width.
 
 ### Time (`~`)
 
@@ -245,12 +291,12 @@ Full-width punctuation (`＠ ～ ＊ ！ ［ ］ ：`) is accepted too, so a Chi
 
 | Syntax | Examples | Meaning |
 | --- | --- | --- |
-| Offset | `now`, `+30m`, `+2h`, `+1d`, `+1w` | offset from now; units are `m` `h` `d` `w` |
-| Offset + clock | `+3d 15:30` | offset by days, then anchor to a clock time |
-| Day words | `today`, `tomorrow`, `今天`, `明天`, `后天` | that calendar day |
-| Weekdays | `mon`–`sun`, `next fri`, `周一`–`周日`, `下周一` | nearest matching weekday; `next` adds a week |
-| Clock | `18:00` | today, or tomorrow if that time already passed |
-| Dates | `8/20`, `2026.8.20`, `2026-07-24 14:30` | absolute date, optional time |
+| **Offset** | `now`, `+30m`, `+2h`, `+1d`, `+1w` | offset from now; units are `m` `h` `d` `w` |
+| **Offset + clock** | `+3d 15:30` | offset by days, then anchor to a clock time |
+| **Day words** | `today`, `tomorrow`, `今天`, `明天`, `后天` | that calendar day |
+| **Weekdays** | `mon`–`sun`, `next fri`, `周一`–`周日`, `下周一` | nearest matching weekday; `next` adds a week |
+| **Clock** | `18:00` | today, or tomorrow if that time already passed |
+| **Dates** | `8/20`, `2026.8.20`, `2026-07-24 14:30` | absolute date, optional time |
 
 ### Recurrence (`*`)
 
@@ -271,6 +317,8 @@ Only `DAILY`, `WEEKLY`, `MONTHLY` and `YEARLY` are supported, and every write pa
 
 `!high` (also `!h`, `!1`, `!高`), `!medium` (`!m`, `!2`, `!中`), `!low` (`!l`, `!3`, `!低`). Priority is a dedicated `tasks.priority` column, not a tag; clear it with `--clear-priority`.
 
+---
+
 ## CLI reference
 
 | Command | Alias | What it does |
@@ -279,6 +327,7 @@ Only `DAILY`, `WEEKLY`, `MONTHLY` and `YEARLY` are supported, and every write pa
 | `horae -f` / `horae flash` | `f` | flash capture: type one line, Enter, exit |
 | `horae tui` | | explicit TUI launch (`--flash` / `--normal`) |
 | `horae capture [text]` | `c` | add to inbox; `--clip`, `--tag`, `--due`, `--status`, `--high/--medium/--low`, `--notes`, `--json` |
+| `horae voice [text]` | `v` | capture from voice transcription or natural language (`capture --natural`), supports pipe input |
 | `horae list` | `l` | query tasks: `--status`, `--tag`, `--date 0829`, `--due-before`, `--json` |
 | `horae show <id>` | `s` | details plus the full event timeline |
 | `horae modify <id> [text]` | `m`, `mod`, `edit` | update anything: `--title`, `--tag`, `--untag`, `--due`, `--clear-due`, `--start`, `--end`, `--rrule`, `--clear-schedule`, `--status`, `--notes`, `--edit-notes` |
@@ -306,43 +355,53 @@ Only `DAILY`, `WEEKLY`, `MONTHLY` and `YEARLY` are supported, and every write pa
 | `horae import <file>` | | restore a backup (`--replace` wipes first) |
 | `horae profile <list\|new\|rename\|rm\|set-default>` | | manage data sets |
 | `horae completions <shell>` | | generate shell completions |
+| `horae sound <status\|on\|off\|toggle\|test>` | `bell` | manage acoustic sound effects (status, toggle, test playback) |
+| `horae password <enable\|disable\|change\|status>` | `passwd` | manage password protection mode |
 
 Global flags apply everywhere: `--profile <name>` selects the data set, `--lang zh` (or `HORAE_LANG=zh`) prints help in Chinese, and `--theme <name>` (or `HORAE_THEME=<name>`) sets the UI theme (supports all 23 official Omarchy themes including `catppuccin`, `latte`, `tokyo-night`, `gruvbox`, `retro-82`, `nord`, `kanagawa`, `everforest`, `rose-pine`, `hackerman`, etc., or `auto` to follow system).
 
+---
+
 ## TUI
+
+<!-- TUI main layout screenshot placeholder: assets/screenshots/tui-main.png -->
 
 Running `horae` opens a three-pane layout: navigation on the left, the task list in the middle, details and the event timeline on the right.
 
-| Keys | Action |
-| --- | --- |
-| `h` `j` `k` `l` / arrows | move between panes and through the list |
-| `0`–`9` | switch view: `1` Inbox, `2` Next, `3` Scheduled, `4` Waiting, `5` Someday, `6` Reference, `7` Done, `8` Archive, `9` Tags, `0` Quotes |
-| `J` / `K` | jump to Today / Tomorrow |
-| `g` / `G` | jump to first / last row |
-| `a` | capture (quick-add syntax works here) |
-| `Enter` / `e` | organize / edit the selected task |
-| `n` | edit notes in `$EDITOR` |
-| `C` | add a checklist item |
-| `Tab` | manage checklist items (`j`/`k` move, `Space` toggles, `d` deletes, `J`/`K` reorder, `e` renames) |
-| `=` | tick the next uncompleted checklist item |
-| `x` / `w` / `s` | done / waiting / someday |
-| `A` | archive (`y` to confirm); `u` restores; `D` purges inside the Archive view |
-| `v` | visual multi-select; `Space` toggles a row, `Ctrl+a` selects all, `Ctrl+u` inverts, `T` bulk-tags |
-| `P` / `S` | start or continue a pomodoro / stop it |
-| `[` | configure pomodoro intervals (`25;5;15;4`) |
-| `r` / `R` | weekly review; `R` advances to the next step |
-| `"` | add to / remove from Quotes (when the feature is enabled) |
-| `/` / `f` | search text / filter by tag |
-| `F1` or `?` | keybinding help |
-| `F5` / `F6` / `F7` | theme / language / feature toggles |
-| `M` | settings view (profile management) |
-| `W` | GTD workflow view |
-| `Ctrl+P` | syntax cheat sheet |
-| `Esc` / `q` | cancel / quit |
+| Keys | Category | Action |
+| --- | --- | --- |
+| `h` `j` `k` `l` / arrows | **Navigation** | move between panes and through the list |
+| `g` / `G` | **Navigation** | jump to first / last row |
+| `J` / `K` | **Navigation** | jump to Today / Tomorrow view |
+| `0`–`9` | **View Switch** | `1` Inbox, `2` Next, `3` Scheduled, `4` Waiting, `5` Someday, `6` Reference, `7` Done, `8` Archive, `9` Tags, `0` Quotes |
+| `W` | **View Switch** | GTD workflow view |
+| `M` | **View Switch** | Settings view (profile management and global toggles) |
+| `a` | **Capture & Edit** | capture new task (quick-add syntax supported) |
+| `Enter` / `e` | **Capture & Edit** | organize / edit the selected task |
+| `n` | **Capture & Edit** | edit notes in `$EDITOR` |
+| `C` | **Checklists** | add a checklist item |
+| `Tab` | **Checklists** | manage checklist items (`j`/`k` move, `Space` toggles, `d` deletes, `J`/`K` reorder, `e` renames) |
+| `=` | **Checklists** | tick the next uncompleted checklist item |
+| `x` / `w` / `s` | **Task Actions** | mark Done / Waiting / Someday |
+| `A` | **Task Actions** | archive (`y` to confirm); `D` purges inside the Archive view |
+| `u` | **Task Actions** | undo: undo recent capture, checklist item toggle, archive, or restore |
+| `L` | **Security** | lock screen immediately (when password mode is enabled) |
+| `v` | **Visual Mode** | visual multi-select; `Space` toggles a row, `Ctrl+a` selects all, `Ctrl+u` inverts, `T` bulk-tags |
+| `"` | **Library** | add to / remove from Quotes (when quotes feature is enabled) |
+| `P` / `S` | **Pomodoro** | start or continue a pomodoro / stop it |
+| `[` | **Pomodoro** | configure pomodoro intervals (`25;5;15;4`) |
+| `r` / `R` | **Review** | weekly review; `R` advances to next step |
+| `/` / `f` | **Find** | search text / filter by tag |
+| `F1` or `?` | **Help & Toggles** | keybinding help |
+| `F5` / `F6` / `F7` | **Help & Toggles** | theme / language / feature toggles |
+| `Ctrl+P` | **Help & Toggles** | syntax cheat sheet |
+| `Esc` / `q` | **System** | cancel / quit |
 
-In the Tags view, `c` creates a tag and `D` deletes one. In the Settings view, `n` creates a profile, `r` renames, `d` deletes, `s` sets the default, `b` toggles sound effects, and `p` configures password protection.
+In the Tags view, `c` creates a tag and `D` deletes one. In the Settings view (`M`), `n` creates a profile, `r` renames, `d` deletes, `s` sets the default, `b` toggles sound effects, and `p` configures password protection.
 
 Today and Tomorrow are deliberately strict: both only contain `Next` and `Scheduled` tasks. Today is the union of overdue tasks and tasks whose window falls inside today; Tomorrow contains only tasks scheduled inside tomorrow's window, with no carry-over of unfinished work.
+
+---
 
 ## Focus recommendation
 
@@ -352,12 +411,14 @@ It first drops `Someday`, `Reference`, `Done`, quotes, and any `Scheduled` or `W
 
 | Factor | Points |
 | --- | --- |
-| Priority `high` / `medium` / `low` | +10000 / +5000 / +1000 |
-| Overdue | +2000, plus +10 per day overdue (capped at +500) |
-| Due today | +1000 |
-| Status `Next` | +500 |
+| **Priority** `high` / `medium` / `low` | +10000 / +5000 / +1000 |
+| **Overdue** | +2000, plus +10 per day overdue (capped at +500) |
+| **Due today** | +1000 |
+| **Status `Next`** | +500 |
 
 Ties are broken by `created_at`, oldest first.
+
+---
 
 ## Pomodoro
 
@@ -369,13 +430,56 @@ horae pomo waybar       # JSON for a waybar module
 
 The daemon ticks once a second, writes `~/.config/horae/pomo.json`, and sends a desktop notification when a phase ends. `horae stats` shows today's count.
 
+---
+
 ## Calendar
 
 `horae calendar` prints the lunar date, the current solar term and upcoming holiday countdowns from a built-in 1900–2100 table — no network access involved. `--short` gives a one-line summary suitable for a login banner, `--json` gives structured output. Major holidays are flagged in the TUI banner and desktop notifications three days and one day ahead.
 
+---
+
 ## Quotes
 
 An opt-in feature (off by default, toggled under `F7`) for keeping quotes and reference fragments. A quote is a `reference` task tagged `@quote`; it only ever appears in the Quotes view (`0`) and never in the inbox or action lists. Capturing anything with `@quote` routes it there.
+
+---
+
+## Password protection
+
+<!-- Password lock screen placeholder: assets/screenshots/lock-screen.png -->
+
+To safeguard privacy and sensitive data, `horae` offers opt-in database protection powered by PBKDF2-HMAC-SHA256 (50,000 security iterations with a 16-byte random salt):
+
+```sh
+horae password status              # check protection status
+horae password enable              # enable password protection (interactive or --password)
+horae password change              # change existing password
+horae password disable             # disable password protection
+```
+
+- **TUI behavior**: When enabled, `horae` boots into a full-screen lock screen and requires authentication to view tasks; press `L` anytime in the TUI to instantly lock the screen. Configure it via Settings (`M` → `p`) or the `F7` module toggles.
+- **CLI & scripting**: Operations on a password-protected profile require `--password <PASSWORD>` or the `HORAE_PASSWORD` environment variable; otherwise an interactive password prompt is displayed.
+
+> [!IMPORTANT]
+> Passwords are authenticated against cryptographic key derivation hashes. If forgotten, protected data cannot be recovered.
+
+---
+
+## Sound effects
+
+`horae` features an acoustic physical percussion sound engine (synthesized warm polyphonic chords rather than harsh system bells), providing semantic audio feedback for pomodoro phase transitions, task completions, and due alarms:
+
+```sh
+horae sound status                 # check whether sound is enabled
+horae sound on / horae sound off   # enable or disable audio feedback
+horae sound toggle                 # toggle sound on/off
+horae sound test                   # play sample sound
+horae sound test task_complete     # test specific sound (focus_start, break_start, task_due, etc.)
+```
+
+In the TUI Settings view (`M`), you can also press `b` to toggle sound effects on the fly.
+
+---
 
 ## Profiles
 
@@ -389,6 +493,8 @@ horae --profile work capture "buy milk"
 ```
 
 The TUI settings view (`M`) does the same with `n` / `r` / `d` / `s`. Switching takes effect on the next launch. Configuration lives in `~/.config/horae/config.json`; the database file is never touched by profile commands.
+
+---
 
 ## Phone capture and notifications
 
@@ -433,6 +539,8 @@ Check it with `horae ntfy test`.
 
 Configure a `feishu` block and `horae watch` will push due-task cards and a daily briefing. `horae feishu listen` opens a WebSocket long connection so you can capture tasks by messaging the bot and act on cards from your phone, without a public IP. `horae feishu doctor` checks credentials and connectivity; `horae feishu sync` reconciles with Feishu Tasks v2.
 
+---
+
 ## Backup
 
 ```sh
@@ -440,6 +548,8 @@ horae export --file ~/horae-backup.json   # tasks, events, tags, settings, pomod
 horae import ~/horae-backup.json          # merge; existing ids are skipped
 horae import --replace ~/horae-backup.json # wipe and restore exactly
 ```
+
+---
 
 ## Where data lives
 
@@ -452,6 +562,8 @@ horae import --replace ~/horae-backup.json # wipe and restore exactly
 
 `HORAE_CONFIG_DIR` overrides the whole directory. On Windows the default is `%APPDATA%\horae\`.
 
+---
+
 ## Contributing
 
 ```sh
@@ -461,6 +573,8 @@ cargo fmt --check
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and [ARCHITECTURE.md](ARCHITECTURE.md) for the layering rules, migration rules and domain vocabulary.
+
+---
 
 ## License
 

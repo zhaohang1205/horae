@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-11-06
+
+### Security
+
+- **语音录制临时文件与目录隔离防护（Voice Capture Security Hardening）**：
+  - 强制语音临时目录（`/tmp/horae-<uid>`）权限为 `0700`，严格校验属主为当前有效用户（EUID），严厉拒绝攻击者预先创建的同名非属主目录或软链接。
+  - 递归遍历校验目录父链权限（reject symlinks, non-sticky world-writable directories and untrusted UIDs）。
+  - 音频 WAV 文件采用 `O_CREAT | O_EXCL | O_NOFOLLOW` 模式原子创建，权限设为 `0600` 并使用随机 UUID 命名。
+  - 在唤起录音器（`pw-record` / `arecord`）进程时通过 `/proc/self/fd/<fd>` 保留文件标识（`dev`, `ino`），并在 `pre_exec`、进程启动后及录制完成后多阶段校验目录与文件防篡改。
+
+### Added
+
+- **以用户为中心的操作反馈体系（User Feedback Principle）**：
+  - TUI 状态提示全面引入 `ToastKind` 级别体系（`Success` / `Info` / `Warning` / `Error`），严重错误警告（`Error`）保持常驻直至下次按键，避免瞬时闪烁遗漏重要故障。
+  - 录入与排程（Capture / Schedule）操作保持视图连贯，显式展示任务流转目的地与智能解析出的具体时间。
+  - 对排程到过去时间的任务主动发出警示，在列表为空时提供上下文操作引导。
+  - CLI `modify` / `schedule` / `done` 全面增强时间解析回显与周期性习惯打卡状态确认。
+- **命令行完整国际化支持**：
+  - 补全 `voice`、`calendar`、`feishu`、`password` 等子命令与参数的中文本地化帮助信息（`cli_i18n.rs`）。
+
+### Fixed
+
+- **TUI 撤销/重做防崩溃保护**：
+  - 修复在任务归档、清除后撤销/重做极端情况下可能引发的崩溃隐患，将致命退出降级为友好 Toast 提醒，确保主事件循环稳健运行。
+
 ## [0.2.5] - 2026-10-24
 
 ### Added

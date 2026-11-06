@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -eo pipefail
+# Capture current clipboard content into Horae inbox and notify user
+HORAE_BIN="${HORAE_BIN:-$(command -v horae || echo "$HOME/.cargo/bin/horae")}"
+
+if msg=$("$HORAE_BIN" capture --clip "$@" 2>&1); then
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -a "Horae" -i checkbox-checked-symbolic "Horae 剪贴板捕获" "$msg"
+    else
+        echo "$msg"
+    fi
+else
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -a "Horae" -u critical "Horae 剪贴板捕获失败" "$msg"
+    else
+        echo "$msg" >&2
+    fi
+    exit 1
+fi
