@@ -148,6 +148,7 @@ impl<'a> App<'a> {
                 self.act_on_selected(task::Status::Done)?;
                 self.move_sel(1);
             }
+            KeyCode::Char('t') => self.act_on_selected(task::Status::Next)?,
             KeyCode::Char('s') => self.act_on_selected(task::Status::Someday)?,
             KeyCode::Char('"') if self.quotes.enabled => {
                 // 金句移入/移出：加/摘 @quote 标签，工作态流转为 reference。

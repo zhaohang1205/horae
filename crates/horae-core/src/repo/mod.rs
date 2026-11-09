@@ -48,6 +48,7 @@ pub fn log_event(
     meta: Option<&str>,
     at: i64,
 ) -> anyhow::Result<()> {
+    let enc_meta = meta.map(|m| crate::password::maybe_encrypt_field(conn, m));
     let mut stmt = conn.prepare_cached(
         "INSERT INTO task_events (task_id, event_type, from_status, to_status, at, meta)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -58,7 +59,7 @@ pub fn log_event(
         from_status,
         to_status,
         at,
-        meta
+        enc_meta.as_deref()
     ])?;
     Ok(())
 }

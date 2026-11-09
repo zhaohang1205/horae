@@ -61,6 +61,12 @@ pub struct PomoState {
     /// 开启新一轮或显式停止时清空。
     #[serde(default)]
     pub break_ended_at: Option<i64>,
+    /// 启动当前番茄钟会话的 profile 名，供后台 daemon 写入正确的数据库。
+    #[serde(default)]
+    pub profile: Option<String>,
+    /// 后台 daemon 进程 PID，用于精准终止而不阻塞 UI。
+    #[serde(default)]
+    pub daemon_pid: Option<u32>,
 }
 
 impl PomoState {
@@ -86,6 +92,8 @@ impl Default for PomoState {
             config: PomoConfig::default(),
             last_date: None,
             break_ended_at: None,
+            profile: None,
+            daemon_pid: None,
         }
     }
 }

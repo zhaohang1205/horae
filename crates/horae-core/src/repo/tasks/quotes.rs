@@ -45,7 +45,8 @@ pub fn list_quotes(
     query: Option<&str>,
     extra_tag: Option<&str>,
 ) -> Result<Vec<Task>> {
-    let (where_sql, params) = quote_filter(query, extra_tag);
+    let enc_search = query.is_some() && crate::password::is_password_enabled(conn).unwrap_or(false);
+    let (where_sql, params) = quote_filter(if enc_search { None } else { query }, extra_tag);
     let sql = format!(
         "SELECT {} FROM tasks WHERE archived_at IS NULL{where_sql} \
          ORDER BY created_at DESC",
@@ -54,11 +55,23 @@ pub fn list_quotes(
     let mut stmt = conn.prepare(&sql)?;
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let rows = stmt.query_map(param_refs.as_slice(), row_to_task)?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    let mut out = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    if enc_search {
+        if let Some(q) = query {
+            let ql = q.to_lowercase();
+            out.retain(|t| {
+                t.title.to_lowercase().contains(&ql) || t.notes.to_lowercase().contains(&ql)
+            });
+        }
+    }
+    Ok(out)
 }
 
 /// Count of quote-tagged (unarchived) tasks, for the guide sidebar badge.
 pub fn count_quotes(conn: &Connection, query: Option<&str>) -> Result<usize> {
+    if query.is_some() && crate::password::is_password_enabled(conn).unwrap_or(false) {
+        return Ok(list_quotes(conn, query, None)?.len());
+    }
     let (where_sql, params) = quote_filter(query, None);
     let sql = format!("SELECT COUNT(*) FROM tasks WHERE archived_at IS NULL{where_sql}");
     let mut stmt = conn.prepare(&sql)?;
@@ -88,6 +101,13 @@ pub fn count_quotes_in_status(
     status: &str,
     query: Option<&str>,
 ) -> Result<usize> {
+    if query.is_some() && crate::password::is_password_enabled(conn).unwrap_or(false) {
+        let quotes = list_quotes(conn, query, None)?;
+        return Ok(quotes
+            .into_iter()
+            .filter(|t| t.status.to_string() == status)
+            .count());
+    }
     let mut sql = String::from(
         "SELECT COUNT(*) FROM tasks WHERE archived_at IS NULL AND status = ?1 \
          AND id IN (SELECT task_id FROM task_tags tt JOIN tags g ON g.id=tt.tag_id WHERE g.name = 'quote')",

@@ -45,7 +45,21 @@ fn resolve_by_title(conn: &Connection, key: &str) -> Result<String> {
         "SELECT id FROM tasks WHERE title = ?1 AND archived_at IS NULL ORDER BY id",
     )?;
     let rows = stmt.query_map([key], |r| r.get::<usize, String>(0))?;
-    let ids: Vec<String> = rows.collect::<rusqlite::Result<_>>()?;
+    let mut ids: Vec<String> = rows.collect::<rusqlite::Result<_>>()?;
+    if ids.is_empty() && crate::password::session_key().is_some() {
+        let mut scan_stmt = conn.prepare_cached(
+            "SELECT id, title FROM tasks WHERE archived_at IS NULL AND id != '__journal__' ORDER BY id",
+        )?;
+        let scanned = scan_stmt.query_map([], |r| {
+            Ok((r.get::<usize, String>(0)?, r.get::<usize, String>(1)?))
+        })?;
+        for pair in scanned {
+            let (id, raw_title) = pair?;
+            if crate::password::maybe_decrypt_field(&raw_title) == key {
+                ids.push(id);
+            }
+        }
+    }
     match ids.as_slice() {
         [id] => Ok(id.clone()),
         [] => Err(Error::TaskNotFound(key.to_string()).into()),
@@ -104,7 +118,21 @@ pub struct ListFilter {
 }
 
 pub fn list(conn: &Connection, f: &ListFilter) -> Result<Vec<Task>> {
-    let (where_sql, params) = filter_where(f);
+    let enc_search =
+        f.query.is_some() && crate::password::is_password_enabled(conn).unwrap_or(false);
+    let effective_filter;
+    let f_sql = if enc_search {
+        effective_filter = ListFilter {
+            status: f.status,
+            tags: f.tags.clone(),
+            query: None,
+            review_stale: f.review_stale,
+        };
+        &effective_filter
+    } else {
+        f
+    };
+    let (where_sql, params) = filter_where(f_sql);
     let sql = format!(
         "SELECT {} FROM tasks WHERE archived_at IS NULL{where_sql} \
          ORDER BY (scheduled_start_at IS NOT NULL) DESC, scheduled_start_at ASC, due_at ASC, created_at ASC",
@@ -113,7 +141,16 @@ pub fn list(conn: &Connection, f: &ListFilter) -> Result<Vec<Task>> {
     let mut stmt = conn.prepare_cached(&sql)?;
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let rows = stmt.query_map(param_refs.as_slice(), row_to_task)?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    let mut out = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    if enc_search {
+        if let Some(q) = &f.query {
+            let ql = q.to_lowercase();
+            out.retain(|t| {
+                t.title.to_lowercase().contains(&ql) || t.notes.to_lowercase().contains(&ql)
+            });
+        }
+    }
+    Ok(out)
 }
 
 /// 未归档任务按状态分组计数（`status 字符串 -> 数量`），一次 GROUP BY 取代逐状态
@@ -122,6 +159,24 @@ pub fn count_by_status(
     conn: &Connection,
     query: Option<&str>,
 ) -> Result<std::collections::HashMap<String, usize>> {
+    if let Some(q) = query {
+        if crate::password::is_password_enabled(conn).unwrap_or(false) {
+            let tasks = list(
+                conn,
+                &ListFilter {
+                    status: None,
+                    tags: vec![],
+                    query: Some(q.to_string()),
+                    review_stale: false,
+                },
+            )?;
+            let mut counts = std::collections::HashMap::new();
+            for t in tasks {
+                *counts.entry(t.status.to_string()).or_insert(0) += 1;
+            }
+            return Ok(counts);
+        }
+    }
     let f = ListFilter {
         status: None,
         tags: vec![],
@@ -151,7 +206,9 @@ fn filter_where(f: &ListFilter) -> (String, Vec<Box<dyn rusqlite::ToSql>>) {
     }
     if f.review_stale {
         let seven_days_ago = crate::time::now_ms() - 7 * 24 * 3600 * 1000;
-        sql.push_str(" AND (updated_at < ? OR updated_at IS NULL)");
+        sql.push_str(
+            " AND status NOT IN ('done', 'reference') AND (updated_at < ? OR updated_at IS NULL)",
+        );
         params.push(Box::new(seven_days_ago));
     }
     for tag in &f.tags {
@@ -181,7 +238,10 @@ pub fn list_stale_inbox(conn: &Connection, before_ms: i64) -> Result<Vec<(String
          WHERE archived_at IS NULL AND status = 'inbox' AND created_at < ?1 \
          ORDER BY created_at ASC",
     )?;
-    let rows = stmt.query_map([before_ms], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let rows = stmt.query_map([before_ms], |r| {
+        let raw_title: String = r.get(1)?;
+        Ok((r.get(0)?, crate::password::maybe_decrypt_field(&raw_title)))
+    })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
@@ -193,7 +253,10 @@ pub fn list_stale_waiting(conn: &Connection, before_ms: i64) -> Result<Vec<(Stri
          WHERE archived_at IS NULL AND status = 'waiting' AND updated_at < ?1 \
          ORDER BY updated_at ASC",
     )?;
-    let rows = stmt.query_map([before_ms], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let rows = stmt.query_map([before_ms], |r| {
+        let raw_title: String = r.get(1)?;
+        Ok((r.get(0)?, crate::password::maybe_decrypt_field(&raw_title)))
+    })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
@@ -271,6 +334,7 @@ pub fn events(conn: &Connection, task_id: &str) -> Result<Vec<event::TaskEvent>>
          FROM task_events WHERE task_id = ?1 ORDER BY at ASC",
     )?;
     let rows = stmt.query_map([task_id], |r| {
+        let raw_meta: Option<String> = r.get(6)?;
         Ok(event::TaskEvent {
             id: r.get(0)?,
             task_id: r.get(1)?,
@@ -278,7 +342,7 @@ pub fn events(conn: &Connection, task_id: &str) -> Result<Vec<event::TaskEvent>>
             from_status: r.get(3)?,
             to_status: r.get(4)?,
             at: r.get(5)?,
-            meta: r.get(6)?,
+            meta: raw_meta.map(|m| crate::password::maybe_decrypt_field(&m)),
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)

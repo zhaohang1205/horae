@@ -12,6 +12,7 @@ pub enum ThemeId {
     Everforest,
     FlexokiLight,
     Hackerman,
+    JadeHorse,
     Kanagawa,
     LastHorizon,
     Lumon,
@@ -39,6 +40,7 @@ impl ThemeId {
         Self::Everforest,
         Self::FlexokiLight,
         Self::Hackerman,
+        Self::JadeHorse,
         Self::Kanagawa,
         Self::LastHorizon,
         Self::Lumon,
@@ -66,6 +68,7 @@ impl ThemeId {
             Self::Everforest => "everforest",
             Self::FlexokiLight => "flexoki-light",
             Self::Hackerman => "hackerman",
+            Self::JadeHorse => "jade-horse",
             Self::Kanagawa => "kanagawa",
             Self::LastHorizon => "last-horizon",
             Self::Lumon => "lumon",
@@ -103,6 +106,8 @@ impl ThemeId {
             (Self::FlexokiLight, horae_core::i18n::Lang::En) => "Flexoki Light",
             (Self::Hackerman, horae_core::i18n::Lang::Zh) => "Hackerman 黑客绿 (深色)",
             (Self::Hackerman, horae_core::i18n::Lang::En) => "Hackerman (Dark)",
+            (Self::JadeHorse, horae_core::i18n::Lang::Zh) => "Jade Horse 翡翠玉马 (深色)",
+            (Self::JadeHorse, horae_core::i18n::Lang::En) => "Jade Horse (Dark)",
             (Self::Kanagawa, horae_core::i18n::Lang::Zh) => "Kanagawa 神奈川 (深色)",
             (Self::Kanagawa, horae_core::i18n::Lang::En) => "Kanagawa (Dark)",
             (Self::LastHorizon, horae_core::i18n::Lang::Zh) => "Last Horizon 暮色地平线 (深色)",
@@ -549,6 +554,46 @@ impl Theme {
             priority_high: Color::Rgb(80, 248, 114), // #50f872
             priority_medium: Color::Rgb(80, 247, 212), // #50f7d4
             priority_low: Color::Rgb(130, 251, 156), // #82FB9C
+        }
+    }
+
+    pub fn jade_horse() -> Self {
+        Self {
+            id: ThemeId::JadeHorse,
+            is_dark: true,
+            bg: Color::Rgb(20, 38, 32),              // #142620
+            fg: Color::Rgb(223, 237, 229),           // #dfede5
+            text_dim: Color::Rgb(145, 173, 159),     // #91ad9f
+            text_urgent: Color::Rgb(216, 141, 145),  // #d88d91
+            text_warn: Color::Rgb(197, 204, 145),    // #c5cc91
+            text_success: Color::Rgb(139, 203, 177), // #8bcbb1
+            rrule_fg: Color::Rgb(210, 171, 141),     // #d2ab8d
+
+            border_active: Color::Rgb(139, 203, 177), // #8bcbb1
+            border_inactive: Color::Rgb(43, 81, 71),  // #2b5147
+
+            hl_bg: Color::Rgb(32, 59, 49),            // #203b31
+            hl_fg: Color::Rgb(139, 203, 177),         // #8bcbb1
+            row_active_bg: Color::Rgb(100, 136, 123), // #64887b
+
+            status_bg: Color::Rgb(15, 30, 25),    // #0f1e19
+            status_fg: Color::Rgb(190, 214, 201), // #bed6c9
+
+            accent: Color::Rgb(139, 203, 177), // #8bcbb1
+
+            // Status colors
+            status_inbox: Color::Rgb(190, 214, 201), // #bed6c9
+            status_next: Color::Rgb(139, 203, 177),  // #8bcbb1
+            status_waiting: Color::Rgb(197, 204, 145), // #c5cc91
+            status_scheduled: Color::Rgb(150, 183, 208), // #96b7d0
+            status_someday: Color::Rgb(183, 161, 200), // #b7a1c8
+            status_reference: Color::Rgb(134, 199, 197), // #86c7c5
+            status_done: Color::Rgb(145, 173, 159),  // #91ad9f
+
+            // Priority colors
+            priority_high: Color::Rgb(216, 141, 145), // #d88d91
+            priority_medium: Color::Rgb(197, 204, 145), // #c5cc91
+            priority_low: Color::Rgb(150, 183, 208),  // #96b7d0
         }
     }
 
@@ -1123,6 +1168,7 @@ impl Theme {
             ThemeId::Everforest => Self::everforest(),
             ThemeId::FlexokiLight => Self::flexoki_light(),
             ThemeId::Hackerman => Self::hackerman(),
+            ThemeId::JadeHorse => Self::jade_horse(),
             ThemeId::Kanagawa => Self::kanagawa(),
             ThemeId::LastHorizon => Self::last_horizon(),
             ThemeId::Lumon => Self::lumon(),
@@ -1141,7 +1187,7 @@ impl Theme {
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
-        match name.trim().to_lowercase().replace('_', "-").as_str() {
+        match name.trim().to_lowercase().replace(['_', ' '], "-").as_str() {
             "catppuccin" | "catppuccin-mocha" | "mocha" => Some(Self::catppuccin_mocha()),
             "catppuccin-latte" | "latte" => Some(Self::catppuccin_latte()),
             "tokyo-night" | "tokyonight" => Some(Self::tokyo_night()),
@@ -1151,6 +1197,7 @@ impl Theme {
             "everforest" => Some(Self::everforest()),
             "flexoki-light" | "flexoki" | "flexokilight" => Some(Self::flexoki_light()),
             "hackerman" => Some(Self::hackerman()),
+            "jade-horse" | "jadehorse" => Some(Self::jade_horse()),
             "kanagawa" => Some(Self::kanagawa()),
             "last-horizon" | "lasthorizon" => Some(Self::last_horizon()),
             "lumon" => Some(Self::lumon()),
@@ -1265,4 +1312,22 @@ pub fn detect_omarchy_theme() -> Option<Theme> {
     }
 
     None
+}
+
+/// 循环切换主题（支持 Omarchy 自动跟随逻辑）。
+/// 返回 (新主题, 是否为 omarchy_auto, 保存到 settings 的 key)
+pub fn cycle_theme(current: &Theme, omarchy_auto: bool) -> (Theme, bool, &'static str) {
+    let is_omarchy = is_omarchy_system();
+    if is_omarchy && omarchy_auto {
+        let next = Theme::catppuccin_latte();
+        let key = next.id.key();
+        (next, false, key)
+    } else if is_omarchy && current.id.is_last() {
+        let detected = detect_omarchy_theme().unwrap_or_else(Theme::catppuccin_mocha);
+        (detected, true, "auto")
+    } else {
+        let next = current.next();
+        let key = next.id.key();
+        (next, false, key)
+    }
 }

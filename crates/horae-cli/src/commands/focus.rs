@@ -7,25 +7,30 @@ use horae_core::repo::tasks;
 use horae_core::schedule;
 use horae_core::time;
 
-pub fn run(conn: &Connection, start: bool) -> Result<()> {
-    let filter = tasks::ListFilter {
-        status: None,
-        tags: vec![],
-        query: None,
-        review_stale: false,
-    };
-    let all_tasks = tasks::list(conn, &filter)?;
+pub fn pick_focus_task<'a>(
+    conn: &Connection,
+    all_tasks: &'a [Task],
+) -> Result<Option<(i64, &'a Task)>> {
     let task_ids: Vec<&str> = all_tasks.iter().map(|t| t.id.as_str()).collect();
     let tags_map = tags::get_tags_for_tasks(conn, &task_ids)?;
+    let today_start = time::local_day_bounds(0).0;
+    let checked_today: std::collections::HashSet<String> =
+        tasks::checked_in_today(conn, today_start)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
 
     let now = time::now_ms();
-    let mut best_task: Option<(i64, &Task)> = None;
+    let mut best_task: Option<(i64, &'a Task)> = None;
 
-    for task in &all_tasks {
+    for task in all_tasks {
         if matches!(
             task.status,
             Status::Someday | Status::Reference | Status::Done
         ) {
+            continue;
+        }
+        if task.rrule.is_some() && checked_today.contains(&task.id) {
             continue;
         }
 
@@ -67,21 +72,23 @@ pub fn run(conn: &Connection, start: bool) -> Result<()> {
             score += 500;
         }
 
-        if let Some(d) = due {
-            if d < now {
-                score += 2000;
-                let days_overdue = (now - d) / (1000 * 60 * 60 * 24);
-                score += days_overdue.min(50) * 10;
-            } else {
-                let ms_to_due = d - now;
-                let days_to_due = ms_to_due / (1000 * 60 * 60 * 24);
-                if days_to_due == 0 {
-                    score += 1000;
+        // 区分真正的截止时间/周期槽位 (due_at / rrule) 与普通排程起点 (scheduled_start_at)，
+        // 避免无 due_at 的排程任务被 effective_due 与 scheduled_start_at 双重计分。
+        if task.due_at.is_some() || task.rrule.is_some() {
+            if let Some(d) = due {
+                if d < now {
+                    score += 2000;
+                    let days_overdue = (now - d) / (1000 * 60 * 60 * 24);
+                    score += days_overdue.min(50) * 10;
+                } else {
+                    let ms_to_due = d - now;
+                    let days_to_due = ms_to_due / (1000 * 60 * 60 * 24);
+                    if days_to_due == 0 {
+                        score += 1000;
+                    }
                 }
             }
-        }
-
-        if let Some(s) = task.scheduled_start_at {
+        } else if let Some(s) = task.scheduled_start_at {
             if s <= now {
                 score += 1500;
                 let days_started = (now - s) / (1000 * 60 * 60 * 24);
@@ -97,6 +104,19 @@ pub fn run(conn: &Connection, start: bool) -> Result<()> {
             best_task = Some((score, task));
         }
     }
+
+    Ok(best_task)
+}
+
+pub fn run(conn: &Connection, start: bool) -> Result<()> {
+    let filter = tasks::ListFilter {
+        status: None,
+        tags: vec![],
+        query: None,
+        review_stale: false,
+    };
+    let all_tasks = tasks::list(conn, &filter)?;
+    let best_task = pick_focus_task(conn, &all_tasks)?;
 
     if let Some((score, task)) = best_task {
         println!("🎯 专注目标 (推荐分数: {})", score);
@@ -222,7 +242,21 @@ mod tests {
         )
         .unwrap();
 
-        // The scheduled task should have a higher score (+1500 + some days) than the normal task (0)
+        // The scheduled task should have a higher score (+1500 + 50*5 = 1750) than the normal task (0),
+        // without double-counting the +2000 due_at penalty.
+        let all = tasks::list(
+            &conn,
+            &tasks::ListFilter {
+                status: None,
+                tags: vec![],
+                query: None,
+                review_stale: false,
+            },
+        )
+        .unwrap();
+        let (score, picked) = pick_focus_task(&conn, &all).unwrap().unwrap();
+        assert_eq!(picked.title, "scheduled task");
+        assert_eq!(score, 1750);
         assert!(run(&conn, false).is_ok());
     }
 }

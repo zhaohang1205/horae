@@ -140,8 +140,16 @@ pub fn run_with_mode(
         .unwrap_or_default();
     // 闪念模式或密码锁定模式下跳过开屏页，实现极速就绪与数据安全
     if app.modules.splash && launch_mode != LaunchMode::Flash && !app.locked {
-        if let Ok(new_lang) = splash::show_splash(conn, app.lang, app.icon_style) {
+        if let Ok((new_lang, new_theme, new_auto)) = splash::show_splash(
+            conn,
+            app.lang,
+            app.theme.clone(),
+            app.omarchy_auto,
+            app.icon_style,
+        ) {
             app.lang = new_lang;
+            app.theme = new_theme;
+            app.omarchy_auto = new_auto;
         }
     } else {
         // 未开启开屏页时，在此冻结启动用时快照
@@ -225,6 +233,9 @@ fn run_app(
                     app.handle_paste(text);
                 }
                 Event::Mouse(m) => {
+                    if app.locked {
+                        continue;
+                    }
                     let left_width = terminal.size()?.width * 22 / 100;
                     let is_left_panel = m.column < left_width;
                     match m.kind {

@@ -236,7 +236,7 @@ fn rrule_occurrences(rrule: &str, anchor_ms: i64, limit: usize) -> Result<Vec<i6
     let max_iter = (count as usize).min(actual_limit);
 
     let mut out = Vec::with_capacity(max_iter.min(64));
-    let mut cur = anchor;
+    let cur = anchor;
 
     if freq == Freq::Weekly && !byday.is_empty() {
         let mut occurrences_found = 0;
@@ -332,15 +332,19 @@ fn rrule_occurrences(rrule: &str, anchor_ms: i64, limit: usize) -> Result<Vec<i6
             year += interval as i32;
         }
     } else {
-        for _ in 0..max_iter {
-            let ms = cur.timestamp_millis();
+        for i in 0..max_iter {
+            let cur_dt = if i == 0 {
+                anchor
+            } else {
+                step(anchor, freq, interval * (i as i64))?
+            };
+            let ms = cur_dt.timestamp_millis();
             if let Some(u) = until_ms {
                 if ms > u {
                     break;
                 }
             }
             out.push(ms);
-            cur = step(cur, freq, interval)?;
         }
     }
     Ok(out)
@@ -356,7 +360,8 @@ fn step(dt: DateTime<Utc>, freq: Freq, interval: i64) -> Result<DateTime<Utc>> {
 }
 
 fn add_months(dt: DateTime<Utc>, interval: i64) -> DateTime<Utc> {
-    let d = dt.date_naive();
+    let local_dt = dt.with_timezone(&Local);
+    let d = local_dt.date_naive();
     let total = d.year() as i64 * 12 + (d.month() as i64 - 1) + interval;
     let y = (total / 12) as i32;
     let m = ((total % 12 + 12) % 12 + 1) as u32;
@@ -364,7 +369,12 @@ fn add_months(dt: DateTime<Utc>, interval: i64) -> DateTime<Utc> {
     let day = d.day().min(last_day);
     let nd = NaiveDate::from_ymd_opt(y, m, day)
         .unwrap_or(d)
-        .and_time(dt.time());
+        .and_time(local_dt.time());
+    if let Ok(ms) = crate::time::local_to_utc_ms(nd) {
+        if let Some(utc) = Utc.timestamp_millis_opt(ms).single() {
+            return utc;
+        }
+    }
     Utc.from_utc_datetime(&nd)
 }
 
@@ -716,5 +726,23 @@ mod tests {
         let rec = mk_task(Some("FREQ=DAILY"), Some(now), None);
         let occ = [now, now + 86_400_000];
         assert_eq!(display_due(&rec, Some(&occ)), Some(now));
+    }
+
+    #[test]
+    fn monthly_recurrence_preserves_local_day_across_short_months() {
+        let jan31 = NaiveDate::from_ymd_opt(2026, 1, 31).unwrap();
+        let t = chrono::NaiveTime::from_hms_opt(0, 30, 0).unwrap();
+        let anchor = local_ms(jan31, t);
+        let occ = occurrences("FREQ=MONTHLY;COUNT=3", anchor).unwrap();
+        assert_eq!(occ.len(), 3);
+        assert_eq!(occ[0], anchor);
+        assert_eq!(
+            occ[1],
+            local_ms(NaiveDate::from_ymd_opt(2026, 2, 28).unwrap(), t)
+        );
+        assert_eq!(
+            occ[2],
+            local_ms(NaiveDate::from_ymd_opt(2026, 3, 31).unwrap(), t)
+        );
     }
 }

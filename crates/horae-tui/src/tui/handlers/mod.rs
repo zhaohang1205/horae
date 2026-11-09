@@ -456,6 +456,9 @@ impl<'a> AppHandlers for App<'a> {
         match key.code {
             KeyCode::Esc => {
                 self.organizing_id = None;
+                if let Some((snap, tags)) = self.waiting_snapshot.take() {
+                    let _ = horae_core::repo::tasks::restore_snapshot(self.conn, &snap, &tags);
+                }
                 self.show_syntax = false;
                 self.syntax_scroll = 0;
                 self.set_mode(Mode::Normal);
@@ -464,6 +467,9 @@ impl<'a> AppHandlers for App<'a> {
             }
             KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.organizing_id = None;
+                if let Some((snap, tags)) = self.waiting_snapshot.take() {
+                    let _ = horae_core::repo::tasks::restore_snapshot(self.conn, &snap, &tags);
+                }
                 self.show_syntax = false;
                 self.syntax_scroll = 0;
                 self.set_mode(Mode::Normal);
@@ -583,6 +589,12 @@ impl<'a> AppHandlers for App<'a> {
     /// 处于普通列表模式时，先打开快速录入再粘贴，直接满足「复制到快速录入」。
     /// 三个确认提示模式（归档/删除/删 profile）只等待 y/n，不接受文本，忽略。
     fn handle_paste(&mut self, text: String) {
+        if self.locked {
+            let clean: String = text.chars().filter(|c| *c != '\n' && *c != '\r').collect();
+            self.lock_input.push_str(&clean);
+            self.lock_error = None;
+            return;
+        }
         match self.mode {
             Mode::Normal => {
                 self.set_mode(Mode::Capturing);

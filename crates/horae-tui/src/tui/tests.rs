@@ -1559,7 +1559,7 @@ fn key_table_respects_view_selection_and_mode() {
     let rm_q = quotes_view.iter().find(|(k, _)| *k == "\"").unwrap();
     assert_eq!(rm_q.1, "移出金句");
 
-    // 状态栏快捷键条：含 hjkl, a, x, s, /, w, f, F1, P, F5, F6, F7, Ctrl+P
+    // 状态栏快捷键条：含 hjkl, a, x, t, s, /, w, f, F1, P, F5, F6, F7, Ctrl+P
     let strip = status_strip(Lang::Zh);
     assert_eq!(
         strip,
@@ -1567,6 +1567,7 @@ fn key_table_respects_view_selection_and_mode() {
             ("hjkl", "方向键"),
             ("a", "捕获"),
             ("x", "完成"),
+            ("t", "下一步"),
             ("s", "将来"),
             ("/", "搜索"),
             ("w", "等待"),
@@ -1586,6 +1587,7 @@ fn key_table_respects_view_selection_and_mode() {
             ("hjkl", "arrows"),
             ("a", "capture"),
             ("x", "done"),
+            ("t", "next"),
             ("s", "someday"),
             ("/", "search"),
             ("w", "waiting"),
@@ -2091,13 +2093,13 @@ fn lang_and_theme_toggle_persist_to_settings() {
 }
 
 #[test]
-fn omarchy_themes_all_twenty_three_presets_and_resolution() {
+fn omarchy_themes_all_twenty_four_presets_and_resolution() {
     use crate::tui::theme::{parse_hex_color, Theme, ThemeId};
     use horae_core::model::task::Status;
 
-    assert_eq!(ThemeId::ALL.len(), 23);
+    assert_eq!(ThemeId::ALL.len(), 24);
 
-    // 1. from_name 解析所有 23 款预设及常见别名
+    // 1. from_name 解析所有 24 款预设及常见别名
     let cases = [
         ("mocha", ThemeId::CatppuccinMocha),
         ("catppuccin", ThemeId::CatppuccinMocha),
@@ -2116,6 +2118,10 @@ fn omarchy_themes_all_twenty_three_presets_and_resolution() {
         ("flexoki-light", ThemeId::FlexokiLight),
         ("flexoki", ThemeId::FlexokiLight),
         ("hackerman", ThemeId::Hackerman),
+        ("jade-horse", ThemeId::JadeHorse),
+        ("jadehorse", ThemeId::JadeHorse),
+        ("jade_horse", ThemeId::JadeHorse),
+        ("jade horse", ThemeId::JadeHorse),
         ("kanagawa", ThemeId::Kanagawa),
         ("last-horizon", ThemeId::LastHorizon),
         ("lasthorizon", ThemeId::LastHorizon),
@@ -2145,7 +2151,7 @@ fn omarchy_themes_all_twenty_three_presets_and_resolution() {
 
     assert!(Theme::from_name("unknown-theme-xyz").is_none());
 
-    // 2. 检查 5 个亮色主题和 18 个深色主题的明暗属性与特定配色调性
+    // 2. 检查 5 个亮色主题和 19 个深色主题的明暗属性与特定配色调性
     for id in ThemeId::ALL {
         let t = Theme::from_id(*id);
         assert_eq!(t.id, *id);
@@ -2202,6 +2208,15 @@ fn omarchy_themes_all_twenty_three_presets_and_resolution() {
     assert_eq!(hacker.bg, ratatui::style::Color::Rgb(11, 12, 22));
     assert_eq!(hacker.accent, ratatui::style::Color::Rgb(130, 251, 156));
 
+    let jade = Theme::jade_horse();
+    assert!(jade.is_dark);
+    assert_eq!(jade.bg, ratatui::style::Color::Rgb(20, 38, 32));
+    assert_eq!(jade.accent, ratatui::style::Color::Rgb(139, 203, 177));
+    assert_eq!(
+        jade.status_color(&Status::Scheduled),
+        ratatui::style::Color::Rgb(150, 183, 208)
+    );
+
     let nord = Theme::nord();
     assert!(nord.is_dark);
     assert_eq!(nord.bg, ratatui::style::Color::Rgb(46, 52, 64));
@@ -2219,7 +2234,7 @@ fn omarchy_themes_all_twenty_three_presets_and_resolution() {
 }
 
 #[test]
-fn f5_cycles_all_twenty_three_themes_and_persists() {
+fn f5_cycles_all_twenty_four_themes_and_persists() {
     horae_core::repo::state::set_test_override();
     let mut conn = Connection::open(":memory:").unwrap();
     migrate::run(&mut conn).unwrap();
@@ -2228,7 +2243,7 @@ fn f5_cycles_all_twenty_three_themes_and_persists() {
     app.popup = None;
     assert_eq!(app.theme.id, crate::tui::theme::ThemeId::CatppuccinMocha);
 
-    // 依次通过 F5 循环遍历全部 23 款主题并验证持久化
+    // 依次通过 F5 循环遍历全部 24 款主题并验证持久化
     for expected_next in crate::tui::theme::ThemeId::ALL.iter().skip(1) {
         app.handle_key(kc(KeyCode::F(5))).unwrap();
         assert_eq!(app.theme.id, *expected_next);
@@ -6048,4 +6063,164 @@ fn archived_view_blocks_rearchive_and_edit_with_hint() {
         "应提示已在归档箱中，实际: {}",
         app.status_message
     );
+}
+
+#[test]
+fn t_shortcut_and_inbox_enter_clarify_to_next_with_undo() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+
+    let t1 = tasks::create_capture(
+        &conn,
+        &CaptureInput {
+            title: "Inbox item 1".into(),
+            status: task::Status::Inbox,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let t2 = tasks::create_capture(
+        &conn,
+        &CaptureInput {
+            title: "Inbox item 2".into(),
+            status: task::Status::Inbox,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let mut app = app_normal(&conn);
+    assert_eq!(app.view, View::Inbox);
+    assert_eq!(app.items.len(), 2);
+
+    // 1. 按 t 直接将选中任务流转为 Next
+    app.handle_key(key('t')).unwrap();
+    assert_eq!(
+        tasks::get(&conn, &t1.id).unwrap().status,
+        task::Status::Next
+    );
+    assert_eq!(app.items.len(), 1);
+
+    // 按 u 撤销 t 流转，回到 Inbox
+    app.handle_key(key('u')).unwrap();
+    assert_eq!(
+        tasks::get(&conn, &t1.id).unwrap().status,
+        task::Status::Inbox
+    );
+    assert_eq!(app.items.len(), 2);
+
+    // 2. 在 Inbox 按 Enter 编辑（不带 ~time）自动完成 GTD 澄清流转为 Next
+    app.selected = 1;
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+    assert_eq!(app.mode, Mode::Capturing);
+    for c in " @work !high".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+    assert_eq!(app.mode, Mode::Normal);
+
+    let clarified = tasks::get(&conn, &t2.id).unwrap();
+    assert_eq!(
+        clarified.status,
+        task::Status::Next,
+        "Inbox 编辑无 ~time 时自动澄清为 Next"
+    );
+    assert_eq!(clarified.priority.as_deref(), Some("high"));
+
+    // 按 u 完整撤销编辑与状态流转
+    app.handle_key(key('u')).unwrap();
+    let reverted = tasks::get(&conn, &t2.id).unwrap();
+    assert_eq!(reverted.status, task::Status::Inbox);
+    assert_eq!(reverted.priority, None);
+}
+
+#[test]
+fn habit_checkin_undo_restores_schedule_and_removes_checkin_badge() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+
+    let rec = tasks::create_capture(
+        &conn,
+        &CaptureInput {
+            title: "Morning Run".into(),
+            status: task::Status::Scheduled,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let today_slot = horae_core::time::parse_time("today 08:00").unwrap();
+    tasks::schedule(&conn, &rec.id, today_slot, None, Some("FREQ=DAILY".into())).unwrap();
+
+    let mut app = app_normal(&conn);
+    app.handle_key(key('J')).unwrap(); // 今日视图
+    assert!(app.items.iter().any(|r| r.id == rec.id));
+
+    // 按 x 打卡：习惯推进到明日并离开今日视图
+    app.handle_key(key('x')).unwrap();
+    assert!(!app.items.iter().any(|r| r.id == rec.id));
+
+    // 按 u 撤销打卡：习惯排程恢复到今日，且今日未打卡
+    app.handle_key(key('u')).unwrap();
+    let row = app
+        .items
+        .iter()
+        .find(|r| r.id == rec.id)
+        .expect("撤销打卡后习惯回到今日视图");
+    assert!(!row.checked_in_today, "撤销后不再标记为今日已打卡");
+    assert_eq!(
+        tasks::get(&conn, &rec.id).unwrap().scheduled_start_at,
+        Some(today_slot)
+    );
+}
+
+#[test]
+fn waiting_flow_sets_delegated_to_dedupes_suffix_and_supports_undo() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+
+    let rec = tasks::create_capture(
+        &conn,
+        &CaptureInput {
+            title: "Review contract".into(),
+            status: task::Status::Next,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let mut app = app_normal(&conn);
+    app.handle_key(key('2')).unwrap(); // Next
+    app.handle_key(key('w')).unwrap();
+    for c in "Alice".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+    app.handle_key(kc(KeyCode::Enter)).unwrap(); // default +1d
+
+    let t1 = tasks::get(&conn, &rec.id).unwrap();
+    assert_eq!(t1.status, task::Status::Waiting);
+    assert_eq!(t1.title, "Review contract [Wait: Alice]");
+    assert_eq!(t1.delegated_to.as_deref(), Some("Alice"));
+
+    // 切到 Waiting 视图，再次按 w 改为 Bob：不得叠加两个 [Wait: ...]
+    app.handle_key(key('3')).unwrap();
+    app.handle_key(key('w')).unwrap();
+    for c in "Bob".chars() {
+        app.handle_key(key(c)).unwrap();
+    }
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+
+    let t2 = tasks::get(&conn, &rec.id).unwrap();
+    assert_eq!(t2.title, "Review contract [Wait: Bob]");
+    assert_eq!(t2.delegated_to.as_deref(), Some("Bob"));
+
+    // 按 u 撤销第二次 w：回到 Alice
+    app.handle_key(key('u')).unwrap();
+    let t_undo1 = tasks::get(&conn, &rec.id).unwrap();
+    assert_eq!(t_undo1.title, "Review contract [Wait: Alice]");
+    assert_eq!(t_undo1.delegated_to.as_deref(), Some("Alice"));
 }

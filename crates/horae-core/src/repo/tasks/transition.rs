@@ -47,6 +47,13 @@ pub fn create_capture(conn: &Connection, input: &CaptureInput) -> Result<Task> {
     let id = Uuid::new_v4().to_string();
     let status = input.status;
     let cl_str = serde_json::to_string(&input.checklist)?;
+    let enc_title = crate::password::maybe_encrypt_field(conn, &input.title);
+    let enc_notes = crate::password::maybe_encrypt_field(conn, &input.notes);
+    let enc_delegated = input
+        .delegated_to
+        .as_deref()
+        .map(|d| crate::password::maybe_encrypt_field(conn, d));
+    let enc_cl = crate::password::maybe_encrypt_field(conn, &cl_str);
 
     crate::repo::mutate(conn, |tx, now| {
         let clarified = if status != task::Status::Inbox {
@@ -60,8 +67,8 @@ pub fn create_capture(conn: &Connection, input: &CaptureInput) -> Result<Task> {
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
             rusqlite::params![
                 id,
-                input.title,
-                input.notes,
+                enc_title,
+                enc_notes,
                 status.to_string(),
                 input.rrule,
                 input.priority,
@@ -69,8 +76,8 @@ pub fn create_capture(conn: &Connection, input: &CaptureInput) -> Result<Task> {
                 clarified,
                 input.due_at,
                 now,
-                input.delegated_to,
-                cl_str
+                enc_delegated,
+                enc_cl
             ],
         )?;
         let status_str = status.to_string();
@@ -218,13 +225,19 @@ pub fn modify(conn: &Connection, id: &str, input: &ModifyInput) -> Result<Task> 
             crate::repo::tags::add_tag_to_task_inner(tx, id, tag_name, now)?;
         }
         t.updated_at = now;
+        let enc_title = crate::password::maybe_encrypt_field(tx, &t.title);
+        let enc_notes = crate::password::maybe_encrypt_field(tx, &t.notes);
+        let enc_delegated = t
+            .delegated_to
+            .as_deref()
+            .map(|d| crate::password::maybe_encrypt_field(tx, d));
         tx.execute(
             "UPDATE tasks SET title=?1, notes=?2, status=?3, clarified_at=?4, completed_at=?5, \
              due_at=?6, scheduled_start_at=?7, scheduled_end_at=?8, rrule=?9, priority=?10, \
              delegated_to=?11, updated_at=?12 WHERE id=?13",
             rusqlite::params![
-                t.title,
-                t.notes,
+                enc_title,
+                enc_notes,
                 t.status.to_string(),
                 t.clarified_at,
                 t.completed_at,
@@ -233,7 +246,7 @@ pub fn modify(conn: &Connection, id: &str, input: &ModifyInput) -> Result<Task> 
                 t.scheduled_end_at,
                 t.rrule,
                 t.priority,
-                t.delegated_to,
+                enc_delegated,
                 t.updated_at,
                 id
             ],
@@ -244,21 +257,84 @@ pub fn modify(conn: &Connection, id: &str, input: &ModifyInput) -> Result<Task> 
 }
 
 pub fn rename(conn: &Connection, id: &str, new_title: &str) -> Result<Task> {
-    let now = time::now_ms();
-    conn.execute(
-        "UPDATE tasks SET title=?1, updated_at=?2 WHERE id=?3",
-        rusqlite::params![new_title, now, id],
-    )?;
+    let enc_title = crate::password::maybe_encrypt_field(conn, new_title);
+    crate::repo::mutate(conn, |tx, now| {
+        tx.execute(
+            "UPDATE tasks SET title=?1, updated_at=?2 WHERE id=?3",
+            rusqlite::params![enc_title, now, id],
+        )?;
+        Ok(())
+    })?;
     get(conn, id)
 }
 
 pub fn update_notes(conn: &Connection, id: &str, new_notes: &str) -> Result<Task> {
-    let now = time::now_ms();
-    conn.execute(
-        "UPDATE tasks SET notes=?1, updated_at=?2 WHERE id=?3",
-        rusqlite::params![new_notes, now, id],
-    )?;
+    let enc_notes = crate::password::maybe_encrypt_field(conn, new_notes);
+    crate::repo::mutate(conn, |tx, now| {
+        tx.execute(
+            "UPDATE tasks SET notes=?1, updated_at=?2 WHERE id=?3",
+            rusqlite::params![enc_notes, now, id],
+        )?;
+        Ok(())
+    })?;
     get(conn, id)
+}
+
+/// Revert a recurring habit check-in by restoring its previous schedule window
+/// and status, and removing the most recent `habit_completed` event.
+pub fn undo_habit_check_in(
+    conn: &Connection,
+    id: &str,
+    prev_status: task::Status,
+    prev_start: Option<i64>,
+    prev_end: Option<i64>,
+    prev_due: Option<i64>,
+) -> Result<Task> {
+    crate::repo::mutate(conn, |tx, now| {
+        tx.execute(
+            "UPDATE tasks SET status=?1, scheduled_start_at=?2, scheduled_end_at=?3, \
+             due_at=?4, updated_at=?5 WHERE id=?6",
+            rusqlite::params![
+                prev_status.to_string(),
+                prev_start,
+                prev_end,
+                prev_due,
+                now,
+                id
+            ],
+        )?;
+        tx.execute(
+            "DELETE FROM task_events WHERE id = (
+                SELECT id FROM task_events WHERE task_id = ?1 AND event_type = ?2
+                ORDER BY at DESC, id DESC LIMIT 1
+            )",
+            rusqlite::params![id, event::EV_HABIT_COMPLETED],
+        )?;
+        Ok(())
+    })?;
+    get(conn, id)
+}
+
+/// Restore a full task snapshot (fields + tags) for undo/redo of complex edits.
+pub fn restore_snapshot(conn: &Connection, snap: &Task, tags: &[String]) -> Result<Task> {
+    let mut input = ModifyInput {
+        title: Some(snap.title.clone()),
+        notes: Some(snap.notes.clone()),
+        status: Some(snap.status),
+        due_at: Some(snap.due_at),
+        scheduled_start_at: Some(snap.scheduled_start_at),
+        scheduled_end_at: Some(snap.scheduled_end_at),
+        rrule: Some(snap.rrule.clone()),
+        priority: Some(snap.priority.clone()),
+        delegated_to: Some(snap.delegated_to.clone()),
+        add_tags: tags.to_vec(),
+        remove_tags: Vec::new(),
+        clear_tags: true,
+    };
+    if snap.title.is_empty() {
+        input.title = None;
+    }
+    modify(conn, &snap.id, &input)
 }
 
 /// Write the checklist JSON inside the mutate seam and log a `checklist` event
@@ -270,10 +346,11 @@ fn write_checklist(
     meta: &str,
 ) -> Result<()> {
     let cl_str = serde_json::to_string(checklist)?;
+    let enc_cl = crate::password::maybe_encrypt_field(conn, &cl_str);
     crate::repo::mutate(conn, |tx, now| {
         tx.execute(
             "UPDATE tasks SET checklist=?1, updated_at=?2 WHERE id=?3",
-            rusqlite::params![cl_str, now, id],
+            rusqlite::params![enc_cl, now, id],
         )?;
         log_event(tx, id, event::EV_CHECKLIST, None, None, Some(meta), now)?;
         Ok(())

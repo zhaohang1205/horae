@@ -21,7 +21,7 @@ pub struct Cli {
     #[arg(long, value_name = "LANG", global = true)]
     pub lang: Option<String>,
 
-    /// UI theme: 23 official themes (e.g. `catppuccin`, `latte`, `tokyo-night`, `gruvbox`, `retro-82`, `nord`, `kanagawa`, `hackerman`), or `auto`.
+    /// UI theme: 24 official themes (e.g. `catppuccin`, `latte`, `tokyo-night`, `gruvbox`, `retro-82`, `nord`, `kanagawa`, `hackerman`, `jade-horse`), or `auto`.
     /// Also configurable via `HORAE_THEME` environment variable.
     #[arg(long, value_name = "THEME", global = true)]
     pub theme: Option<String>,

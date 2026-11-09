@@ -156,8 +156,14 @@ pub fn process_once(
         };
     }
 
-    stage!(captures, ingest_queue(conn, dir, FILE_CAPTURE, do_capture));
-    stage!(actions, ingest_queue(conn, dir, FILE_ACTIONS, do_action));
+    stage!(
+        captures,
+        ingest_queue(conn, dir, FILE_CAPTURE, true, do_capture)
+    );
+    stage!(
+        actions,
+        ingest_queue(conn, dir, FILE_ACTIONS, false, do_action)
+    );
     stage!(reminders, write_reminders(conn, dir));
     stage!(today_written, write_today(conn, dir));
 
@@ -233,7 +239,13 @@ fn feishu_stage(conn: &Connection, dir: &Path, cfg: &Option<FeishuConfig>) -> Re
 ///   逐行执行，追加回执到 `capture.done`，最后删除 `.processing`；
 /// - 崩溃恢复：若 `.processing` 已存在则直接消费它（不重复改名）；
 /// - 去重：`capture.done` 里已有的行（崩溃中断/重写竞态）不再执行。
-fn ingest_queue<F>(conn: &Connection, dir: &Path, name: &str, handler: F) -> Result<usize>
+fn ingest_queue<F>(
+    conn: &Connection,
+    dir: &Path,
+    name: &str,
+    dedup_across_batches: bool,
+    handler: F,
+) -> Result<usize>
 where
     F: Fn(&Connection, &str) -> Result<()>,
 {
@@ -241,11 +253,16 @@ where
     let proc = dir.join(format!("{name}.processing"));
     let done = dir.join(format!("{name}.done"));
 
-    if !proc.exists() && fs::rename(&txt, &proc).is_err() {
+    let is_crash_recovery = proc.exists();
+    if !is_crash_recovery && fs::rename(&txt, &proc).is_err() {
         return Ok(0);
     }
 
-    let done_set = read_done_set(&done)?;
+    let mut seen_set = if dedup_across_batches || is_crash_recovery {
+        read_done_set(&done)?
+    } else {
+        HashSet::new()
+    };
     // lossy 读取：畸形字节只影响所在行（变成替换符），不丢整份队列。
     let content = match fs::read(&proc) {
         Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
@@ -259,7 +276,7 @@ where
     let mut processed = 0usize;
     for raw in content.lines() {
         let line = raw.trim();
-        if line.is_empty() || done_set.contains(line) {
+        if line.is_empty() || !seen_set.insert(line.to_string()) {
             continue;
         }
         match handler(conn, line) {
@@ -938,5 +955,43 @@ mod tests {
         fs::set_permissions(&rem, fs::Permissions::from_mode(0o755)).unwrap();
         let s2 = process_once(&conn, &dir, None).unwrap();
         assert_eq!(s2.reminders, 1, "失败提醒下一轮重试成功");
+    }
+
+    #[test]
+    fn actions_allow_repeated_habit_checkins_across_batches() {
+        let (root, conn) = test_conn();
+        let dir = sync_dir(root.path());
+        let habit = tasks::create_capture(
+            &conn,
+            &tasks::CaptureInput {
+                title: "每日喝水".into(),
+                status: Status::Scheduled,
+                rrule: Some("FREQ=DAILY".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let start = time::parse_time("today 08:00").unwrap();
+        tasks::schedule(&conn, &habit.id, start, None, Some("FREQ=DAILY".into())).unwrap();
+
+        // 第一批：手机写入两次相同的 done，同批次内去重执行 1 次
+        fs::write(dir.join("actions.txt"), "done 每日喝水\ndone 每日喝水\n").unwrap();
+        let s1 = process_once(&conn, &dir, None).unwrap();
+        assert_eq!(s1.actions, 1);
+        let after1 = tasks::get(&conn, &habit.id).unwrap();
+        assert!(after1.scheduled_start_at.unwrap() > start);
+
+        // 模拟进入次日（将首次打卡事件时间戳回拨 1 天），再次写入相同的 done 每日喝水：
+        // 不应被 actions.done 的历史记录永久拦截
+        conn.execute(
+            "UPDATE task_events SET at = at - 86400000 WHERE task_id = ?1",
+            [&habit.id],
+        )
+        .unwrap();
+        fs::write(dir.join("actions.txt"), "done 每日喝水\n").unwrap();
+        let s2 = process_once(&conn, &dir, None).unwrap();
+        assert_eq!(s2.actions, 1, "跨批次的相同动作必须继续执行");
+        let after2 = tasks::get(&conn, &habit.id).unwrap();
+        assert!(after2.scheduled_start_at.unwrap() > after1.scheduled_start_at.unwrap());
     }
 }

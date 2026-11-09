@@ -172,14 +172,29 @@ impl<'a> App<'a> {
                 }
             }
             let rrule_for_warn = quick_add.rrule.clone();
+            let old_tags =
+                horae_core::repo::tags::get_task_tags(self.conn, &id).unwrap_or_default();
+            let before_task = task.clone();
+            let before_tags: Vec<String> = old_tags.iter().map(|t| t.name.clone()).collect();
             let mut ok = true;
             if !quick_add.title.is_empty() {
-                ok &= self.note(tasks::rename(self.conn, &id, &quick_add.title));
+                let wait_who = extract_wait_who(&quick_add.title);
+                if wait_who != task.delegated_to && wait_who.is_some() {
+                    ok &= self.note(tasks::modify(
+                        self.conn,
+                        &id,
+                        &tasks::ModifyInput {
+                            title: Some(quick_add.title.clone()),
+                            delegated_to: Some(wait_who),
+                            ..Default::default()
+                        },
+                    ));
+                } else {
+                    ok &= self.note(tasks::rename(self.conn, &id, &quick_add.title));
+                }
             }
             let tag_names = quick_add.tags;
             let new_set: std::collections::HashSet<String> = tag_names.iter().cloned().collect();
-            let old_tags =
-                horae_core::repo::tags::get_task_tags(self.conn, &id).unwrap_or_default();
             for tg in &old_tags {
                 if !new_set.contains(&tg.name) {
                     ok &= self.note(horae_core::repo::tags::remove_tag_from_task(
@@ -204,11 +219,12 @@ impl<'a> App<'a> {
             if is_quote && !matches!(task.status, task::Status::Reference | task::Status::Done) {
                 ok &= self.note(tasks::transition(self.conn, &id, task::Status::Reference));
             }
-            // ~time → 排程起点（自动分类 Inbox→Scheduled）；无时间则仅改周期。
+            // ~time → 排程起点（自动分类 Inbox→Scheduled）；无时间则仅改周期（Inbox 自动流转 Next）。
             // 金句不参与排程：时间/周期让位给金句路由。
+            let mut clarified_to_next = false;
             if is_quote {
                 // 金句保持 reference，忽略 ~time 与 *rrule 的排程效果。
-            } else if task.status == task::Status::Inbox || task.status == task::Status::Scheduled {
+            } else if task.status == task::Status::Inbox {
                 if let Some(start) = start_ms {
                     if Some(start) != task.scheduled_start_at || quick_add.rrule != task.rrule {
                         ok &= self.note(tasks::schedule(
@@ -219,19 +235,68 @@ impl<'a> App<'a> {
                             quick_add.rrule.clone(),
                         ));
                     }
-                } else if quick_add.rrule != task.rrule {
-                    ok &= self.note(tasks::set_rrule(self.conn, &id, quick_add.rrule.clone()));
+                } else {
+                    if quick_add.rrule != task.rrule {
+                        ok &= self.note(tasks::set_rrule(self.conn, &id, quick_add.rrule.clone()));
+                    }
+                    ok &= self.note(tasks::transition(self.conn, &id, task::Status::Next));
+                    clarified_to_next = true;
                 }
-            } else {
-                // 非 Inbox / Scheduled 任务（如 Waiting 等待中）：更新排程/跟进时间与周期，但保持原状态不跳视图
-                let sched_changed = start_ms != task.scheduled_start_at;
-                let rrule_changed = quick_add.rrule != task.rrule;
-                if sched_changed || rrule_changed {
+            } else if task.status == task::Status::Scheduled {
+                if let Some(start) = start_ms {
+                    if Some(start) != task.scheduled_start_at || quick_add.rrule != task.rrule {
+                        ok &= self.note(tasks::schedule(
+                            self.conn,
+                            &id,
+                            start,
+                            None,
+                            quick_add.rrule.clone(),
+                        ));
+                    }
+                } else {
+                    // 用户在编辑器中清空了排程任务的 ~time：清除排程时间，若无周期则回退为 Next
+                    let new_status = if quick_add.rrule.is_none() {
+                        Some(task::Status::Next)
+                    } else {
+                        None
+                    };
                     ok &= self.note(tasks::modify(
                         self.conn,
                         &id,
                         &tasks::ModifyInput {
-                            scheduled_start_at: if sched_changed { Some(start_ms) } else { None },
+                            status: new_status,
+                            scheduled_start_at: Some(None),
+                            scheduled_end_at: Some(None),
+                            due_at: Some(None),
+                            rrule: Some(quick_add.rrule.clone()),
+                            ..Default::default()
+                        },
+                    ));
+                }
+            } else {
+                // 非 Inbox / Scheduled 任务（如 Waiting 等待中、Next 等）：更新排程/截止时间与周期，但保持原状态不跳视图
+                let use_due = task.scheduled_start_at.is_none() && task.due_at.is_some();
+                let time_changed = if use_due {
+                    start_ms != task.due_at
+                } else {
+                    start_ms != task.scheduled_start_at
+                };
+                let rrule_changed = quick_add.rrule != task.rrule;
+                if time_changed || rrule_changed {
+                    ok &= self.note(tasks::modify(
+                        self.conn,
+                        &id,
+                        &tasks::ModifyInput {
+                            due_at: if use_due && time_changed {
+                                Some(start_ms)
+                            } else {
+                                None
+                            },
+                            scheduled_start_at: if !use_due && time_changed {
+                                Some(start_ms)
+                            } else {
+                                None
+                            },
                             rrule: if rrule_changed {
                                 Some(quick_add.rrule.clone())
                             } else {
@@ -243,6 +308,20 @@ impl<'a> App<'a> {
                 }
             }
             if ok {
+                if let Ok(after_task) = tasks::get(self.conn, &id) {
+                    let after_tags: Vec<String> =
+                        horae_core::repo::tags::get_task_tags(self.conn, &id)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|t| t.name)
+                            .collect();
+                    self.push_undo(crate::tui::app::UndoAction::TaskSnapshot {
+                        before: Box::new(before_task),
+                        before_tags,
+                        after: Box::new(after_task),
+                        after_tags,
+                    });
+                }
                 if is_quote {
                     self.set_toast(
                         tr!(
@@ -291,6 +370,16 @@ impl<'a> App<'a> {
                             true,
                         );
                     }
+                } else if clarified_to_next {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "✓ 已组织 {} → 下一步 (按 u 撤销)",
+                            "✓ organized {} → Next (press u to undo)",
+                            short_id(&id)
+                        ),
+                        true,
+                    );
                 } else {
                     self.set_toast(
                         tr!(self.lang, "✓ 已组织 {}", "✓ organized {}", short_id(&id)),
@@ -470,10 +559,27 @@ impl<'a> App<'a> {
 
     pub(super) fn confirm_waiting_who(&mut self, input: &str) -> Result<()> {
         if let Some(row) = self.items.get(self.selected).cloned() {
+            if let Ok(t) = tasks::get(self.conn, &row.id) {
+                let tgs: Vec<String> = tags::get_task_tags(self.conn, &row.id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|g| g.name)
+                    .collect();
+                self.waiting_snapshot = Some((t, tgs));
+            }
             let who = input.trim();
             if !who.is_empty() {
-                let new_title = format!("{} [Wait: {}]", row.title, who);
-                tasks::rename(self.conn, &row.id, &new_title)?;
+                let base_title = strip_wait_suffix(&row.title);
+                let new_title = format!("{} [Wait: {}]", base_title, who);
+                tasks::modify(
+                    self.conn,
+                    &row.id,
+                    &tasks::ModifyInput {
+                        title: Some(new_title),
+                        delegated_to: Some(Some(who.to_string())),
+                        ..Default::default()
+                    },
+                )?;
             }
             self.set_mode(Mode::WaitingWhen);
             self.input.clear();
@@ -490,8 +596,22 @@ impl<'a> App<'a> {
         if let Some(row) = self.items.get(self.selected).cloned() {
             match time::parse_time(start_s) {
                 Ok(start_ms) => {
-                    tasks::schedule(self.conn, &row.id, start_ms, None, None)?;
+                    let existing_rrule = tasks::get(self.conn, &row.id).ok().and_then(|t| t.rrule);
+                    tasks::schedule(self.conn, &row.id, start_ms, None, existing_rrule)?;
                     let t = tasks::transition(self.conn, &row.id, task::Status::Waiting)?;
+                    if let Some((before_task, before_tags)) = self.waiting_snapshot.take() {
+                        let after_tags: Vec<String> = tags::get_task_tags(self.conn, &row.id)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|g| g.name)
+                            .collect();
+                        self.push_undo(crate::tui::app::UndoAction::TaskSnapshot {
+                            before: Box::new(before_task),
+                            before_tags,
+                            after: Box::new(t.clone()),
+                            after_tags,
+                        });
+                    }
                     let fmt_time = time::format_quick_time(start_ms);
                     if time::is_past(start_ms, time::now_ms()) {
                         self.flash(
@@ -519,6 +639,9 @@ impl<'a> App<'a> {
                     self.reload()?;
                 }
                 Err(e) => {
+                    if let Some((snap, tgs)) = self.waiting_snapshot.take() {
+                        let _ = tasks::restore_snapshot(self.conn, &snap, &tgs);
+                    }
                     self.flash(
                         ToastKind::Error,
                         tr!(self.lang, "时间无效: {}", "bad time: {}", e),
@@ -639,4 +762,26 @@ impl<'a> App<'a> {
         self.input.clear();
         Ok(())
     }
+}
+
+fn strip_wait_suffix(title: &str) -> &str {
+    if let Some(idx) = title.rfind(" [Wait: ") {
+        if title.ends_with(']') {
+            return title[..idx].trim_end();
+        }
+    }
+    title
+}
+
+fn extract_wait_who(title: &str) -> Option<String> {
+    if let Some(idx) = title.rfind("[Wait: ") {
+        let rest = &title[idx + "[Wait: ".len()..];
+        if let Some(end) = rest.find(']') {
+            let who = rest[..end].trim();
+            if !who.is_empty() {
+                return Some(who.to_string());
+            }
+        }
+    }
+    None
 }

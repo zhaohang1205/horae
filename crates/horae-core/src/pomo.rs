@@ -10,11 +10,33 @@ use std::thread;
 use std::time::Duration;
 
 fn kill_daemon() {
-    let _ = StdCommand::new("pkill")
-        .args(["-f", "horae pomo daemon"])
-        .status();
-    // 等待旧进程实际退出，防止新旧 daemon 同时写 pomo.json 导致文件损坏
-    thread::sleep(Duration::from_millis(200));
+    let state = pomodoro::get_state().unwrap_or_default();
+    if let Some(pid) = state.daemon_pid {
+        if pid > 0 {
+            let _ = StdCommand::new("kill")
+                .args(["-TERM", &pid.to_string()])
+                .status();
+            // 仅当进程仍在运行时轮询等待退出（最多 200ms），避免盲目阻塞 UI 线程
+            let proc_path = std::path::PathBuf::from(format!("/proc/{pid}"));
+            for _ in 0..10 {
+                if !proc_path.exists() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+            return;
+        }
+    }
+    if state.phase != Phase::Idle {
+        if let Ok(st) = StdCommand::new("pkill")
+            .args(["-f", "horae pomo daemon"])
+            .status()
+        {
+            if st.success() {
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
 }
 
 pub fn start(conn: &Connection, task_id: &str) -> Result<()> {
@@ -32,6 +54,21 @@ pub fn start(conn: &Connection, task_id: &str) -> Result<()> {
     state.end_ts = Some(now + duration_ms);
     // 新一轮已开启，“休息完成，再接再厉”横幅不再有意义
     state.break_ended_at = None;
+    state.profile = crate::db::conn::active_profile();
+
+    let exe_path = std::env::current_exe().unwrap_or_else(|_| "horae".into());
+    // stdio 全部置空：daemon 是常驻后台进程，不能继承父进程的终端/管道 fd，
+    // 否则调用方（脚本、测试断言）要等 daemon 结束才能读到 EOF。
+    let mut cmd = StdCommand::new(exe_path);
+    cmd.args(["pomo", "daemon"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(hex_key) = crate::password::session_key_hex() {
+        cmd.env("HORAE_SESSION_KEY", hex_key);
+    }
+    let child = cmd.spawn()?;
+    state.daemon_pid = Some(child.id());
     pomodoro::save_state(&state)?;
 
     let _ = crate::repo::mutate(conn, |tx, at| {
@@ -45,16 +82,6 @@ pub fn start(conn: &Connection, task_id: &str) -> Result<()> {
             at,
         )
     });
-
-    let exe_path = std::env::current_exe().unwrap_or_else(|_| "horae".into());
-    // stdio 全部置空：daemon 是常驻后台进程，不能继承父进程的终端/管道 fd，
-    // 否则调用方（脚本、测试断言）要等 daemon 结束才能读到 EOF。
-    StdCommand::new(exe_path)
-        .args(["pomo", "daemon"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
 
     let lang = Lang::detect(Some(conn));
     let summary = tr!(lang, "🎯 专注模式开启", "🎯 Focus Mode Started");
@@ -102,6 +129,7 @@ pub fn stop(conn: Option<&rusqlite::Connection>, completed: bool) -> anyhow::Res
     state.streak = 0;
     state.cycle = 0;
     state.break_ended_at = None;
+    state.daemon_pid = None;
     pomodoro::save_state(&state)?;
     let lang = Lang::detect(conn);
     notify_with_sound(
@@ -147,7 +175,16 @@ pub fn complete(conn: &Connection) -> Result<PomoState> {
 }
 
 pub fn waybar() -> Result<()> {
-    let state = pomodoro::get_state()?;
+    let mut state = pomodoro::get_state()?;
+    if state.phase != Phase::Idle && crate::password::session_key().is_none() {
+        let pwd_enabled = crate::db::conn::open(state.profile.as_deref())
+            .ok()
+            .and_then(|c| crate::password::is_password_enabled(&c).ok())
+            .unwrap_or(false);
+        if pwd_enabled {
+            state.task_title = Some("🔒 Focus".to_string());
+        }
+    }
     println!("{}", waybar_payload(&state, time::now_ms()));
     Ok(())
 }
@@ -213,7 +250,8 @@ fn waybar_payload(state: &crate::model::pomodoro::PomoState, now_ms: i64) -> ser
 }
 
 pub fn daemon() -> Result<()> {
-    let conn = crate::db::conn::open(None)?;
+    let initial = pomodoro::get_state().unwrap_or_default();
+    let conn = crate::db::conn::open(initial.profile.as_deref())?;
     loop {
         let mut state = pomodoro::get_state().unwrap_or_default();
         if state.phase == Phase::Idle {

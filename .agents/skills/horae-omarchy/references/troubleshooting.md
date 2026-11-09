@@ -50,6 +50,6 @@
 
 ## 6. 主题与 Omarchy 系统主题不一致
 
-- Horae 原生内置 23 款官方主题，且具备 Omarchy 主题自动感知能力；
+- Horae 原生内置 24 款官方主题，且具备 Omarchy 主题自动感知能力；
 - 若需手动切换，可在 TUI 中按 `F5` 快速轮换主题；
 - 或在命令行启动时指定 `--theme <主题名>`（例如 `horae --theme catppuccin`）。

@@ -1,9 +1,12 @@
 //! 开屏（splash）：ASCII 艺术字、GTD 标语展示与按键等待。
+//! 支持动态自适应当前系统主题（包含 24 款 Omarchy 主题与亮/深色模式切换），
+//! 严格遵循 WCAG 2.1 高对比度色彩排版规范。
 
 use horae_core::i18n::Lang;
 use unicode_width::UnicodeWidthStr;
 
 use crate::tui::icons::IconStyle;
+use crate::tui::theme::Theme;
 
 /// figlet 字体 "Delta Corps Priest1" 渲染的 HORAE 艺术字（视觉主体）。
 const HORAE_LOGO: &[&str] = &[
@@ -39,12 +42,105 @@ fn center_pad(text: &str, width: usize) -> String {
     format!("{}{}{}", " ".repeat(left), text, " ".repeat(right))
 }
 
-/// Catppuccin 点缀色（RGB），与 `theme.rs` 的 Mocha 保持一致。
-type Rgb = (u8, u8, u8);
-const ROSEWATER: Rgb = (245, 224, 220);
-const TEXT: Rgb = (205, 214, 244);
-const OVERLAY0: Rgb = (108, 112, 134);
-const CRUST: Rgb = (17, 17, 27);
+/// RGB 颜色三元组。
+pub(crate) type Rgb = (u8, u8, u8);
+
+/// 将 [`ratatui::style::Color`] 转换为 RGB 三元组。
+pub(crate) fn color_to_rgb(color: ratatui::style::Color) -> Rgb {
+    match color {
+        ratatui::style::Color::Rgb(r, g, b) => (r, g, b),
+        ratatui::style::Color::Black => (0, 0, 0),
+        ratatui::style::Color::White => (255, 255, 255),
+        _ => (128, 128, 128),
+    }
+}
+
+/// 计算 sRGB 颜色的相对感知亮度（WCAG 2.1 规范）。
+pub(crate) fn relative_luminance((r, g, b): Rgb) -> f32 {
+    let srgb = |c: u8| -> f32 {
+        let v = (c as f32) / 255.0;
+        if v <= 0.03928 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * srgb(r) + 0.7152 * srgb(g) + 0.0722 * srgb(b)
+}
+
+/// 计算两种颜色的 WCAG 对比度比率（1.0 ~ 21.0）。
+pub(crate) fn contrast_ratio(c1: Rgb, c2: Rgb) -> f32 {
+    let l1 = relative_luminance(c1);
+    let l2 = relative_luminance(c2);
+    let (lighter, darker) = if l1 > l2 { (l1, l2) } else { (l2, l1) };
+    (lighter + 0.05) / (darker + 0.05)
+}
+
+/// 从候选颜色集合中，挑选与指定背景具有最高 WCAG 对比度的颜色。
+pub(crate) fn best_contrast(bg: Rgb, candidates: &[Rgb]) -> Rgb {
+    candidates
+        .iter()
+        .copied()
+        .max_by(|&a, &b| {
+            contrast_ratio(bg, a)
+                .partial_cmp(&contrast_ratio(bg, b))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .unwrap_or((255, 255, 255))
+}
+
+/// 开屏页自适应调色板（派生自当前激活的 [`Theme`]）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SplashPalette {
+    /// 终端基底色
+    pub bg: Rgb,
+    /// 正文主体文字色
+    pub fg: Rgb,
+    /// 横幅底色（取自主题的主强调色 accent）
+    pub banner_bg: Rgb,
+    /// 横幅字标文字色（WCAG 最高对比度计算）
+    pub banner_fg: Rgb,
+    /// 装饰分割线与卡片边框色
+    pub border: Rgb,
+    /// 弱化辅助文字（标签、页脚、慢闪提示）
+    pub text_dim: Rgb,
+    /// 图标与关键视觉点缀色
+    pub accent: Rgb,
+}
+
+impl SplashPalette {
+    /// 从主题构建开屏调色板，确保无论浅色/深色主题，各元素均具备清晰的设计层级。
+    pub fn from_theme(theme: &Theme) -> Self {
+        let bg = color_to_rgb(theme.bg);
+        let fg = color_to_rgb(theme.fg);
+        let accent = color_to_rgb(theme.accent);
+        let border = color_to_rgb(theme.border_inactive);
+        let text_dim = color_to_rgb(theme.text_dim);
+
+        let banner_bg = accent;
+        // 在主题底色、主体前景色、纯黑、纯白以及深炭黑中挑选对比度最高的前景字标色
+        let banner_fg = best_contrast(
+            banner_bg,
+            &[
+                bg,
+                fg,
+                (17, 17, 27),    // 深炭黑（Crust）
+                (255, 255, 255), // 纯白
+                (0, 0, 0),       // 纯黑
+            ],
+        );
+
+        Self {
+            bg,
+            fg,
+            banner_bg,
+            banner_fg,
+            border,
+            text_dim,
+            accent,
+        }
+    }
+}
 
 /// 前景色转义序列。
 fn fg(color: Rgb) -> String {
@@ -77,6 +173,7 @@ fn draw_subtitle<W: std::io::Write>(
     cols: u16,
     y: u16,
     brand: &str,
+    palette: &SplashPalette,
 ) -> std::io::Result<()> {
     use crossterm::{cursor::MoveTo, ExecutableCommand};
     let dash = "─────";
@@ -84,9 +181,9 @@ fn draw_subtitle<W: std::io::Write>(
     let start_x = center_x(cols, full_text.width() as u16);
 
     out.execute(MoveTo(start_x, y))?;
-    write!(out, "{}{dash} \x1b[0m", fg(OVERLAY0))?;
-    write!(out, "{}{brand}\x1b[0m", fg(ROSEWATER))?;
-    write!(out, "{} {dash}\x1b[0m", fg(OVERLAY0))?;
+    write!(out, "{}{dash} \x1b[0m", fg(palette.border))?;
+    write!(out, "\x1b[1m{}{brand}\x1b[0m", fg(palette.accent))?;
+    write!(out, "{} {dash}\x1b[0m", fg(palette.border))?;
     Ok(())
 }
 
@@ -117,19 +214,28 @@ fn draw_card_row<W: std::io::Write>(
 /// 品牌副标题：呼应「时间女神」。
 const BRAND_SUBTITLE: &str = "Goddess of Time";
 
-/// 底部提示：主提示语。
-fn prompts(lang: Lang) -> &'static str {
-    match lang {
-        Lang::Zh => "按任意键开始…",
-        Lang::En => "Press any key to start…",
+/// 底部提示：主提示语（自适应宽度展示快捷键引导）。
+fn prompts(lang: Lang, cols: u16) -> &'static str {
+    if cols >= 62 {
+        match lang {
+            Lang::Zh => "按任意键开启 · F5 切换主题 · F6 切换语言",
+            Lang::En => "Press any key · F5 Theme · F6 Language",
+        }
+    } else {
+        match lang {
+            Lang::Zh => "按任意键开始…",
+            Lang::En => "Press any key to start…",
+        }
     }
 }
 
 pub(super) fn show_splash(
     conn: &rusqlite::Connection,
     mut lang: Lang,
+    mut theme: Theme,
+    mut omarchy_auto: bool,
     icon_style: IconStyle,
-) -> anyhow::Result<Lang> {
+) -> anyhow::Result<(Lang, Theme, bool)> {
     use crossterm::{
         cursor,
         event::{self, Event, KeyCode},
@@ -139,16 +245,25 @@ pub(super) fn show_splash(
 
     let mut stdout = std::io::stdout();
 
-    // 先进入 raw mode 再画首帧，这样等待期间能收到 Resize / F6 事件并重绘。
+    // 先进入 raw mode 再画首帧，这样等待期间能收到 Resize / F5 / F6 事件并重绘。
     crossterm::terminal::enable_raw_mode()?;
-    let result = (|| -> anyhow::Result<Lang> {
+    let result = (|| -> anyhow::Result<(Lang, Theme, bool)> {
         // 开屏绘制会多次移动输出位置，隐藏硬件光标避免用户看到跳动。
         crossterm::execute!(stdout, cursor::Hide)?;
         let (mut cols, mut rows) = terminal::size()?;
         // 首帧绘制前获得耗时快照并冻结（包含全部初始化与终端就绪开销）
         let boot_duration = horae_core::time::boot_elapsed();
         loop {
-            draw_frame_with(&mut stdout, cols, rows, lang, boot_duration, icon_style)?;
+            draw_frame_with(
+                &mut stdout,
+                cols,
+                rows,
+                lang,
+                &theme,
+                omarchy_auto,
+                boot_duration,
+                icon_style,
+            )?;
             stdout.flush()?;
             let mut redraw = false;
             while !redraw {
@@ -166,7 +281,16 @@ pub(super) fn show_splash(
                         );
                         redraw = true;
                     }
-                    Event::Key(_) => return Ok(lang),
+                    // F5 切换主题（与应用一致），写回 settings 并重绘。
+                    Event::Key(key) if key.code == KeyCode::F(5) => {
+                        let (next_theme, next_auto, key_str) =
+                            crate::tui::theme::cycle_theme(&theme, omarchy_auto);
+                        let _ = horae_core::repo::settings::set(conn, "theme", key_str);
+                        theme = next_theme;
+                        omarchy_auto = next_auto;
+                        redraw = true;
+                    }
+                    Event::Key(_) => return Ok((lang, theme, omarchy_auto)),
                     Event::Resize(c, r) => {
                         cols = c;
                         rows = r;
@@ -183,6 +307,7 @@ pub(super) fn show_splash(
         cursor::MoveTo(0, 0),
         cursor::Show
     );
+    let _ = write!(stdout, "\x1b[0m");
     let _ = stdout.flush();
     let _ = crossterm::terminal::disable_raw_mode();
     result
@@ -297,12 +422,15 @@ fn splash_layout(cols: u16, rows: u16, logo_h: u16) -> SplashLayout {
     }
 }
 
-/// 清屏并绘制一帧纯文本开屏内容。
+/// 清屏并绘制一帧自适应系统主题的开屏内容。
+#[allow(clippy::too_many_arguments)]
 fn draw_frame_with<W: std::io::Write>(
     out: &mut W,
     cols: u16,
     rows: u16,
     lang: Lang,
+    theme: &Theme,
+    omarchy_auto: bool,
     boot_duration: Option<std::time::Duration>,
     icon_style: IconStyle,
 ) -> anyhow::Result<()> {
@@ -316,12 +444,14 @@ fn draw_frame_with<W: std::io::Write>(
         .unwrap_or(0);
     let lay = splash_layout(cols, rows, logo_h);
 
+    let palette = SplashPalette::from_theme(theme);
+
     out.execute(crossterm::terminal::Clear(
         crossterm::terminal::ClearType::All,
     ))?;
 
-    let banner_bg = ROSEWATER;
-    let banner_fg = CRUST;
+    let banner_bg = palette.banner_bg;
+    let banner_fg = palette.banner_fg;
 
     let draw_banner_line =
         |out: &mut W, y: u16, text: &str, sgr: &str, block_w: Option<u16>| -> std::io::Result<()> {
@@ -347,7 +477,7 @@ fn draw_frame_with<W: std::io::Write>(
             )
         };
 
-    // 1. 粉色通栏横幅与 HORAE 像素字标
+    // 1. 主题自适应通栏横幅与 HORAE 像素字标
     for i in 0..lay.banner_pad_top {
         draw_banner_line(out, lay.banner_y + i, "", "", None)?;
     }
@@ -371,11 +501,11 @@ fn draw_frame_with<W: std::io::Write>(
     }
 
     // 2. 带分割细线的品牌副标题 `───── Goddess of Time ─────`
-    draw_subtitle(out, cols, lay.subtitle_y, BRAND_SUBTITLE)?;
+    draw_subtitle(out, cols, lay.subtitle_y, BRAND_SUBTITLE, &palette)?;
 
     // 3. 核心哲学标语 `Ideas in. Time accounted.`
     let slogan = tr!(lang, "心念所至 · 岁月有迹", "Ideas in. Time accounted.");
-    write_centered(out, cols, lay.slogan_y, "", slogan, TEXT)?;
+    write_centered(out, cols, lay.slogan_y, "", slogan, palette.fg)?;
 
     // 4. 四列特性指标卡片（极速启动、快速捕获、时间资产、GTD心流）
     if let Some(cy) = lay.cards_y {
@@ -407,8 +537,8 @@ fn draw_frame_with<W: std::io::Write>(
             [icon_bolt, icon_pencil, icon_clock, icon_workflow],
             card_w,
             "",
-            ROSEWATER,
-            OVERLAY0,
+            palette.accent,
+            palette.border,
         )?;
         // 行 1：指标值
         draw_card_row(
@@ -418,8 +548,8 @@ fn draw_frame_with<W: std::io::Write>(
             [&boot_str, "<10s", val_time, val_gtd],
             card_w,
             "\x1b[1m",
-            TEXT,
-            OVERLAY0,
+            palette.fg,
+            palette.border,
         )?;
         // 行 2：副标签
         draw_card_row(
@@ -429,21 +559,21 @@ fn draw_frame_with<W: std::io::Write>(
             [lbl_startup, lbl_capture, lbl_asset, lbl_workflow],
             card_w,
             "",
-            OVERLAY0,
-            OVERLAY0,
+            palette.text_dim,
+            palette.border,
         )?;
     }
 
-    // 5. 交互提示（暗色闪烁）
+    // 5. 交互提示（暗色慢闪，智能展示按键指引）
     if let Some(py) = lay.prompt_y {
-        let prompt = prompts(lang);
-        write_centered(out, cols, py, "\x1b[5m", prompt, OVERLAY0)?;
+        let prompt = prompts(lang, cols);
+        write_centered(out, cols, py, "\x1b[5m", prompt, palette.text_dim)?;
     }
 
-    // 6. 底部信息行：版本（沙漏图标）、作者（GitHub 图标 + 点击跳转隐藏链接）、RUST BUILT（Rust 图标）
-    let (icon_hourglass, icon_github, icon_rust) = match icon_style {
-        IconStyle::Nerd => ("\u{f252} ", "\u{f09b} ", "\u{e7a8} "),
-        IconStyle::Ascii => ("", "", ""),
+    // 6. 底部信息行：版本（沙漏图标）、作者（GitHub 图标 + 点击跳转隐藏链接）、RUST BUILT（Rust 图标）、主题徽章
+    let (icon_hourglass, icon_github, icon_rust, icon_palette) = match icon_style {
+        IconStyle::Nerd => ("\u{f252} ", "\u{f09b} ", "\u{e7a8} ", "\u{f042} "),
+        IconStyle::Ascii => ("", "", "", ""),
     };
 
     let version = format!("{icon_hourglass}horae v{}", env!("CARGO_PKG_VERSION"));
@@ -453,7 +583,18 @@ fn draw_frame_with<W: std::io::Write>(
     let author_link =
         format!("\x1b]8;;https://github.com/zhaohang1205\x1b\\{author_plain}\x1b]8;;\x1b\\");
 
-    let (visible_footer, full_footer) = if cols >= 54 {
+    let theme_badge = if omarchy_auto {
+        format!("{icon_palette}{}", tr!(lang, "系统自适应", "Auto"))
+    } else {
+        format!("{icon_palette}{}", theme.id.display_name(lang))
+    };
+
+    let (visible_footer, full_footer) = if cols >= 80 {
+        (
+            format!("{version}  ·  {author_plain}  ·  {rust_built}  ·  {theme_badge}"),
+            format!("{version}  ·  {author_link}  ·  {rust_built}  ·  {theme_badge}"),
+        )
+    } else if cols >= 54 {
         (
             format!("{version}  ·  {author_plain}  ·  {rust_built}"),
             format!("{version}  ·  {author_link}  ·  {rust_built}"),
@@ -468,7 +609,7 @@ fn draw_frame_with<W: std::io::Write>(
 
     let start_x = center_x(cols, visible_footer.width() as u16);
     out.execute(cursor::MoveTo(start_x, lay.footer_y))?;
-    write!(out, "{}{full_footer}\x1b[0m", fg(OVERLAY0))?;
+    write!(out, "{}{full_footer}\x1b[0m", fg(palette.text_dim))?;
 
     Ok(())
 }
@@ -513,9 +654,42 @@ mod splash_tests {
     }
 
     #[test]
+    fn splash_palette_meets_wcag_contrast_across_themes() {
+        // 测试深色主题（Mocha）与亮色主题（Latte / FlexokiLight）
+        let themes = [
+            Theme::catppuccin_mocha(),
+            Theme::catppuccin_latte(),
+            Theme::flexoki_light(),
+            Theme::gruvbox(),
+            Theme::nord(),
+        ];
+
+        for t in &themes {
+            let palette = SplashPalette::from_theme(t);
+            let contrast = contrast_ratio(palette.banner_bg, palette.banner_fg);
+            assert!(
+                contrast >= 4.5,
+                "主题 {:?} 的横幅字标对比度应满足 WCAG AA 规范 (>= 4.5)，实际为 {contrast:.2}",
+                t.id
+            );
+        }
+    }
+
+    #[test]
     fn draw_frame_renders_clean_text_splash() {
+        let theme = Theme::catppuccin_mocha();
         let mut buf = std::io::Cursor::new(Vec::new());
-        draw_frame_with(&mut buf, 80, 24, Lang::Zh, None, IconStyle::Nerd).unwrap();
+        draw_frame_with(
+            &mut buf,
+            80,
+            24,
+            Lang::Zh,
+            &theme,
+            false,
+            None,
+            IconStyle::Nerd,
+        )
+        .unwrap();
         let s = String::from_utf8(buf.into_inner()).unwrap();
         assert!(s.contains("█"), "应绘制 HORAE 艺术字");
         assert!(s.contains(BRAND_SUBTITLE), "应绘制品牌副标题");
@@ -536,6 +710,7 @@ mod splash_tests {
     #[test]
     fn draw_frame_shows_boot_ms_bilingual() {
         use std::time::Duration;
+        let theme = Theme::catppuccin_mocha();
         // 打点后卡片应携带启动用时
         for lang in [Lang::Zh, Lang::En] {
             let mut buf = std::io::Cursor::new(Vec::new());
@@ -544,6 +719,8 @@ mod splash_tests {
                 80,
                 24,
                 lang,
+                &theme,
+                false,
                 Some(Duration::from_millis(42)),
                 IconStyle::Nerd,
             )
@@ -561,6 +738,8 @@ mod splash_tests {
             80,
             24,
             Lang::Zh,
+            &theme,
+            false,
             Some(Duration::from_micros(800)),
             IconStyle::Nerd,
         )
@@ -572,12 +751,15 @@ mod splash_tests {
     #[test]
     fn draw_frame_supports_ascii_icon_style() {
         use std::time::Duration;
+        let theme = Theme::catppuccin_mocha();
         let mut buf = std::io::Cursor::new(Vec::new());
         draw_frame_with(
             &mut buf,
             80,
             24,
             Lang::En,
+            &theme,
+            false,
             Some(Duration::from_millis(3)),
             IconStyle::Ascii,
         )
@@ -590,5 +772,59 @@ mod splash_tests {
             !s.contains("\u{f252}"),
             "ASCII 模式不应含 Nerd Font 沙漏图标"
         );
+    }
+
+    #[test]
+    fn draw_frame_adapts_to_theme_and_displays_badge() {
+        let mocha = Theme::catppuccin_mocha();
+        let latte = Theme::catppuccin_latte();
+
+        // 验证深色 Mocha
+        let mut buf_mocha = std::io::Cursor::new(Vec::new());
+        draw_frame_with(
+            &mut buf_mocha,
+            88,
+            24,
+            Lang::Zh,
+            &mocha,
+            false,
+            None,
+            IconStyle::Nerd,
+        )
+        .unwrap();
+        let s_mocha = String::from_utf8(buf_mocha.into_inner()).unwrap();
+        assert!(s_mocha.contains("Catppuccin 摩卡"));
+
+        // 验证亮色 Latte
+        let mut buf_latte = std::io::Cursor::new(Vec::new());
+        draw_frame_with(
+            &mut buf_latte,
+            88,
+            24,
+            Lang::Zh,
+            &latte,
+            false,
+            None,
+            IconStyle::Nerd,
+        )
+        .unwrap();
+        let s_latte = String::from_utf8(buf_latte.into_inner()).unwrap();
+        assert!(s_latte.contains("Catppuccin 拿铁"));
+
+        // 验证系统自动跟随模式
+        let mut buf_auto = std::io::Cursor::new(Vec::new());
+        draw_frame_with(
+            &mut buf_auto,
+            88,
+            24,
+            Lang::Zh,
+            &mocha,
+            true,
+            None,
+            IconStyle::Nerd,
+        )
+        .unwrap();
+        let s_auto = String::from_utf8(buf_auto.into_inner()).unwrap();
+        assert!(s_auto.contains("系统自适应"));
     }
 }

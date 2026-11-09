@@ -448,6 +448,15 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
         heat: 98,
     },
     KeyDef {
+        keys: "t",
+        zh: "下一步",
+        en: "next",
+        group: KeyGroup::Task,
+        status: true,
+        when: When::StatusNot(&[Status::Next, Status::Done]),
+        heat: 97,
+    },
+    KeyDef {
         keys: "s",
         zh: "将来",
         en: "someday",

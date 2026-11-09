@@ -20,9 +20,9 @@ pub use quotes::{count_quotes, count_quotes_in_status, list_quotes, quote_task_i
 pub use timeline::{describe_event, TimelineEntry};
 pub use transition::{
     add_checklist_item, archive, create_capture, delete_checklist_item, ensure_ready_for_pomodoro,
-    modify, move_checklist_item, purge, rename, rename_checklist_item, schedule, set_due,
-    set_priority, set_rrule, toggle_checklist_item, toggle_next_checklist_item, transition,
-    unarchive, update_notes, CaptureInput, ModifyInput,
+    modify, move_checklist_item, purge, rename, rename_checklist_item, restore_snapshot, schedule,
+    set_due, set_priority, set_rrule, toggle_checklist_item, toggle_next_checklist_item,
+    transition, unarchive, undo_habit_check_in, update_notes, CaptureInput, ModifyInput,
 };
 
 use crate::model::task::Task;
@@ -38,9 +38,12 @@ pub(crate) const TASK_COLUMNS: &str =
         delegated_to,checklist,archive_reason";
 
 pub(crate) fn row_to_task(r: &rusqlite::Row) -> rusqlite::Result<Task> {
+    let raw_title: String = r.get(1)?;
+    let raw_notes: String = r.get(2)?;
     let status_str: String = r.get(3)?;
-    let delegated_to: Option<String> = r.get(14)?;
-    let cl_str: String = r.get(15)?;
+    let raw_delegated: Option<String> = r.get(14)?;
+    let raw_cl: String = r.get(15)?;
+    let cl_str = crate::password::maybe_decrypt_field(&raw_cl);
     let checklist = if cl_str.is_empty() || cl_str == "[]" {
         Vec::new()
     } else {
@@ -49,8 +52,8 @@ pub(crate) fn row_to_task(r: &rusqlite::Row) -> rusqlite::Result<Task> {
 
     Ok(Task {
         id: r.get(0)?,
-        title: r.get(1)?,
-        notes: r.get(2)?,
+        title: crate::password::maybe_decrypt_field(&raw_title),
+        notes: crate::password::maybe_decrypt_field(&raw_notes),
         status: status_str
             .parse()
             .unwrap_or(crate::model::task::Status::Inbox),
@@ -64,7 +67,7 @@ pub(crate) fn row_to_task(r: &rusqlite::Row) -> rusqlite::Result<Task> {
         completed_at: r.get(11)?,
         archived_at: r.get(12)?,
         updated_at: r.get(13)?,
-        delegated_to,
+        delegated_to: raw_delegated.map(|d| crate::password::maybe_decrypt_field(&d)),
         checklist,
         archive_reason: r.get(16)?,
     })

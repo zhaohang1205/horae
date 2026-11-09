@@ -296,7 +296,10 @@ impl<'a> App<'a> {
         let mut tag_map = tags::get_tags_for_tasks(self.conn, &ids)?;
         for (t, due) in tasks {
             let base_due = due.or_else(|| self.row_due(&t));
-            let row_tags = tag_map.remove(&t.id).unwrap_or_default();
+            let mut row_tags = tag_map.remove(&t.id).unwrap_or_default();
+            if self.view == View::Review {
+                row_tags.insert(0, crate::tui::status_cn(self.lang, t.status).to_string());
+            }
             let mut row = row_from_tags_with_due(&t, 0, row_tags, base_due);
             row.checked_in_today = checked_today.contains(&t.id);
             self.items.push(row);

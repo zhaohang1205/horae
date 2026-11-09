@@ -1,9 +1,18 @@
 use std::path::PathBuf;
+use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
 
 use rusqlite::Connection;
 
 use crate::db::migrate;
+
+static ACTIVE_PROFILE: OnceLock<RwLock<Option<String>>> = OnceLock::new();
+
+pub fn active_profile() -> Option<String> {
+    ACTIVE_PROFILE
+        .get()
+        .and_then(|lock| lock.read().ok().and_then(|g| g.clone()))
+}
 
 /// Open (creating if needed) the horae SQLite database for a named profile and
 /// run migrations. When `name` is `None`, the config's default profile is used.
@@ -12,7 +21,10 @@ use crate::db::migrate;
 /// `horae.db` is the default profile, so existing setups keep working.
 pub fn open(name: Option<&str>) -> anyhow::Result<Connection> {
     let config = crate::config::Config::load()?;
-    let (_, profile) = config.resolve_profile(name)?;
+    let (resolved_name, profile) = config.resolve_profile(name)?;
+    if let Ok(mut guard) = ACTIVE_PROFILE.get_or_init(|| RwLock::new(None)).write() {
+        *guard = Some(resolved_name.to_string());
+    }
     let path = config.db_path(profile);
 
     let dir = path

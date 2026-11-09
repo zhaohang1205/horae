@@ -65,7 +65,7 @@ horae 是一个 **Rust 二进制，启动开销约 2 ms**——字体探测直�
 - **参考模式** — 并排显示 token、含义和语法示例
 - **极速模式** — 紧凑列表，候选文本以幽灵字直接内联在输入行
 
-<!-- 待插入补全模式对比截图：assets/screenshots/completion-modes.png -->
+![horae 响应式补全模式](assets/screenshots/completion-modes.png)
 
 ### 完整语法，一行搞定
 
@@ -358,13 +358,13 @@ CLI `capture`、`modify`、TUI 输入条、手机同步文件与飞书消息共�
 | `horae sound <status\|on\|off\|toggle\|test>` | `bell` | 管理声学音效系统（状态、开关、试听） |
 | `horae password <enable\|disable\|change\|status>` | `passwd` | 管理密码安全保护模式 |
 
-全局参数在任何子命令上都可用：`--profile <名称>` 选择数据集，`--lang zh`（或环境变量 `HORAE_LANG=zh`）让 `--help` 输出中文，`--theme <主题>`（或环境变量 `HORAE_THEME=<主题>`）指定界面主题（支持 Omarchy 全部 23 款官方主题，如 `catppuccin`、`latte`、`tokyo-night`、`gruvbox`、`retro-82`、`nord`、`kanagawa`、`everforest`、`rose-pine`、`hackerman` 等，或 `auto` 自动跟随系统）。
+全局参数在任何子命令上都可用：`--profile <名称>` 选择数据集，`--lang zh`（或环境变量 `HORAE_LANG=zh`）让 `--help` 输出中文，`--theme <主题>`（或环境变量 `HORAE_THEME=<主题>`）指定界面主题（支持 Omarchy 全部 24 款官方主题，如 `catppuccin`、`latte`、`tokyo-night`、`gruvbox`、`retro-82`、`nord`、`kanagawa`、`everforest`、`rose-pine`、`hackerman`、`jade-horse` 等，或 `auto` 自动跟随系统）。
 
 ---
 
 ## TUI 界面
 
-<!-- 待插入 TUI 三栏主界面截图：assets/screenshots/tui-main.png -->
+![horae TUI 三栏主界面](assets/screenshots/tui-main.png)
 
 直接运行 `horae` 进入三栏布局：左侧导航、中间任务列表、右侧详情与事件时间线。
 
@@ -446,7 +446,7 @@ horae pomo waybar       # 输出 JSON 供 waybar 模块消费
 
 ## 密码保护
 
-<!-- 待插入锁屏界面截图：assets/screenshots/lock-screen.png -->
+![horae 密码保护锁屏界面](assets/screenshots/lock-screen.png)
 
 为保护隐私与数据安全，`horae` 提供了可选的数据加密保护机制（基于 PBKDF2-HMAC-SHA256，50,000 次安全迭代与 16 字节随机盐）：
 

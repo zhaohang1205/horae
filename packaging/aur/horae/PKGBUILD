@@ -1,0 +1,53 @@
+# Maintainer: Alex Zhao <zhaohang1205@gmail.com>
+pkgname=horae
+pkgver=0.2.6
+pkgrel=1
+pkgdesc="A terminal GTD task manager with TUI and CLI powered by Rust & SQLite"
+arch=('x86_64')
+url="https://github.com/zhaohang1205/horae"
+license=('GPL-3.0-only')
+depends=('gcc-libs' 'glibc')
+makedepends=('cargo')
+optdepends=(
+    'libnotify: desktop notifications for timers and tasks'
+    'ttf-nerd-fonts-symbols: Nerd Font glyphs for TUI'
+    'syncthing: mobile sync bridge'
+)
+options=('!lto')
+
+source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=('a81225f31bbf82e8aa487ca054036499d87ef84599fa685644d89175b5c5a859')
+
+prepare() {
+    cd "${pkgname}-${pkgver}"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd "${pkgname}-${pkgver}"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    CFLAGS+=' -ffat-lto-objects'
+    cargo build --frozen --release --package horae
+}
+
+check() {
+    cd "${pkgname}-${pkgver}"
+    export RUSTUP_TOOLCHAIN=stable
+    CFLAGS+=' -ffat-lto-objects'
+    cargo test --frozen --workspace
+}
+
+package() {
+    cd "${pkgname}-${pkgver}"
+    install -Dm755 "target/release/horae" "${pkgdir}/usr/bin/horae"
+    install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+    install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+    install -Dm644 README_CN.md "${pkgdir}/usr/share/doc/${pkgname}/README_CN.md"
+
+    # Shell completions
+    "${pkgdir}/usr/bin/horae" completions bash | install -Dm644 /dev/stdin "${pkgdir}/usr/share/bash-completion/completions/horae"
+    "${pkgdir}/usr/bin/horae" completions zsh | install -Dm644 /dev/stdin "${pkgdir}/usr/share/zsh/site-functions/_horae"
+    "${pkgdir}/usr/bin/horae" completions fish | install -Dm644 /dev/stdin "${pkgdir}/usr/share/fish/vendor_completions.d/horae.fish"
+}

@@ -14,7 +14,8 @@ pub fn run(conn: &Connection, message_parts: &[String]) -> Result<()> {
         let rows = stmt.query_map([EV_LOGGED], |r| {
             let meta: Option<String> = r.get(0)?;
             let at: i64 = r.get(1)?;
-            Ok((meta.unwrap_or_default(), at))
+            let text = horae_core::password::maybe_decrypt_field(&meta.unwrap_or_default());
+            Ok((text, at))
         })?;
 
         let mut logs = Vec::new();

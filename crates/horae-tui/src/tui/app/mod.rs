@@ -239,6 +239,20 @@ pub(crate) enum UndoAction {
         item_id: String,
         item_title: String,
     },
+    HabitCheckIn {
+        task_id: String,
+        prev_status: horae_core::model::task::Status,
+        prev_start: Option<i64>,
+        prev_end: Option<i64>,
+        prev_due: Option<i64>,
+        title: String,
+    },
+    TaskSnapshot {
+        before: Box<Task>,
+        before_tags: Vec<String>,
+        after: Box<Task>,
+        after_tags: Vec<String>,
+    },
 }
 
 #[derive(Clone)]
@@ -282,6 +296,8 @@ pub(crate) struct App<'a> {
     pub(crate) input_cursor: usize,
     /// 组织/编辑模式正在编辑的任务 id。
     pub(crate) organizing_id: Option<String>,
+    /// 等待流转（w）进行中的编辑前快照，用于完整撤销或 Esc 还原。
+    pub(crate) waiting_snapshot: Option<(Task, Vec<String>)>,
     pub(crate) status_message: String,
     /// 瞬时操作提示浮层（Toast）。
     pub(crate) toast: Option<Toast>,
@@ -458,6 +474,9 @@ impl<'a> App<'a> {
             Some("1")
         );
         let locked = password_enabled && std::env::var("HORAE_UNLOCKED").is_err();
+        if locked {
+            horae_core::password::clear_session_key();
+        }
         // 提示音效开关：缺省视为开启（settings 显式写 "0" 才关闭）。
         let sound_enabled = !matches!(
             settings_map.get("sound_enabled").map(|s| s.as_str()),
@@ -480,6 +499,7 @@ impl<'a> App<'a> {
             input: String::new(),
             input_cursor: 0,
             organizing_id: None,
+            waiting_snapshot: None,
             status_message: String::new(),
             toast: None,
             undo_stack: Vec::new(),
@@ -539,10 +559,11 @@ impl<'a> App<'a> {
             lock_input: String::new(),
             lock_error: None,
         };
-        app.refresh()?;
-
-        app.load_detail();
-        if start_in_capture {
+        if !app.locked {
+            app.refresh()?;
+            app.load_detail();
+        }
+        if start_in_capture && !app.locked {
             // 启动即快速录入：空输入，光标就位。
             app.input.clear();
             app.set_mode(Mode::Capturing);

@@ -133,7 +133,31 @@ pub fn parse_quick_add(input: &str) -> QuickAdd {
             QuickAddKind::Tag => tags.push(strip_token_prefix(&tok.text).to_string()),
             QuickAddKind::Time => {
                 let mut combined = strip_token_prefix(&tok.text).to_string();
-                // 吸收紧跟的裸 HH:MM，使 `~2026-08-20 15:30` / `～2026-08-20 15：30` 成为完整绝对时间。
+                // 吸收多词英文时间短语：`~next mon` / `~next friday` / `~day after tomorrow`
+                if combined.eq_ignore_ascii_case("next") {
+                    if let Some(next_tok) = tokens.get(i + 1) {
+                        if next_tok.kind == QuickAddKind::Title
+                            && day_code(&next_tok.text).is_some()
+                        {
+                            combined.push(' ');
+                            combined.push_str(&next_tok.text);
+                            i += 1;
+                        }
+                    }
+                } else if combined.eq_ignore_ascii_case("day") {
+                    if let (Some(t1), Some(t2)) = (tokens.get(i + 1), tokens.get(i + 2)) {
+                        if t1.kind == QuickAddKind::Title
+                            && t2.kind == QuickAddKind::Title
+                            && t1.text.eq_ignore_ascii_case("after")
+                            && t2.text.eq_ignore_ascii_case("tomorrow")
+                        {
+                            combined.push_str(" after tomorrow");
+                            i += 2;
+                        }
+                    }
+                }
+
+                // 吸收紧跟的裸 HH:MM，使 `~2026-08-20 15:30` / `~next mon 15:30` 成为完整时间。
                 if let Some(next) = tokens.get(i + 1) {
                     if next.kind == QuickAddKind::Title && is_hhmm(&next.text) {
                         combined.push(' ');
@@ -176,18 +200,19 @@ pub fn parse_quick_add(input: &str) -> QuickAdd {
     }
 }
 
-/// 是否形如裸的 `HH:MM`（1-2 位小时 + 冒号/中文冒号 + 2 位分钟）。
+/// 是否形如合法的 24 小时制裸 `HH:MM`（0..=23 小时 + 冒号/中文冒号 + 00..=59两位分钟）。
 pub fn is_hhmm(s: &str) -> bool {
     let normalized = s.replace('：', ":");
     let mut parts = normalized.split(':');
     match (parts.next(), parts.next(), parts.next()) {
         (Some(h), Some(m), None) => {
             !h.is_empty()
-                && !m.is_empty()
                 && h.len() <= 2
                 && m.len() == 2
                 && h.chars().all(|c| c.is_ascii_digit())
                 && m.chars().all(|c| c.is_ascii_digit())
+                && h.parse::<u32>().is_ok_and(|hh| hh < 24)
+                && m.parse::<u32>().is_ok_and(|mm| mm < 60)
         }
         _ => false,
     }
@@ -549,17 +574,68 @@ pub fn rrule_friendly_desc(s: &str, lang: crate::i18n::Lang) -> String {
 
 /// 判定一个循环简写/标准 RRULE 是否有效。
 ///
-/// 简写能映射成标准 RRULE（非原样 fallback），或已是 `FREQ=` 开头的 RRULE。
-/// 无法被任何分支识别的词（原样 fallback）视为无效。支持
-/// `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY` 及其 INTERVAL/BYDAY/BYMONTHDAY/BYMONTH 组合。
+/// 简写必须能解析为 `FREQ=` 开头的标准 RRULE，所有键值合法且能被调度引擎成功展开。
+/// 支持 `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY` 及其 INTERVAL/COUNT/UNTIL/BYDAY/BYMONTHDAY/BYMONTH 组合。
 pub fn rrule_valid(rrule: &str) -> bool {
     let trimmed = rrule.trim();
     if trimmed.is_empty() {
         return false;
     }
     let resolved = parse_rrule_shorthand(trimmed);
-    let looks_like_rrule = resolved.to_lowercase().starts_with("freq=");
-    resolved != trimmed || looks_like_rrule
+    let clean = resolved
+        .strip_prefix("RRULE:")
+        .or_else(|| resolved.strip_prefix("rrule:"))
+        .unwrap_or(&resolved)
+        .trim();
+    if !clean.to_ascii_lowercase().starts_with("freq=") {
+        return false;
+    }
+    for part in clean.split(';') {
+        if part.is_empty() {
+            return false;
+        }
+        let Some((k, v)) = part.split_once('=') else {
+            return false;
+        };
+        let k = k.trim().to_ascii_uppercase();
+        let v = v.trim();
+        if v.is_empty() {
+            return false;
+        }
+        match k.as_str() {
+            "FREQ" => {
+                if !matches!(
+                    v.to_ascii_uppercase().as_str(),
+                    "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY"
+                ) {
+                    return false;
+                }
+            }
+            "INTERVAL" | "COUNT" => {
+                if v.parse::<u32>().ok().filter(|&n| n >= 1).is_none() {
+                    return false;
+                }
+            }
+            "UNTIL" => {}
+            "BYDAY" => {
+                if parse_day_codes(v).is_none() {
+                    return false;
+                }
+            }
+            "BYMONTHDAY" => {
+                if parse_month_days(v).is_none() {
+                    return false;
+                }
+            }
+            "BYMONTH" => {
+                if parse_month_codes(v).is_none() {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
+    crate::schedule::occurrences(clean, 0).is_ok()
 }
 
 /// Map a weekday token (name or number) to its two-letter RRULE code.
@@ -629,27 +705,42 @@ fn parse_yearly_head(head: &str) -> Option<Option<u32>> {
 }
 
 /// Parse a comma-separated day-of-month list into numbers, deduplicated in
-/// first-appearance order. Supports 1-31 and negative counts from the end of
-/// the month (-1 = last day, -2 = second-to-last, ...). Invalid entries
-/// (0, |n|>31, non-numeric) → None.
+/// first-appearance order. Supports 1-31, ranges (`1..5`), and negative counts
+/// from the end of the month (-1 = last day, -2 = second-to-last, ...).
+/// Invalid entries (0, |n|>31, non-numeric) → None.
 fn parse_month_days(body: &str) -> Option<Vec<i32>> {
     if body.trim().is_empty() {
         return None;
     }
     let mut out = Vec::new();
     for part in body.split(',') {
-        let n = part.trim().parse::<i32>().ok()?;
-        if n == 0 || n.abs() > 31 {
-            return None;
-        }
-        if !out.contains(&n) {
-            out.push(n);
+        let part = part.trim();
+        if let Some((a_str, b_str)) = part.split_once("..") {
+            let b_str = b_str.strip_prefix('=').unwrap_or(b_str);
+            let a = a_str.trim().parse::<i32>().ok()?;
+            let b = b_str.trim().parse::<i32>().ok()?;
+            if a == 0 || b == 0 || a.abs() > 31 || b.abs() > 31 || a > b || (a > 0) != (b > 0) {
+                return None;
+            }
+            for n in a..=b {
+                if !out.contains(&n) {
+                    out.push(n);
+                }
+            }
+        } else {
+            let n = part.parse::<i32>().ok()?;
+            if n == 0 || n.abs() > 31 {
+                return None;
+            }
+            if !out.contains(&n) {
+                out.push(n);
+            }
         }
     }
     Some(out)
 }
 
-/// Parse a comma-separated weekday list (numbers or names) into RRULE codes,
+/// Parse a comma-separated weekday list (numbers, names, or `1..5` ranges) into RRULE codes,
 /// deduplicated in first-appearance order.
 fn parse_day_codes(body: &str) -> Option<Vec<&'static str>> {
     if body.trim().is_empty() {
@@ -657,15 +748,31 @@ fn parse_day_codes(body: &str) -> Option<Vec<&'static str>> {
     }
     let mut out = Vec::new();
     for part in body.split(',') {
-        let code = day_code(part.trim())?;
-        if !out.contains(&code) {
-            out.push(code);
+        let part = part.trim();
+        if let Some((a_str, b_str)) = part.split_once("..") {
+            let b_str = b_str.strip_prefix('=').unwrap_or(b_str);
+            let a = a_str.trim().parse::<u8>().ok()?;
+            let b = b_str.trim().parse::<u8>().ok()?;
+            if a < 1 || b > 7 || a > b {
+                return None;
+            }
+            for d in a..=b {
+                let code = day_code(&d.to_string())?;
+                if !out.contains(&code) {
+                    out.push(code);
+                }
+            }
+        } else {
+            let code = day_code(part)?;
+            if !out.contains(&code) {
+                out.push(code);
+            }
         }
     }
     Some(out)
 }
 
-/// Parse a comma-separated month list (numbers 1-12 or names) into RRULE
+/// Parse a comma-separated month list (numbers 1-12, names, or `1..6` ranges) into RRULE
 /// BYMONTH numbers, deduplicated and sorted in ascending order. Invalid entries → None.
 fn parse_month_codes(body: &str) -> Option<Vec<i32>> {
     if body.trim().is_empty() {
@@ -673,9 +780,24 @@ fn parse_month_codes(body: &str) -> Option<Vec<i32>> {
     }
     let mut out = Vec::new();
     for part in body.split(',') {
-        let n = month_number(part.trim())?;
-        if !out.contains(&n) {
-            out.push(n);
+        let part = part.trim();
+        if let Some((a_str, b_str)) = part.split_once("..") {
+            let b_str = b_str.strip_prefix('=').unwrap_or(b_str);
+            let a = month_number(a_str.trim())?;
+            let b = month_number(b_str.trim())?;
+            if a > b {
+                return None;
+            }
+            for n in a..=b {
+                if !out.contains(&n) {
+                    out.push(n);
+                }
+            }
+        } else {
+            let n = month_number(part)?;
+            if !out.contains(&n) {
+                out.push(n);
+            }
         }
     }
     out.sort_unstable();
@@ -1194,5 +1316,45 @@ mod tests {
         let q7 = parse_quick_add("~明天 15:30");
         assert_eq!(q7.title, "");
         assert_eq!(q7.time_str.as_deref(), Some("明天 15:30"));
+
+        // 非 24 小时制的比值（如 99:99）不被误识别为裸时刻
+        let q8 = parse_quick_add("修复 99:99 比例问题");
+        assert_eq!(q8.title, "修复 99:99 比例问题");
+        assert_eq!(q8.time_str, None);
+    }
+
+    #[test]
+    fn multiword_english_time_and_rrule_ranges() {
+        let q1 = parse_quick_add("Submit report ~next friday 14:30 @work");
+        assert_eq!(q1.title, "Submit report");
+        assert_eq!(q1.time_str.as_deref(), Some("next friday 14:30"));
+        assert_eq!(q1.tags, vec!["work"]);
+        assert!(crate::time::parse_time(q1.time_str.as_deref().unwrap()).is_ok());
+
+        let q2 = parse_quick_add("Follow up ~day after tomorrow 09:00");
+        assert_eq!(q2.title, "Follow up");
+        assert_eq!(q2.time_str.as_deref(), Some("day after tomorrow 09:00"));
+        assert!(crate::time::parse_time(q2.time_str.as_deref().unwrap()).is_ok());
+
+        // 范围语法 *w[1..5] 与 *2w[1..5]
+        let r1 = parse_quick_add("Standup *w[1..5]");
+        assert_eq!(
+            r1.rrule.as_deref(),
+            Some("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR")
+        );
+        assert!(rrule_valid(r1.rrule.as_deref().unwrap()));
+
+        let r2 = parse_quick_add("Sprint review *2w[1..5]");
+        assert_eq!(
+            r2.rrule.as_deref(),
+            Some("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TU,WE,TH,FR")
+        );
+        assert!(rrule_valid(r2.rrule.as_deref().unwrap()));
+
+        // 非法频率与全角括号乱写必须被 rrule_valid 拒绝
+        assert!(!rrule_valid("FREQ=HOURLY"));
+        assert!(!rrule_valid("FREQ=DAILY;UNKNOWN=1"));
+        let bad = parse_quick_add("Task *乱写［1］");
+        assert!(!rrule_valid(bad.rrule.as_deref().unwrap()));
     }
 }

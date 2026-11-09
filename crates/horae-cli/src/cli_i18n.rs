@@ -273,7 +273,7 @@ fn zh_arg_help(path: &str, arg: &str) -> Option<&'static str> {
             "帮助文本的输出语言：`en`（默认）或 `zh`（中文）。也可通过环境变量 `HORAE_LANG` 设置。"
         }
         ("horae", "theme") => {
-            "UI 主题：23 款内置主题（如 `catppuccin`、`latte`、`tokyo-night`、`gruvbox`、`retro-82`、`nord`、`kanagawa`、`hackerman`）或 `auto`（自动探测）。也可通过环境变量 `HORAE_THEME` 设置。"
+            "UI 主题：24 款内置主题（如 `catppuccin`、`latte`、`tokyo-night`、`gruvbox`、`retro-82`、`nord`、`kanagawa`、`hackerman`、`jade-horse`）或 `auto`（自动探测）。也可通过环境变量 `HORAE_THEME` 设置。"
         }
         ("horae", "password") => "受保护数据库的密码（也可设置 HORAE_PASSWORD 环境变量）",
         ("password", "password") => "密码（省略则进入交互式无回显输入）",
@@ -365,7 +365,7 @@ fn zh_arg_help(path: &str, arg: &str) -> Option<&'static str> {
         (_, "lang") => "帮助文本的输出语言：en（默认）或 zh（中文）。",
         (_, "profile") => "要使用的配置集（数据集）；默认为配置中的默认配置集。",
         (_, "theme") => {
-            "UI 主题：23 款内置主题（如 `catppuccin`、`latte`、`tokyo-night`、`gruvbox`、`retro-82`、`nord`、`kanagawa`、`hackerman`）或 `auto`（自动探测）。也可通过环境变量 `HORAE_THEME` 设置。"
+            "UI 主题：24 款内置主题（如 `catppuccin`、`latte`、`tokyo-night`、`gruvbox`、`retro-82`、`nord`、`kanagawa`、`hackerman`、`jade-horse`）或 `auto`（自动探测）。也可通过环境变量 `HORAE_THEME` 设置。"
         }
         (_, "password") => "受保护数据库的密码（也可设置 HORAE_PASSWORD 环境变量）",
         (_, "id") => "任务 id（完整 id、唯一前缀或精确标题）",

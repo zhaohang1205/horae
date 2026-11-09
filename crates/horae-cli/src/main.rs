@@ -39,6 +39,13 @@ fn main() -> Result<()> {
             cli.command,
             None | Some(cli::Command::Tui { .. }) | Some(cli::Command::Flash)
         );
+        let is_bg_status = matches!(
+            &cli.command,
+            Some(cli::Command::Pomo { action, .. }) if action == "daemon" || action == "waybar"
+        ) || matches!(
+            &cli.command,
+            Some(cli::Command::Alarm { action, .. }) if action == "waybar"
+        );
         let cli_password = cli
             .password
             .or_else(|| std::env::var("HORAE_PASSWORD").ok());
@@ -49,7 +56,12 @@ fn main() -> Result<()> {
                 eprintln!("Error: Incorrect password for horae.");
                 std::process::exit(1);
             }
-        } else if !is_tui && !matches!(cli.command, Some(cli::Command::Password { .. })) {
+        } else if horae_core::password::session_key().is_some() {
+            std::env::set_var("HORAE_UNLOCKED", "1");
+        } else if !is_tui
+            && !is_bg_status
+            && !matches!(cli.command, Some(cli::Command::Password { .. }))
+        {
             use std::io::IsTerminal;
             if std::io::stdin().is_terminal() {
                 let pass = commands::password::prompt_password("Enter horae password: ")?;

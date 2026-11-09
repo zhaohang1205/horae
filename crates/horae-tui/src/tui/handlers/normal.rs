@@ -125,46 +125,20 @@ impl<'a> App<'a> {
                 };
             }
             KeyCode::F(5) => {
-                let is_omarchy = crate::tui::theme::is_omarchy_system();
-                if is_omarchy && self.omarchy_auto {
-                    let next = crate::tui::theme::Theme::catppuccin_latte();
-                    let key = next.id.key();
-                    let saved = horae_core::repo::settings::set(self.conn, "theme", key);
-                    self.omarchy_auto = false;
-                    self.theme = next;
-                    if self.note(saved) {
-                        self.status_message = match self.lang {
-                            horae_core::i18n::Lang::Zh => format!(
-                                "主题: {}",
-                                self.theme.id.display_name(horae_core::i18n::Lang::Zh)
-                            ),
-                            horae_core::i18n::Lang::En => format!(
-                                "Theme: {}",
-                                self.theme.id.display_name(horae_core::i18n::Lang::En)
-                            ),
-                        };
-                    }
-                } else if is_omarchy && self.theme.id.is_last() {
-                    let saved = horae_core::repo::settings::set(self.conn, "theme", "auto");
-                    self.omarchy_auto = true;
-                    if let Some(t) = crate::tui::theme::detect_omarchy_theme() {
-                        self.theme = t;
-                    }
-                    if self.note(saved) {
+                let (next, next_auto, key) =
+                    crate::tui::theme::cycle_theme(&self.theme, self.omarchy_auto);
+                let saved = horae_core::repo::settings::set(self.conn, "theme", key);
+                self.omarchy_auto = next_auto;
+                self.theme = next;
+                if self.note(saved) {
+                    if next_auto {
                         self.status_message = tr!(
                             self.lang,
                             "主题: 自动跟随 Omarchy 系统",
                             "Theme: Auto (Follow Omarchy)"
                         )
                         .to_string();
-                    }
-                } else {
-                    let next = self.theme.next();
-                    let key = next.id.key();
-                    let saved = horae_core::repo::settings::set(self.conn, "theme", key);
-                    self.omarchy_auto = false;
-                    self.theme = next;
-                    if self.note(saved) {
+                    } else {
                         self.status_message = match self.lang {
                             horae_core::i18n::Lang::Zh => format!(
                                 "主题: {}",
@@ -202,7 +176,10 @@ impl<'a> App<'a> {
             }
             KeyCode::Char('L') => {
                 if self.password_enabled {
+                    horae_core::password::clear_session_key();
                     self.locked = true;
+                    self.items.clear();
+                    self.detail = None;
                     self.lock_input.clear();
                     self.lock_error = None;
                     return Ok(true);

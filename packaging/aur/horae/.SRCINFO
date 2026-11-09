@@ -1,0 +1,18 @@
+pkgbase = horae
+	pkgdesc = A terminal GTD task manager with TUI and CLI powered by Rust & SQLite
+	pkgver = 0.2.6
+	pkgrel = 1
+	url = https://github.com/zhaohang1205/horae
+	arch = x86_64
+	license = GPL-3.0-only
+	makedepends = cargo
+	depends = gcc-libs
+	depends = glibc
+	optdepends = libnotify: desktop notifications for timers and tasks
+	optdepends = ttf-nerd-fonts-symbols: Nerd Font glyphs for TUI
+	optdepends = syncthing: mobile sync bridge
+	options = !lto
+	source = horae-0.2.6.tar.gz::https://github.com/zhaohang1205/horae/archive/refs/tags/v0.2.6.tar.gz
+	sha256sums = a81225f31bbf82e8aa487ca054036499d87ef84599fa685644d89175b5c5a859
+
+pkgname = horae

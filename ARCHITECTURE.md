@@ -41,7 +41,7 @@ Everything that is not a user interface.
 
 ### horae-tui
 
-`tui/app/` owns state (`mod.rs` holds the shared vocabulary and the `App` struct; `data.rs` the refresh pipeline; `completion.rs` input editing; `ops.rs` task actions; `profiles.rs` settings). `tui/handlers/` handles keys grouped by `Mode`, `tui/render/` draws views, `tui/keys.rs` is the single source of truth for keybindings and their help text, `tui/icons.rs` resolves every glyph, `tui/theme.rs` holds the theme palettes (23 official Omarchy themes including Catppuccin, Tokyo Night, Gruvbox, Retro 82, Nord, Kanagawa, Hackerman, etc., with Omarchy auto-detection).
+`tui/app/` owns state (`mod.rs` holds the shared vocabulary and the `App` struct; `data.rs` the refresh pipeline; `completion.rs` input editing; `ops.rs` task actions; `profiles.rs` settings). `tui/handlers/` handles keys grouped by `Mode`, `tui/render/` draws views, `tui/keys.rs` is the single source of truth for keybindings and their help text, `tui/icons.rs` resolves every glyph, `tui/theme.rs` holds the theme palettes (24 official Omarchy themes including Catppuccin, Tokyo Night, Gruvbox, Retro 82, Nord, Kanagawa, Hackerman, Jade Horse, etc., with Omarchy auto-detection).
 
 UI strings are Chinese by default and localized through `crate::tr!` / `Lang`; F6 toggles language. Never hardcode UI text.
 

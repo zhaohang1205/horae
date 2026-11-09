@@ -1,0 +1,39 @@
+# Maintainer: Alex Zhao <zhaohang1205@gmail.com>
+pkgname=horae-bin
+pkgver=0.2.6
+pkgrel=1
+pkgdesc="A terminal GTD task manager with TUI and CLI powered by Rust & SQLite (precompiled binary)"
+arch=('x86_64')
+url="https://github.com/zhaohang1205/horae"
+license=('GPL-3.0-only')
+depends=('gcc-libs' 'glibc')
+optdepends=(
+    'libnotify: desktop notifications for timers and tasks'
+    'ttf-nerd-fonts-symbols: Nerd Font glyphs for TUI'
+    'syncthing: mobile sync bridge'
+)
+provides=('horae')
+conflicts=('horae')
+options=('!strip')
+
+source_x86_64=(
+    "${pkgname}-${pkgver}-x86_64.tar.gz::${url}/releases/download/v${pkgver}/horae-v${pkgver}-x86_64-unknown-linux-gnu.tar.gz"
+    "LICENSE-${pkgver}::https://raw.githubusercontent.com/zhaohang1205/horae/v${pkgver}/LICENSE"
+    "README-${pkgver}.md::https://raw.githubusercontent.com/zhaohang1205/horae/v${pkgver}/README.md"
+)
+sha256sums_x86_64=(
+    'e67c839530e5df3ae993f04017ccc7c1d65cb71619947a2abbebd3434398d7a9'
+    '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986'
+    'dc768568bfcf302dcb0dd13af7bd739d99ac2970b58f847e2c0b6800cd0ef85b'
+)
+
+package() {
+    install -Dm755 "${srcdir}/horae" "${pkgdir}/usr/bin/horae"
+    install -Dm644 "${srcdir}/LICENSE-${pkgver}" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+    install -Dm644 "${srcdir}/README-${pkgver}.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+
+    # Shell completions
+    "${srcdir}/horae" completions bash | install -Dm644 /dev/stdin "${pkgdir}/usr/share/bash-completion/completions/horae"
+    "${srcdir}/horae" completions zsh | install -Dm644 /dev/stdin "${pkgdir}/usr/share/zsh/site-functions/_horae"
+    "${srcdir}/horae" completions fish | install -Dm644 /dev/stdin "${pkgdir}/usr/share/fish/vendor_completions.d/horae.fish"
+}

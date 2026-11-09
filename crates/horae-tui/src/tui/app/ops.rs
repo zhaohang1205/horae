@@ -81,7 +81,7 @@ impl<'a> App<'a> {
             s.push('@');
             s.push_str(tag);
         }
-        if let Some(start) = task.scheduled_start_at {
+        if let Some(start) = task.scheduled_start_at.or(task.due_at) {
             s.push_str(" ~");
             s.push_str(&horae_core::time::format_quick_time(start));
         }
@@ -106,12 +106,23 @@ impl<'a> App<'a> {
 
         // 1. 状态流转为 Done
         let t = tasks::transition(self.conn, task_id, task::Status::Done)?;
-        self.push_undo(super::UndoAction::StatusChange {
-            task_id: task_id.to_string(),
-            from: prev_status,
-            to: t.status,
-            title: title.clone(),
-        });
+        if task.rrule.is_some() {
+            self.push_undo(super::UndoAction::HabitCheckIn {
+                task_id: task_id.to_string(),
+                prev_status,
+                prev_start: task.scheduled_start_at,
+                prev_end: task.scheduled_end_at,
+                prev_due: task.due_at,
+                title: title.clone(),
+            });
+        } else {
+            self.push_undo(super::UndoAction::StatusChange {
+                task_id: task_id.to_string(),
+                from: prev_status,
+                to: t.status,
+                title: title.clone(),
+            });
+        }
 
         // 2. 终止并重置番茄钟
         let _ = horae_core::pomo::stop(Some(self.conn), true);
@@ -208,12 +219,23 @@ impl<'a> App<'a> {
                         }
                     }
                     let t = tasks::transition(self.conn, id, to)?;
-                    self.push_undo(super::UndoAction::StatusChange {
-                        task_id: id.clone(),
-                        from: prev_status,
-                        to: t.status,
-                        title: task.title.clone(),
-                    });
+                    if to == task::Status::Done && task.rrule.is_some() {
+                        self.push_undo(super::UndoAction::HabitCheckIn {
+                            task_id: id.clone(),
+                            prev_status,
+                            prev_start: task.scheduled_start_at,
+                            prev_end: task.scheduled_end_at,
+                            prev_due: task.due_at,
+                            title: task.title.clone(),
+                        });
+                    } else {
+                        self.push_undo(super::UndoAction::StatusChange {
+                            task_id: id.clone(),
+                            from: prev_status,
+                            to: t.status,
+                            title: task.title.clone(),
+                        });
+                    }
                     if to == task::Status::Done {
                         self.set_toast(
                             tr!(
@@ -667,6 +689,58 @@ impl<'a> App<'a> {
                     return Ok(false);
                 }
             },
+            super::UndoAction::HabitCheckIn {
+                task_id,
+                prev_status,
+                prev_start,
+                prev_end,
+                prev_due,
+                title,
+            } => match tasks::undo_habit_check_in(
+                self.conn,
+                task_id,
+                *prev_status,
+                *prev_start,
+                *prev_end,
+                *prev_due,
+            ) {
+                Ok(_) => {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "⤺ 已撤销打卡:「{}」",
+                            "⤺ Undone check-in: '{}'",
+                            title
+                        ),
+                        true,
+                    );
+                }
+                Err(e) => {
+                    self.set_toast(tr!(self.lang, "撤销失败: {}", "Undo failed: {}", e), false);
+                    return Ok(false);
+                }
+            },
+            super::UndoAction::TaskSnapshot {
+                before,
+                before_tags,
+                ..
+            } => match tasks::restore_snapshot(self.conn, before, before_tags) {
+                Ok(_) => {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "⤺ 已撤销修改:「{}」",
+                            "⤺ Undone edit: '{}'",
+                            before.title
+                        ),
+                        true,
+                    );
+                }
+                Err(e) => {
+                    self.set_toast(tr!(self.lang, "撤销失败: {}", "Undo failed: {}", e), false);
+                    return Ok(false);
+                }
+            },
         }
 
         self.redo_stack.push(action);
@@ -887,6 +961,44 @@ impl<'a> App<'a> {
                         ),
                         false,
                     );
+                    return Ok(false);
+                }
+            },
+            super::UndoAction::HabitCheckIn { task_id, title, .. } => {
+                match tasks::transition(self.conn, task_id, task::Status::Done) {
+                    Ok(_) => {
+                        self.set_toast(
+                            tr!(
+                                self.lang,
+                                "↷ 已重做打卡:「{}」",
+                                "↷ Redone check-in: '{}'",
+                                title
+                            ),
+                            true,
+                        );
+                    }
+                    Err(e) => {
+                        self.set_toast(tr!(self.lang, "重做失败: {}", "Redo failed: {}", e), false);
+                        return Ok(false);
+                    }
+                }
+            }
+            super::UndoAction::TaskSnapshot {
+                after, after_tags, ..
+            } => match tasks::restore_snapshot(self.conn, after, after_tags) {
+                Ok(_) => {
+                    self.set_toast(
+                        tr!(
+                            self.lang,
+                            "↷ 已重做修改:「{}」",
+                            "↷ Redone edit: '{}'",
+                            after.title
+                        ),
+                        true,
+                    );
+                }
+                Err(e) => {
+                    self.set_toast(tr!(self.lang, "重做失败: {}", "Redo failed: {}", e), false);
                     return Ok(false);
                 }
             },

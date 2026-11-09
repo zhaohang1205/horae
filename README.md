@@ -65,7 +65,7 @@ Two completion styles (toggle under `F7`):
 - **Reference** — token, meaning and a syntax example shown side-by-side
 - **Speed** — compact list with ghost text inlined directly in the input
 
-<!-- Completion modes screenshot placeholder: assets/screenshots/completion-modes.png -->
+![horae reactive completion modes](assets/screenshots/completion-modes.png)
 
 ### The full syntax, on one line
 
@@ -358,13 +358,13 @@ Only `DAILY`, `WEEKLY`, `MONTHLY` and `YEARLY` are supported, and every write pa
 | `horae sound <status\|on\|off\|toggle\|test>` | `bell` | manage acoustic sound effects (status, toggle, test playback) |
 | `horae password <enable\|disable\|change\|status>` | `passwd` | manage password protection mode |
 
-Global flags apply everywhere: `--profile <name>` selects the data set, `--lang zh` (or `HORAE_LANG=zh`) prints help in Chinese, and `--theme <name>` (or `HORAE_THEME=<name>`) sets the UI theme (supports all 23 official Omarchy themes including `catppuccin`, `latte`, `tokyo-night`, `gruvbox`, `retro-82`, `nord`, `kanagawa`, `everforest`, `rose-pine`, `hackerman`, etc., or `auto` to follow system).
+Global flags apply everywhere: `--profile <name>` selects the data set, `--lang zh` (or `HORAE_LANG=zh`) prints help in Chinese, and `--theme <name>` (or `HORAE_THEME=<name>`) sets the UI theme (supports all 24 official Omarchy themes including `catppuccin`, `latte`, `tokyo-night`, `gruvbox`, `retro-82`, `nord`, `kanagawa`, `everforest`, `rose-pine`, `hackerman`, `jade-horse`, etc., or `auto` to follow system).
 
 ---
 
 ## TUI
 
-<!-- TUI main layout screenshot placeholder: assets/screenshots/tui-main.png -->
+![horae TUI main layout](assets/screenshots/tui-main.png)
 
 Running `horae` opens a three-pane layout: navigation on the left, the task list in the middle, details and the event timeline on the right.
 
@@ -446,7 +446,7 @@ An opt-in feature (off by default, toggled under `F7`) for keeping quotes and re
 
 ## Password protection
 
-<!-- Password lock screen placeholder: assets/screenshots/lock-screen.png -->
+![horae password lock screen](assets/screenshots/lock-screen.png)
 
 To safeguard privacy and sensitive data, `horae` offers opt-in database protection powered by PBKDF2-HMAC-SHA256 (50,000 security iterations with a 16-byte random salt):
 
