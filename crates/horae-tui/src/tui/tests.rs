@@ -6224,3 +6224,175 @@ fn waiting_flow_sets_delegated_to_dedupes_suffix_and_supports_undo() {
     assert_eq!(t_undo1.title, "Review contract [Wait: Alice]");
     assert_eq!(t_undo1.delegated_to.as_deref(), Some("Alice"));
 }
+
+#[test]
+fn test_wrap_text_cjk_english_and_punctuation() {
+    use crate::tui::render::detail::wrap_text;
+
+    // 1. 纯英文单词优先在空格处断开，不撕裂单词
+    let en_lines = wrap_text("Hello world this is a test", 12, 12);
+    assert_eq!(en_lines, vec!["Hello world", "this is a", "test"]);
+
+    // 2. 中文文本按字符宽度精准折行（每个汉字占 2 列宽）
+    let zh_lines = wrap_text("习惯打卡完成，已排程至下个周期", 14, 14);
+    assert_eq!(zh_lines[0], "习惯打卡完成，");
+    assert_eq!(zh_lines[1], "已排程至下个周");
+    assert_eq!(zh_lines[2], "期");
+
+    // 3. 中英文混排与箭头符号
+    let mixed_lines = wrap_text("从 inbox 流转至 next 行动", 16, 16);
+    assert!(mixed_lines.len() >= 2);
+    let rejoined = mixed_lines.join(" ");
+    assert!(rejoined.contains("inbox"));
+    assert!(rejoined.contains("next"));
+
+    // 4. 超长单词在无可断标点时安全按字符强制截断
+    let long_word = wrap_text("Supercalifragilistic", 8, 8);
+    assert_eq!(long_word[0], "Supercal");
+    assert_eq!(long_word[1], "ifragili");
+    assert_eq!(long_word[2], "stic");
+
+    // 5. 空字符串与纯空白符
+    assert_eq!(wrap_text("", 10, 10), vec![""]);
+    assert_eq!(wrap_text("   ", 10, 10), vec![""]);
+}
+
+#[test]
+fn test_detail_timeline_structured_folding_preserves_rail() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    let task = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "timeline folding test".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    horae_core::repo::tasks::transition(&conn, &task.id, horae_core::model::task::Status::Next)
+        .unwrap();
+
+    app.set_view(View::Next);
+    let idx = app
+        .items
+        .iter()
+        .position(|r| r.id == task.id)
+        .expect("Next view should have task");
+    app.selected = idx;
+    app.load_detail();
+
+    let d = app.detail.as_ref().expect("detail should be loaded");
+
+    // 在窄宽度（width = 34，内部可用宽度 30）下渲染详情行，必然触发时间线折叠
+    let lines = app.detail_lines(d, 34, 40);
+
+    // 收集所有行的纯文本形式
+    let line_strings: Vec<String> = lines
+        .iter()
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .collect();
+
+    // 验证结构化折叠特性：
+    // 1. 最新事件头部在第一行，包含 node 和徽章
+    let head_line = line_strings
+        .iter()
+        .find(|l| l.contains('●') && l.contains("[流转]"))
+        .expect("最新事件头部行应包含 ● 与 [流转]");
+
+    assert!(head_line.contains("●"));
+    assert!(head_line.contains("[流转]"));
+
+    // 2. 在折叠状态下，描述内容折到下一行，且该行必须以轨线 `  │   ` 前缀开头，绝不能直接从第 0 列顶格开始！
+    let cont_line = line_strings
+        .iter()
+        .find(|l| l.contains("收件箱") && l.contains("下一步"))
+        .expect("折叠后的描述行应包含流转状态说明");
+
+    assert!(
+        cont_line.starts_with("  │   "),
+        "折叠后的描述行必须保留轨道前缀 `  │   `，实际行内容: {:?}",
+        cont_line
+    );
+
+    // 3. 根节点（创建事件）的折叠行不应有悬空的 │ 轨线，而应用空格缩进对齐
+    let root_desc_line = line_strings
+        .iter()
+        .find(|l| l.contains("捕获入收件箱"))
+        .expect("根节点应包含捕获描述");
+    assert!(
+        root_desc_line.starts_with("      ") || root_desc_line.contains("[创建]"),
+        "根节点折叠时应有 6 空格缩进对齐或单行包含，实际: {:?}",
+        root_desc_line
+    );
+}
+
+#[test]
+fn test_detail_long_fields_wrapping_with_proper_indent() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    let task = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "这是一个很长很长很长很长的任务标题用于测试折叠缩进".into(),
+            notes: "这是第一行很长很长很长很长很长的备注内容用于测试折叠".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    app.set_view(View::Inbox);
+    let idx = app
+        .items
+        .iter()
+        .position(|r| r.id == task.id)
+        .expect("Inbox should have task");
+    app.selected = idx;
+    app.load_detail();
+
+    let d = app.detail.as_ref().expect("detail should be loaded");
+    let lines = app.detail_lines(d, 32, 40);
+
+    let line_strings: Vec<String> = lines
+        .iter()
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .collect();
+
+    // 标题被折叠为多行，第 1 行以 "标题: " 开头，后续行必须有 6 空格缩进
+    let title_line_1 = line_strings
+        .iter()
+        .find(|l| l.starts_with("标题: "))
+        .expect("应有标题第 1 行");
+    assert!(title_line_1.contains("这是一个很长"));
+
+    let title_line_2 = line_strings
+        .iter()
+        .find(|l| l.starts_with("      ") && l.contains("任务标题"))
+        .expect("标题折叠后续行应具备 6 格对齐缩进");
+    assert!(title_line_2.starts_with("      "));
+
+    // 备注被折叠时，各行均保持两格缩进
+    let note_line = line_strings
+        .iter()
+        .find(|l| l.starts_with("  这是第一行"))
+        .expect("应有备注行");
+    assert!(note_line.starts_with("  "));
+}

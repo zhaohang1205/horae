@@ -144,13 +144,22 @@ impl<'a> AppRender for App<'a> {
             .constraints([Constraint::Min(0), Constraint::Length(1)])
             .split(main_area);
 
-        // 三栏：引导栏 | 列表 | 详情
+        // 三栏自适应布局：兼顾左侧导航栏的视觉协调（保持约 21% 的自然比重），同时给任务详情栏释放适当空间
+        let w = chunks[0].width;
+        let (left_pct, center_pct, right_pct) = if w < 90 {
+            (22, 42, 36)
+        } else if w <= 110 {
+            (21, 44, 35)
+        } else {
+            (21, 42, 37)
+        };
+
         let body = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(22),
-                Constraint::Percentage(46),
-                Constraint::Percentage(32),
+                Constraint::Percentage(left_pct),
+                Constraint::Percentage(center_pct),
+                Constraint::Percentage(right_pct),
             ])
             .split(chunks[0]);
 
@@ -1169,7 +1178,7 @@ impl<'a> AppRender for App<'a> {
 }
 
 mod banners;
-mod detail;
+pub(crate) mod detail;
 pub(crate) mod focus;
 mod help;
 mod input;
