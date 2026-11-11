@@ -15,7 +15,7 @@
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/zhaohang1205/horae?style=social)](https://github.com/zhaohang1205/horae)
 
-[English](README.md) · [简体中文](README_CN.md)
+[English](README.md) · [简体中文](README_CN.md) · [User Manual (EN)](docs/USER_MANUAL.md) · [用户手册 (中文)](docs/USER_MANUAL_CN.md)
 
 </div>
 
@@ -39,7 +39,7 @@ dentist appointment ~fri 14:00 @health !high ↵
 
 **Time from idea to captured: under 10 seconds.**
 
-<!-- Demo GIF placeholder: assets/screenshots/hero-capture.gif -->
+![horae flash capture](assets/screenshots/flash-capture.png)
 
 ### Why so fast?
 
@@ -101,7 +101,7 @@ A GTD task manager built in Rust: one binary with an embedded SQLite database, a
 
 Nothing about a task is ever lost: every status change, reschedule and check-in is stamped with a UTC-millisecond timestamp and appended to an append-only `task_events` timeline. `horae show <id>` replays the full history.
 
-中文手册：[README_CN.md](README_CN.md)
+中文手册：[README_CN.md](README_CN.md) · [User Manual (EN)](docs/USER_MANUAL.md) · [图文操作说明书 (中文)](docs/USER_MANUAL_CN.md)
 
 ---
 
@@ -253,6 +253,8 @@ Toggles under `F7` in the TUI, persisted per database:
 Inbox → Next / Scheduled / Waiting / Someday / Reference → Done
 ```
 
+![horae GTD workflow overview](assets/screenshots/gtd-workflow.png)
+
 A freshly captured task lands in `Inbox`. Clarifying it moves it to one of the actionable or non-actionable states, and each transition stamps the matching `*_at` column. Because every transition, reschedule and check-in carries its own UTC-ms timestamp, the timeline doubles as a time record of the task's life: you can see how long it sat unclarified in the inbox, when it was rescheduled, and when it was finally done.
 
 ### Archive vs. purge
@@ -397,6 +399,8 @@ Running `horae` opens a three-pane layout: navigation on the left, the task list
 | `Ctrl+P` | **Help & Toggles** | syntax cheat sheet |
 | `Esc` / `q` | **System** | cancel / quit |
 
+![horae keybindings cheatsheet](assets/screenshots/help-cheatsheet.png)
+
 In the Tags view, `c` creates a tag and `D` deletes one. In the Settings view (`M`), `n` creates a profile, `r` renames, `d` deletes, `s` sets the default, `b` toggles sound effects, and `p` configures password protection.
 
 Today and Tomorrow are deliberately strict: both only contain `Next` and `Scheduled` tasks. Today is the union of overdue tasks and tasks whose window falls inside today; Tomorrow contains only tasks scheduled inside tomorrow's window, with no carry-over of unfinished work.
@@ -439,6 +443,8 @@ The daemon ticks once a second, writes `~/.config/horae/pomo.json`, and sends a 
 ---
 
 ## Quotes
+
+![horae quotes library](assets/screenshots/quotes-library.png)
 
 An opt-in feature (off by default, toggled under `F7`) for keeping quotes and reference fragments. A quote is a `reference` task tagged `@quote`; it only ever appears in the Quotes view (`0`) and never in the inbox or action lists. Capturing anything with `@quote` routes it there.
 

@@ -15,7 +15,7 @@
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/zhaohang1205/horae?style=social)](https://github.com/zhaohang1205/horae)
 
-[English](README.md) · [简体中文](README_CN.md)
+[English](README.md) · [简体中文](README_CN.md) · [图文操作说明书 (中文)](docs/USER_MANUAL_CN.md) · [User Manual (EN)](docs/USER_MANUAL.md)
 
 </div>
 
@@ -39,7 +39,7 @@ $ horae -f
 
 **从产生想法到完成录入：不到 10 秒。**
 
-<!-- 待插入演示动图：assets/screenshots/hero-capture.gif -->
+![horae 极速闪念录入](assets/screenshots/flash-capture.png)
 
 ### 为什么这么快？
 
@@ -101,7 +101,7 @@ Rust 编写的 GTD 任务管理工具：单个二进制，内置 SQLite，同时
 
 任务的信息永远不会丢失：每次状态变更、排程调整与打卡完成都会盖上一个 UTC 毫秒时间戳，并追加进只增的 `task_events` 时间线。`horae show <id>` 可以完整回放历史。
 
-English manual: [README.md](README.md)
+English manual: [README.md](README.md) · [完整图文操作说明书 (中文)](docs/USER_MANUAL_CN.md) · [English User Manual](docs/USER_MANUAL.md)
 
 ---
 
@@ -253,6 +253,8 @@ echo "提醒我每周一早上九点开例会" | horae voice
 Inbox → Next / Scheduled / Waiting / Someday / Reference → Done
 ```
 
+![horae GTD 工作流全景](assets/screenshots/gtd-workflow.png)
+
 刚捕获的任务落在 `Inbox`，澄清后进入行动流或非行动流，每次流转都会盖上对应的 `*_at` 时间戳。由于每次流转、排程、打卡都带自己的 UTC 毫秒时间戳，这条时间线本身就是任务的时间账：它在收件箱里躺了多久、什么时候被改期、什么时候才真正做完，都能一笔笔对出来。
 
 ### 归档与清除
@@ -397,6 +399,8 @@ CLI `capture`、`modify`、TUI 输入条、手机同步文件与飞书消息共�
 | `Ctrl+P` | **帮助与开关** | 语法速查卡 |
 | `Esc` / `q` | **系统** | 取消 / 退出 |
 
+![horae 快捷键速查备忘](assets/screenshots/help-cheatsheet.png)
+
 在标签视图里 `c` 新建标签、`D` 删除标签；设置页（`M`）里 `n` 新建、`r` 重命名、`d` 删除、`s` 设为默认 Profile、`b` 开关提示音效、`p` 配置密码保护。
 
 今日与明日视图的口径是刻意收紧的：两者都只收录 `Next` 与 `Scheduled` 状态的任务；今日 = 逾期任务 ∪ 窗口落在今天的排程，明日只含窗口落在明天的任务，今天没做完的事不会结转到明天。
@@ -439,6 +443,8 @@ horae pomo waybar       # 输出 JSON 供 waybar 模块消费
 ---
 
 ## 金句
+
+![horae 灵感金句库](assets/screenshots/quotes-library.png)
 
 一个默认关闭的可选功能（在 `F7` 里开启），用来收藏值得反复看的句子与参考片段。金句本质是带 `@quote` 标签、`reference` 状态的任务，只出现在金句视图（`0`），不会混进收件箱或行动列表。任何带 `@quote` 的捕获都会自动路由进去。
 
