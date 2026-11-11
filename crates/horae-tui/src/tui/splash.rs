@@ -214,6 +214,12 @@ fn draw_card_row<W: std::io::Write>(
 /// 品牌副标题：呼应「时间女神」。
 const BRAND_SUBTITLE: &str = "Goddess of Time";
 
+/// horae 开源仓库地址。
+const REPO_URL: &str = "https://github.com/zhaohang1205/horae";
+
+/// 作者个人主页。
+const AUTHOR_URL: &str = "https://github.com/zhaohang1205";
+
 /// 底部提示：主提示语（自适应宽度展示快捷键引导）。
 fn prompts(lang: Lang, cols: u16) -> &'static str {
     if cols >= 62 {
@@ -570,18 +576,18 @@ fn draw_frame_with<W: std::io::Write>(
         write_centered(out, cols, py, "\x1b[5m", prompt, palette.text_dim)?;
     }
 
-    // 6. 底部信息行：版本（沙漏图标）、作者（GitHub 图标 + 点击跳转隐藏链接）、RUST BUILT（Rust 图标）、主题徽章
-    let (icon_hourglass, icon_github, icon_rust, icon_palette) = match icon_style {
-        IconStyle::Nerd => ("\u{f252} ", "\u{f09b} ", "\u{e7a8} ", "\u{f042} "),
-        IconStyle::Ascii => ("", "", "", ""),
+    // 6. 底部信息行：版本（沙漏图标）、作者（GitHub 图标 + 点击跳转隐藏链接）、Star（星标图标 + 仓库跳转隐藏链接）、主题徽章
+    let (icon_hourglass, icon_github, icon_star, icon_palette) = match icon_style {
+        IconStyle::Nerd => ("\u{f252} ", "\u{f09b} ", "\u{f005} ", "\u{f042} "),
+        IconStyle::Ascii => ("", "", "* ", ""),
     };
 
     let version = format!("{icon_hourglass}horae v{}", env!("CARGO_PKG_VERSION"));
     let author_plain = format!("{icon_github}by zhaohang1205");
-    let rust_built = format!("{icon_rust}RUST BUILT");
+    let star_plain = format!("{icon_star}Star on GitHub");
 
-    let author_link =
-        format!("\x1b]8;;https://github.com/zhaohang1205\x1b\\{author_plain}\x1b]8;;\x1b\\");
+    let author_link = format!("\x1b]8;;{AUTHOR_URL}\x1b\\{author_plain}\x1b]8;;\x1b\\");
+    let star_link = format!("\x1b]8;;{REPO_URL}\x1b\\{star_plain}\x1b]8;;\x1b\\");
 
     let theme_badge = if omarchy_auto {
         format!("{icon_palette}{}", tr!(lang, "系统自适应", "Auto"))
@@ -589,21 +595,28 @@ fn draw_frame_with<W: std::io::Write>(
         format!("{icon_palette}{}", theme.id.display_name(lang))
     };
 
+    let star_short = format!("{icon_star}Star");
+    let star_short_link = format!("\x1b]8;;{REPO_URL}\x1b\\{star_short}\x1b]8;;\x1b\\");
+
     let (visible_footer, full_footer) = if cols >= 80 {
         (
-            format!("{version}  ·  {author_plain}  ·  {rust_built}  ·  {theme_badge}"),
-            format!("{version}  ·  {author_link}  ·  {rust_built}  ·  {theme_badge}"),
+            format!("{version}  ·  {author_plain}  ·  {star_plain}  ·  {theme_badge}"),
+            format!("{version}  ·  {author_link}  ·  {star_link}  ·  {theme_badge}"),
         )
-    } else if cols >= 54 {
+    } else if cols >= 60 {
         (
-            format!("{version}  ·  {author_plain}  ·  {rust_built}"),
-            format!("{version}  ·  {author_link}  ·  {rust_built}"),
+            format!("{version}  ·  {author_plain}  ·  {star_plain}"),
+            format!("{version}  ·  {author_link}  ·  {star_link}"),
+        )
+    } else if cols >= 45 {
+        (
+            format!("{version} · {author_plain} · {star_short}"),
+            format!("{version} · {author_link} · {star_short_link}"),
         )
     } else {
-        let rust_short = format!("{icon_rust}RUST");
         (
-            format!("{version} · {author_plain} · {rust_short}"),
-            format!("{version} · {author_link} · {rust_short}"),
+            format!("{version} · {star_short}"),
+            format!("{version} · {star_short_link}"),
         )
     };
 
@@ -694,17 +707,24 @@ mod splash_tests {
         assert!(s.contains("█"), "应绘制 HORAE 艺术字");
         assert!(s.contains(BRAND_SUBTITLE), "应绘制品牌副标题");
         assert!(s.contains("horae v"), "应包含 horae 及其版本号");
-        assert!(s.contains("RUST BUILT"), "应包含 RUST BUILT 标识");
+        assert!(s.contains("Star on GitHub"), "应包含 Star 引导标识");
         assert!(s.contains("by zhaohang1205"), "应包含作者信息");
-        assert!(
-            s.contains("https://github.com/zhaohang1205"),
-            "应包含 github 跳转链接"
-        );
+        assert!(s.contains(AUTHOR_URL), "应包含作者 github 跳转链接");
+        assert!(s.contains(REPO_URL), "应包含 horae 仓库跳转链接");
         assert!(s.contains("\u{f252}"), "应包含沙漏图标");
         assert!(s.contains("\u{f09b}"), "应包含 GitHub 图标");
-        assert!(s.contains("\u{e7a8}"), "应包含 Rust 图标");
+        assert!(s.contains("\u{f005}"), "应包含 Star 图标");
         assert!(s.contains("<10s"), "应绘制特性卡片");
         assert!(!s.contains("\x1b_G"), "不应包含任何 Kitty 图形协议控制指令");
+        // 验证中间提示行不提示快捷键点赞
+        assert!(
+            !s.contains("S 点赞"),
+            "开屏中间提示行不应包含快捷键点赞提示"
+        );
+        assert!(
+            s.contains("按任意键开启"),
+            "开屏中间提示行应包含常规按任意键开启提示"
+        );
     }
 
     #[test]
@@ -728,7 +748,7 @@ mod splash_tests {
             let s = String::from_utf8(buf.into_inner()).unwrap();
             assert!(s.contains("by zhaohang1205"), "版本行应存在");
             assert!(s.contains("42ms"), "{lang:?} 卡片应显示「42ms」");
-            assert!(s.contains("RUST BUILT"), "应包含 RUST BUILT");
+            assert!(s.contains("Star on GitHub"), "应包含 Star on GitHub");
         }
 
         // 亚毫秒耗时应显示真实的浮点毫秒
@@ -771,6 +791,10 @@ mod splash_tests {
         assert!(
             !s.contains("\u{f252}"),
             "ASCII 模式不应含 Nerd Font 沙漏图标"
+        );
+        assert!(
+            s.contains("* Star on GitHub"),
+            "ASCII 模式应以星号显示 Star 引导"
         );
     }
 
