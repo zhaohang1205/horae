@@ -315,6 +315,12 @@ pub(crate) struct App<'a> {
     pub(crate) workflow_scroll: usize,
     /// GTD 工作流视图（右侧哲学与人物）滚动偏移。
     pub(crate) workflow_side_scroll: usize,
+    /// 任务详情面板垂直滚动行偏移。
+    pub(crate) detail_scroll: usize,
+    /// 任务备注是否全量展开（为 false 时折叠长文本以保障首屏时间线可见性）。
+    pub(crate) notes_expanded: bool,
+    /// 任务历史时间线是否全量展开（为 false 时当空间有限自动折叠更早记录）。
+    pub(crate) timeline_expanded: bool,
     pub(crate) should_quit: bool,
     pub(crate) search_query: String,
     pub(crate) tag_filter: Option<String>,
@@ -512,6 +518,9 @@ impl<'a> App<'a> {
             help_scroll: 0,
             workflow_scroll: 0,
             workflow_side_scroll: 0,
+            detail_scroll: 0,
+            notes_expanded: false,
+            timeline_expanded: false,
             should_quit: false,
             search_query: String::new(),
             tag_filter: None,
@@ -811,6 +820,9 @@ impl<'a> App<'a> {
         self.selected = 0;
         self.workflow_scroll = 0;
         self.workflow_side_scroll = 0;
+        self.detail_scroll = 0;
+        self.notes_expanded = false;
+        self.timeline_expanded = false;
         self.toast = None;
         self.status_message.clear();
         if let Err(e) = self.refresh() {
@@ -844,8 +856,22 @@ impl<'a> App<'a> {
             }
             return;
         }
+        if self.pane == Pane::Right && self.mode != Mode::Visual {
+            if delta <= -10000 {
+                self.detail_scroll = 0;
+            } else if delta >= 10000 {
+                self.detail_scroll = usize::MAX;
+            } else {
+                let s = self.detail_scroll as isize + delta;
+                self.detail_scroll = s.max(0) as usize;
+            }
+            return;
+        }
         if self.items.is_empty() {
             self.selected = 0;
+            self.detail_scroll = 0;
+            self.notes_expanded = false;
+            self.timeline_expanded = false;
             self.load_detail();
             return;
         }
@@ -856,6 +882,11 @@ impl<'a> App<'a> {
         }
         if s >= n {
             s = n - 1;
+        }
+        if self.selected != s as usize {
+            self.detail_scroll = 0;
+            self.notes_expanded = false;
+            self.timeline_expanded = false;
         }
         self.selected = s as usize;
         if self.mode == Mode::Visual {

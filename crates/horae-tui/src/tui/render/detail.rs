@@ -509,19 +509,46 @@ impl<'a> App<'a> {
                 tr!(self.lang, "备注:", "Notes:"),
                 Style::default().add_modifier(Modifier::BOLD),
             )));
-            for ln in d.task.notes.split('\n') {
-                if ln.trim().is_empty() {
-                    lines.push(Line::from(""));
-                } else {
-                    let chunks = wrap_text(
-                        ln,
-                        inner_width.saturating_sub(2),
-                        inner_width.saturating_sub(2),
-                    );
-                    for chunk in chunks {
-                        lines.push(Line::from(format!("  {}", chunk)));
-                    }
-                }
+            let md_lines = crate::tui::render::markdown::render_markdown(
+                &d.task.notes,
+                &self.theme,
+                inner_width,
+                self.icon_style,
+            );
+
+            const NOTES_FOLD_THRESHOLD: usize = 8;
+            let total_md_lines = md_lines.len();
+
+            if total_md_lines > NOTES_FOLD_THRESHOLD && !self.notes_expanded {
+                lines.extend(md_lines.into_iter().take(NOTES_FOLD_THRESHOLD));
+                let collapsed_count = total_md_lines - NOTES_FOLD_THRESHOLD;
+                let fold_hint = tr!(
+                    self.lang,
+                    "  ... (折叠剩余 {} 行 · 按 z 展开备注)",
+                    "  ... (collapsed {} remaining lines · press z to expand)",
+                    collapsed_count
+                );
+                lines.push(Line::from(Span::styled(
+                    fold_hint,
+                    Style::default()
+                        .fg(self.theme.accent)
+                        .add_modifier(Modifier::ITALIC),
+                )));
+            } else if total_md_lines > NOTES_FOLD_THRESHOLD && self.notes_expanded {
+                lines.extend(md_lines);
+                let collapse_hint = tr!(
+                    self.lang,
+                    "  ▲ (已展开全文 · 按 z 收起备注)",
+                    "  ▲ (expanded all · press z to collapse)"
+                );
+                lines.push(Line::from(Span::styled(
+                    collapse_hint,
+                    Style::default()
+                        .fg(self.theme.text_dim)
+                        .add_modifier(Modifier::ITALIC),
+                )));
+            } else {
+                lines.extend(md_lines);
             }
         }
 
@@ -562,16 +589,17 @@ impl<'a> App<'a> {
             // d.events is chronological: index 0 is root, last is HEAD.
             let total = d.events.len();
 
-            // When total > 6 and space is limited: show newest 3, collapsed summary, and 1 root
-            let (display_groups, collapsed_count) = if total > 6 && available < total * 2 {
-                let newest = d.events.iter().rev().take(3).cloned().collect::<Vec<_>>();
-                let root = d.events.first().cloned().unwrap();
-                let collapsed = total - 4;
-                (vec![(newest, true), (vec![root], false)], collapsed)
-            } else {
-                let all_rev = d.events.iter().rev().cloned().collect::<Vec<_>>();
-                (vec![(all_rev, true)], 0)
-            };
+            // When total > 6 and space is limited and not expanded: show newest 3, collapsed summary, and 1 root
+            let (display_groups, collapsed_count) =
+                if total > 6 && available < total * 2 && !self.timeline_expanded {
+                    let newest = d.events.iter().rev().take(3).cloned().collect::<Vec<_>>();
+                    let root = d.events.first().cloned().unwrap();
+                    let collapsed = total - 4;
+                    (vec![(newest, true), (vec![root], false)], collapsed)
+                } else {
+                    let all_rev = d.events.iter().rev().cloned().collect::<Vec<_>>();
+                    (vec![(all_rev, true)], 0)
+                };
 
             let total_displayed = if collapsed_count > 0 { 4 } else { total };
             let show_rail_lines = available > total_displayed * 2;
@@ -759,8 +787,8 @@ impl<'a> App<'a> {
                     }
                     let collapse_msg = tr!(
                         self.lang,
-                        "... (折叠 {} 项更早记录)",
-                        "... (collapsed {} earlier events)",
+                        "... (折叠 {} 项更早记录 · 按 Z 展开时间线)",
+                        "... (collapsed {} earlier events · press Z to expand)",
                         collapsed_count
                     );
                     let prefix_str = format!("  {} ", collapsed_rail);
@@ -775,7 +803,9 @@ impl<'a> App<'a> {
                         ));
                         c_spans.push(Span::styled(
                             chunk,
-                            Style::default().fg(self.theme.text_dim),
+                            Style::default()
+                                .fg(self.theme.accent)
+                                .add_modifier(Modifier::ITALIC),
                         ));
                         lines.push(Line::from(c_spans));
                     }
@@ -786,6 +816,20 @@ impl<'a> App<'a> {
                         )));
                     }
                 }
+            }
+
+            if self.timeline_expanded && total > 6 && available < total * 2 {
+                let collapse_hint = tr!(
+                    self.lang,
+                    "  ┊ ▲ (已展开全部时间线 · 按 Z 收起)",
+                    "  ┊ ▲ (all events expanded · press Z to collapse)"
+                );
+                lines.push(Line::from(Span::styled(
+                    collapse_hint,
+                    Style::default()
+                        .fg(self.theme.text_dim)
+                        .add_modifier(Modifier::ITALIC),
+                )));
             }
         }
 

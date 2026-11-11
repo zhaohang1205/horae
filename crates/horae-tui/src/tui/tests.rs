@@ -1881,7 +1881,7 @@ fn normal_mode_space_batch_ops_use_all_selected() {
     let mut app = app_normal(&conn);
     app.popup = None;
     app.handle_key(key('8')).unwrap(); // 归档箱视图
-    app.handle_key(key('l')).unwrap(); // 焦点移到列表栏（否则 j/k 是切视图）
+    app.pane = Pane::Center; // 确保焦点在列表栏（j/k 操作任务列表）
     let top_two: Vec<String> = tasks::list_archived(&conn)
         .unwrap()
         .into_iter()
@@ -1927,7 +1927,7 @@ fn normal_mode_space_batch_ops_use_all_selected() {
     let mut app2 = app_normal(&conn2);
     app2.popup = None;
     app2.handle_key(key('2')).unwrap(); // Next 视图
-    app2.handle_key(key('l')).unwrap(); // 焦点移到列表栏
+    app2.pane = Pane::Center; // 确保焦点在列表栏
     app2.handle_key(key(' ')).unwrap();
     app2.handle_key(key('j')).unwrap();
     app2.handle_key(key(' ')).unwrap();
@@ -1970,7 +1970,7 @@ fn archived_view_can_restore_multiple_selected() {
     let mut app = app_normal(&conn);
     app.popup = None;
     app.handle_key(key('8')).unwrap(); // 归档箱视图
-    app.handle_key(key('l')).unwrap(); // 焦点移到列表栏
+    app.pane = Pane::Center; // 确保焦点在列表栏
     let top_two: Vec<String> = tasks::list_archived(&conn)
         .unwrap()
         .into_iter()
@@ -6395,4 +6395,255 @@ fn test_detail_long_fields_wrapping_with_proper_indent() {
         .find(|l| l.starts_with("  这是第一行"))
         .expect("应有备注行");
     assert!(note_line.starts_with("  "));
+}
+
+#[test]
+fn test_detail_notes_folding_and_expansion_toggle() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    let long_notes = (1..=12)
+        .map(|i| format!("这是第 {} 行超长任务备注内容", i))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let task = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "测试超长备注折叠任务".into(),
+            notes: long_notes,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    app.set_view(View::Inbox);
+    let idx = app
+        .items
+        .iter()
+        .position(|r| r.id == task.id)
+        .expect("Inbox should have task");
+    app.selected = idx;
+    app.load_detail();
+
+    // 1. 默认状态：notes_expanded = false，超长备注应自动折叠为前 8 行 + 折叠提示
+    assert!(!app.notes_expanded);
+    let folded_strings: Vec<String> = {
+        let d = app.detail.as_ref().expect("detail should be loaded");
+        app.detail_lines(d, 60, 40)
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .collect()
+    };
+
+    assert!(folded_strings
+        .iter()
+        .any(|s| s.contains("折叠剩余 4 行 · 按 z 展开备注")));
+    assert!(folded_strings.iter().any(|s| s.contains("第 1 行")));
+    assert!(folded_strings.iter().any(|s| s.contains("第 8 行")));
+    // 第 9 行被折叠，不应该直接出现在折叠后的行中
+    assert!(!folded_strings.iter().any(|s| s.contains("第 9 行")));
+
+    // 2. 按 'z' 展开全文
+    app.handle_key(key('z')).unwrap();
+    assert!(app.notes_expanded);
+
+    let expanded_strings: Vec<String> = {
+        let d = app.detail.as_ref().expect("detail should be loaded");
+        app.detail_lines(d, 60, 40)
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .collect()
+    };
+
+    assert!(expanded_strings.iter().any(|s| s.contains("第 9 行")));
+    assert!(expanded_strings.iter().any(|s| s.contains("第 12 行")));
+    assert!(expanded_strings
+        .iter()
+        .any(|s| s.contains("已展开全文 · 按 z 收起备注")));
+
+    // 3. 再次按 'z' 重新折叠
+    app.handle_key(key('z')).unwrap();
+    assert!(!app.notes_expanded);
+}
+
+#[test]
+fn test_detail_timeline_folding_and_expansion_toggle() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    let task = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "timeline collapse and expand test".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // 制造 8 次事件，使总事件数达到 9 个（> 6 个）
+    for _ in 0..4 {
+        horae_core::repo::tasks::transition(&conn, &task.id, horae_core::model::task::Status::Next)
+            .unwrap();
+        horae_core::repo::tasks::transition(
+            &conn,
+            &task.id,
+            horae_core::model::task::Status::Waiting,
+        )
+        .unwrap();
+    }
+
+    app.set_view(View::Waiting);
+    let idx = app
+        .items
+        .iter()
+        .position(|r| r.id == task.id)
+        .expect("Waiting view should have task");
+    app.selected = idx;
+    app.load_detail();
+
+    // 1. 默认状态：timeline_expanded = false，在有限高度下时间线应自动折叠更早记录
+    assert!(!app.timeline_expanded);
+    let folded_strings: Vec<String> = {
+        let d = app.detail.as_ref().expect("detail should be loaded");
+        app.detail_lines(d, 50, 15)
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .collect()
+    };
+
+    assert!(
+        folded_strings
+            .iter()
+            .any(|s| s.contains("折叠") && s.contains("按 Z 展开时间线")),
+        "默认应折叠部分历史事件并提示按 Z 展开时间线"
+    );
+
+    // 2. 按 'Z' 展开时间线
+    app.handle_key(key('Z')).unwrap();
+    assert!(app.timeline_expanded);
+
+    let expanded_strings: Vec<String> = {
+        let d = app.detail.as_ref().expect("detail should be loaded");
+        app.detail_lines(d, 50, 15)
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .collect()
+    };
+
+    assert!(
+        !expanded_strings
+            .iter()
+            .any(|s| s.contains("按 Z 展开时间线")),
+        "展开后不应再有折叠提示"
+    );
+    assert!(
+        expanded_strings
+            .iter()
+            .any(|s| s.contains("已展开全部时间线 · 按 Z 收起")),
+        "展开后应显示收起提示"
+    );
+
+    // 3. 再次按 'Z' 收起时间线
+    app.handle_key(key('Z')).unwrap();
+    assert!(!app.timeline_expanded);
+}
+
+#[test]
+fn test_detail_pane_scrolling_and_navigation() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    let _t1 = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "任务1".into(),
+            notes: "内容1\n内容2\n内容3".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let _t2 = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "任务2".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    app.set_view(View::Inbox);
+    app.selected = 0;
+    app.load_detail();
+
+    // 初始状态处于中间列表 (Pane::Center)
+    assert_eq!(app.pane, Pane::Center);
+    assert_eq!(app.detail_scroll, 0);
+
+    // 1. 按 'l' 聚焦右侧详情栏
+    app.handle_key(key('l')).unwrap();
+    assert_eq!(app.pane, Pane::Right);
+
+    // 2. 在右栏按 'j' / 'k' 进行垂直滚动
+    app.handle_key(key('j')).unwrap();
+    assert_eq!(app.detail_scroll, 1);
+    app.handle_key(key('j')).unwrap();
+    assert_eq!(app.detail_scroll, 2);
+    app.handle_key(key('k')).unwrap();
+    assert_eq!(app.detail_scroll, 1);
+
+    // 3. 首尾翻页快捷键 g / G
+    app.handle_key(key('G')).unwrap();
+    assert_eq!(app.detail_scroll, usize::MAX);
+    app.handle_key(key('g')).unwrap();
+    assert_eq!(app.detail_scroll, 0);
+
+    // 4. 按 Esc 返回中间任务列表并重置滚动
+    app.handle_key(key('l')).unwrap();
+    app.handle_key(key('j')).unwrap();
+    assert_eq!(app.detail_scroll, 1);
+    app.handle_key(KeyCode::Esc.into()).unwrap();
+    assert_eq!(app.pane, Pane::Center);
+    assert_eq!(app.detail_scroll, 0);
+
+    // 5. 在中栏移动任务光标也会重置 detail_scroll
+    app.handle_key(key('l')).unwrap();
+    app.handle_key(key('j')).unwrap();
+    assert_eq!(app.detail_scroll, 1);
+    app.handle_key(key('h')).unwrap();
+    assert_eq!(app.pane, Pane::Center);
+    assert_eq!(app.detail_scroll, 0);
+    app.handle_key(key('j')).unwrap();
+    assert_eq!(app.selected, 1);
+    assert_eq!(app.detail_scroll, 0);
 }

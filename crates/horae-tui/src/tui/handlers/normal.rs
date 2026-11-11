@@ -88,6 +88,9 @@ impl<'a> App<'a> {
                 let r = self.reload();
                 self.note(r);
             }
+        } else if self.pane == Pane::Right {
+            self.pane = Pane::Center;
+            self.detail_scroll = 0;
         } else if self.tag_filter.is_some() || !self.search_query.is_empty() {
             self.tag_filter = None;
             self.search_query.clear();
@@ -204,7 +207,10 @@ impl<'a> App<'a> {
         match key.code {
             KeyCode::Char('h') | KeyCode::Left => {
                 self.pane = match self.pane {
-                    Pane::Right => Pane::Center,
+                    Pane::Right => {
+                        self.detail_scroll = 0;
+                        Pane::Center
+                    }
                     Pane::Center => Pane::Left,
                     Pane::Left => Pane::Left,
                 };
@@ -228,6 +234,18 @@ impl<'a> App<'a> {
                     self.next_view(-1);
                 } else {
                     self.move_sel(-1);
+                }
+            }
+            KeyCode::Char('z') => {
+                self.notes_expanded = !self.notes_expanded;
+                if !self.notes_expanded {
+                    self.detail_scroll = 0;
+                }
+            }
+            KeyCode::Char('Z') => {
+                self.timeline_expanded = !self.timeline_expanded;
+                if !self.timeline_expanded {
+                    self.detail_scroll = 0;
                 }
             }
             KeyCode::Char(d) if d.is_ascii_digit() => {

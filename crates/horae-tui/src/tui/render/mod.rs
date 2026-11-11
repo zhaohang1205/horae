@@ -1155,21 +1155,58 @@ impl<'a> AppRender for App<'a> {
             .borders(Borders::ALL)
             .border_set(border::ROUNDED)
             .padding(ratatui::widgets::Padding::horizontal(1))
-            .border_style(Style::default().fg(border_color))
-            .title(tr!(self.lang, " 任务详情 ", " Task Details "));
+            .border_style(Style::default().fg(border_color));
 
         match &self.detail {
             None => {
                 let empty_para = Paragraph::new(tr!(self.lang, " 未选中任务", " No task selected"))
                     .style(Style::default().fg(self.theme.text_dim))
-                    .block(block);
+                    .block(block.title(tr!(self.lang, " 任务详情 ", " Task Details ")));
                 f.render_widget(empty_para, area);
             }
             Some(d) => {
                 let lines = self.detail_lines(d, area.width, area.height);
+                let content_h = area.height.saturating_sub(2) as usize;
+                let max_scroll = lines.len().saturating_sub(content_h);
+                let scroll = self.detail_scroll.min(max_scroll);
+                self.detail_scroll = scroll;
+
+                let title = if max_scroll > 0 {
+                    let pct = if max_scroll == 0 {
+                        100
+                    } else {
+                        ((scroll as f64 / max_scroll as f64) * 100.0).round() as usize
+                    };
+                    let hint = if self.pane == Pane::Right {
+                        tr!(
+                            self.lang,
+                            " · j/k 滚动 · z 备注 · Z 时间线",
+                            " · j/k scroll · z notes · Z timeline"
+                        )
+                    } else {
+                        tr!(self.lang, " · 按 l 聚焦滚动", " · press l to scroll")
+                    };
+                    format!(
+                        "{} ({}%{}) ",
+                        tr!(self.lang, " 任务详情", " Task Details"),
+                        pct,
+                        hint
+                    )
+                } else if self.pane == Pane::Right {
+                    tr!(
+                        self.lang,
+                        " 任务详情 (· z 备注 · Z 时间线) ",
+                        " Task Details (· z notes · Z timeline) "
+                    )
+                    .to_string()
+                } else {
+                    tr!(self.lang, " 任务详情 ", " Task Details ").to_string()
+                };
+
                 let para = Paragraph::new(lines)
                     .style(Style::default().fg(self.theme.fg))
-                    .block(block)
+                    .block(block.title(title))
+                    .scroll((scroll as u16, 0))
                     .wrap(ratatui::widgets::Wrap { trim: false });
                 f.render_widget(para, area);
             }
@@ -1182,4 +1219,5 @@ pub(crate) mod detail;
 pub(crate) mod focus;
 mod help;
 mod input;
+pub(crate) mod markdown;
 mod popups;
