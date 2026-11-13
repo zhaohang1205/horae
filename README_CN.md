@@ -49,7 +49,7 @@
 | **Arch Linux / Omarchy**（pacman 源） | `curl -sSL https://zhaohang1205.github.io/horae/install-repo.sh \| sudo bash`<br>`sudo pacman -S horae` | 预编译原生包 + 自动安装补全脚本 |
 | **npm**（Linux / macOS / Windows） | `npx horae-cli` 或 `npm install -g horae-cli` | 预编译二进制，免装 Rust 工具链 |
 | **Cargo**（Rust 1.89+） | `cargo install horae` | SQLite 内嵌；国内加速：`cargo install --git https://gitee.com/zhao-hang1205/hora.git` |
-| **源码构建** | `git clone https://github.com/zhaohang1205/horae.git && cd horae && cargo build --release` | 产物在 `target/release/horae`；Arch `PKGBUILD` 位于 `packaging/aur/` |
+| **源码构建** | `git clone https://github.com/zhaohang1205/horae.git && cd horae && cargo build --release` | 产物在 `target/release/horae` |
 
 首次运行前有两件事值得知道：
 

@@ -49,7 +49,7 @@
 | **Arch Linux / Omarchy** (pacman repo) | `curl -sSL https://zhaohang1205.github.io/horae/install-repo.sh \| sudo bash`<br>`sudo pacman -S horae` | Prebuilt binary + shell completions |
 | **npm** (Linux / macOS / Windows) | `npx horae-cli` or `npm install -g horae-cli` | Prebuilt binary, no Rust toolchain needed |
 | **Cargo** (Rust 1.89+) | `cargo install horae` | SQLite bundled; Gitee mirror: `cargo install --git https://gitee.com/zhao-hang1205/hora.git` |
-| **From source** | `git clone https://github.com/zhaohang1205/horae.git && cd horae && cargo build --release` | Outputs `target/release/horae`; Arch `PKGBUILD` files are in `packaging/aur/` |
+| **From source** | `git clone https://github.com/zhaohang1205/horae.git && cd horae && cargo build --release` | Outputs `target/release/horae` |
 
 Two things worth knowing on first launch:
 
