@@ -1178,13 +1178,25 @@ impl<'a> AppRender for App<'a> {
                         ((scroll as f64 / max_scroll as f64) * 100.0).round() as usize
                     };
                     let hint = if self.pane == Pane::Right {
+                        let z_action = match self.timeline_mode {
+                            crate::tui::app::TimelineViewMode::Compact => {
+                                tr!(self.lang, "Z 里程碑", "Z milestones")
+                            }
+                            crate::tui::app::TimelineViewMode::Milestones => {
+                                tr!(self.lang, "Z 全量", "Z full")
+                            }
+                            crate::tui::app::TimelineViewMode::Full => {
+                                tr!(self.lang, "Z 折叠", "Z fold")
+                            }
+                        };
                         tr!(
                             self.lang,
-                            " · j/k 滚动 · z 备注 · Z 时间线",
-                            " · j/k scroll · z notes · Z timeline"
+                            " · j/k 滚动 · z 备注 · {}",
+                            " · j/k scroll · z notes · {}",
+                            z_action
                         )
                     } else {
-                        tr!(self.lang, " · 按 l 聚焦滚动", " · press l to scroll")
+                        tr!(self.lang, " · 按 l 聚焦滚动", " · press l to scroll").to_string()
                     };
                     format!(
                         "{} ({}%{}) ",
@@ -1193,12 +1205,23 @@ impl<'a> AppRender for App<'a> {
                         hint
                     )
                 } else if self.pane == Pane::Right {
+                    let z_action = match self.timeline_mode {
+                        crate::tui::app::TimelineViewMode::Compact => {
+                            tr!(self.lang, "Z 里程碑", "Z milestones")
+                        }
+                        crate::tui::app::TimelineViewMode::Milestones => {
+                            tr!(self.lang, "Z 全量", "Z full")
+                        }
+                        crate::tui::app::TimelineViewMode::Full => {
+                            tr!(self.lang, "Z 折叠", "Z fold")
+                        }
+                    };
                     tr!(
                         self.lang,
-                        " 任务详情 (· z 备注 · Z 时间线) ",
-                        " Task Details (· z notes · Z timeline) "
+                        " 任务详情 (· z 备注 · {}) ",
+                        " Task Details (· z notes · {}) ",
+                        z_action
                     )
-                    .to_string()
                 } else {
                     tr!(self.lang, " 任务详情 ", " Task Details ").to_string()
                 };

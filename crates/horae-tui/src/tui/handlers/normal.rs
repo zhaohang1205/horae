@@ -243,8 +243,18 @@ impl<'a> App<'a> {
                 }
             }
             KeyCode::Char('Z') => {
-                self.timeline_expanded = !self.timeline_expanded;
-                if !self.timeline_expanded {
+                self.timeline_mode = match self.timeline_mode {
+                    crate::tui::app::TimelineViewMode::Compact => {
+                        crate::tui::app::TimelineViewMode::Milestones
+                    }
+                    crate::tui::app::TimelineViewMode::Milestones => {
+                        crate::tui::app::TimelineViewMode::Full
+                    }
+                    crate::tui::app::TimelineViewMode::Full => {
+                        crate::tui::app::TimelineViewMode::Compact
+                    }
+                };
+                if self.timeline_mode == crate::tui::app::TimelineViewMode::Compact {
                     self.detail_scroll = 0;
                 }
             }

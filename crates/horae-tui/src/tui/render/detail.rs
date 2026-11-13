@@ -4,7 +4,7 @@ use crate::tui::status_cn;
 use crate::tui::ui;
 use chrono::{Local, TimeZone, Utc};
 use horae_core::model::event;
-use horae_core::repo::tasks::describe_event;
+use horae_core::repo::tasks::AggregatedTimelineEntry;
 use horae_core::time;
 use ratatui::{
     style::{Modifier, Style},
@@ -12,10 +12,55 @@ use ratatui::{
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-fn format_compact_time(ms: i64) -> String {
-    match Utc.timestamp_millis_opt(ms).single() {
-        Some(dt) => dt.with_timezone(&Local).format("%m-%d %H:%M").to_string(),
-        None => "-".to_string(),
+fn format_timeline_time(start_ms: i64, end_ms: Option<i64>, inner_width: usize) -> String {
+    let start_dt = match Utc.timestamp_millis_opt(start_ms).single() {
+        Some(dt) => dt.with_timezone(&Local),
+        None => return "--:--".to_string(),
+    };
+
+    match end_ms {
+        None => {
+            if inner_width < 28 {
+                start_dt.format("%H:%M").to_string()
+            } else {
+                start_dt.format("%m-%d %H:%M").to_string()
+            }
+        }
+        Some(end) if end == start_ms => {
+            if inner_width < 28 {
+                start_dt.format("%H:%M").to_string()
+            } else {
+                start_dt.format("%m-%d %H:%M").to_string()
+            }
+        }
+        Some(end) => {
+            let end_dt = match Utc.timestamp_millis_opt(end).single() {
+                Some(dt) => dt.with_timezone(&Local),
+                None => {
+                    return if inner_width < 28 {
+                        start_dt.format("%H:%M").to_string()
+                    } else {
+                        start_dt.format("%m-%d %H:%M").to_string()
+                    };
+                }
+            };
+
+            let is_same_day = start_dt.date_naive() == end_dt.date_naive();
+            if inner_width < 28 {
+                if is_same_day {
+                    format!("{}-{}", start_dt.format("%H"), end_dt.format("%H:%M"))
+                } else {
+                    format!("{}~{}", start_dt.format("%d"), end_dt.format("%d"))
+                }
+            } else if is_same_day {
+                // 同一天多次事件跨度（如 14:00~16:30，共 11 字符对齐标准时间列）
+                let span_str = format!("{}~{}", start_dt.format("%H:%M"), end_dt.format("%H:%M"));
+                format!("{:<11}", span_str)
+            } else {
+                // 跨天多次事件跨度（如 11-01~11-07，恰好 11 字符）
+                format!("{}~{}", start_dt.format("%m-%d"), end_dt.format("%m-%d"))
+            }
+        }
     }
 }
 
@@ -581,47 +626,225 @@ impl<'a> App<'a> {
             let rail = if is_ascii { "|" } else { "│" };
             let collapsed_rail = if is_ascii { ":" } else { "┊" };
 
+            // 视窗层：周期自适应视窗判定 (DAILY 21天 / WEEKLY 12周 / MONTHLY 12个月)
+            let window_opt = horae_core::repo::tasks::cadence_window(d.task.rrule.as_deref());
+
+            // 根据 TimelineViewMode 及活跃视窗进行历史沉淀与展示列表组织
+            let display_items = match self.timeline_mode {
+                crate::tui::app::TimelineViewMode::Full => {
+                    // 全量模式：无截断展示全生命周期所有聚合事件
+                    horae_core::repo::tasks::aggregate_timeline_events(&d.events, self.lang)
+                }
+                crate::tui::app::TimelineViewMode::Milestones => {
+                    // 里程碑模式：
+                    // 若存在周期视窗，早于视窗的历史聚拢为更早沉淀根节点；视窗内展示关键里程碑
+                    if let Some(window) = window_opt {
+                        let now_ms = horae_core::time::now_ms();
+                        let cutoff_ms = now_ms.saturating_sub(window.horizon_ms);
+                        let (earlier_events, active_events): (Vec<_>, Vec<_>) =
+                            d.events.iter().cloned().partition(|e| e.at < cutoff_ms);
+
+                        let active_agg = horae_core::repo::tasks::aggregate_timeline_events(
+                            &active_events,
+                            self.lang,
+                        );
+                        let mut ms: Vec<_> =
+                            active_agg.into_iter().filter(|e| e.is_milestone).collect();
+
+                        if !earlier_events.is_empty() {
+                            let earlier_checkins: usize = earlier_events
+                                .iter()
+                                .filter(|e| e.event_type == event::EV_HABIT_COMPLETED)
+                                .count();
+                            let earlier_pomos: usize = earlier_events
+                                .iter()
+                                .filter(|e| e.event_type == event::EV_POMODORO)
+                                .count();
+                            let root_at = earlier_events.first().map(|e| e.at).unwrap_or(cutoff_ms);
+                            let horizon_label = match self.lang {
+                                horae_core::i18n::Lang::Zh => window.label_zh,
+                                horae_core::i18n::Lang::En => window.label_en,
+                            };
+                            let desc = if earlier_checkins > 0 {
+                                tr!(
+                                    self.lang,
+                                    "{}前历史沉淀: 累计履约打卡 {} 次 (共 {} 项历史 · 按 Z 展开全量)",
+                                    "Prior to {}: {} check-ins completed ({} earlier events · press Z for full log)",
+                                    horizon_label,
+                                    earlier_checkins,
+                                    earlier_events.len()
+                                )
+                            } else if earlier_pomos > 0 {
+                                tr!(
+                                    self.lang,
+                                    "{}前历史沉淀: 累计专注 {} 个番茄钟 (共 {} 项历史 · 按 Z 展开全量)",
+                                    "Prior to {}: {} pomodoros completed ({} earlier events · press Z for full log)",
+                                    horizon_label,
+                                    earlier_pomos,
+                                    earlier_events.len()
+                                )
+                            } else {
+                                tr!(
+                                    self.lang,
+                                    "{}前历史沉淀: 共 {} 项历史记录 (按 Z 展开全量)",
+                                    "Prior to {}: {} earlier events (press Z for full log)",
+                                    horizon_label,
+                                    earlier_events.len()
+                                )
+                            };
+                            ms.insert(
+                                0,
+                                AggregatedTimelineEntry {
+                                    id: 0,
+                                    at: root_at,
+                                    end_at: None,
+                                    event_type: "earlier_history".to_string(),
+                                    badge: tr!(self.lang, "更早", "Past").to_string(),
+                                    description: desc,
+                                    is_milestone: true,
+                                    count: earlier_events.len(),
+                                },
+                            );
+                        }
+                        if ms.is_empty() {
+                            horae_core::repo::tasks::aggregate_timeline_events(&d.events, self.lang)
+                        } else {
+                            ms
+                        }
+                    } else {
+                        // 单次任务里程碑
+                        let raw_agg = horae_core::repo::tasks::aggregate_timeline_events(
+                            &d.events, self.lang,
+                        );
+                        let total_raw = raw_agg.len();
+                        let ms: Vec<_> = raw_agg
+                            .iter()
+                            .enumerate()
+                            .filter(|(idx, e)| e.is_milestone || *idx == 0 || *idx == total_raw - 1)
+                            .map(|(_, e)| e.clone())
+                            .collect();
+                        if ms.is_empty() {
+                            raw_agg
+                        } else {
+                            ms
+                        }
+                    }
+                }
+                crate::tui::app::TimelineViewMode::Compact => {
+                    // 紧凑模式：
+                    // 若存在周期视窗，早于视窗的历史聚拢为更早沉淀根节点；视窗内展示完整活跃流水
+                    if let Some(window) = window_opt {
+                        let now_ms = horae_core::time::now_ms();
+                        let cutoff_ms = now_ms.saturating_sub(window.horizon_ms);
+                        let (earlier_events, active_events): (Vec<_>, Vec<_>) =
+                            d.events.iter().cloned().partition(|e| e.at < cutoff_ms);
+
+                        let mut active_agg = horae_core::repo::tasks::aggregate_timeline_events(
+                            &active_events,
+                            self.lang,
+                        );
+
+                        if !earlier_events.is_empty() {
+                            let earlier_checkins: usize = earlier_events
+                                .iter()
+                                .filter(|e| e.event_type == event::EV_HABIT_COMPLETED)
+                                .count();
+                            let earlier_pomos: usize = earlier_events
+                                .iter()
+                                .filter(|e| e.event_type == event::EV_POMODORO)
+                                .count();
+                            let root_at = earlier_events.first().map(|e| e.at).unwrap_or(cutoff_ms);
+                            let horizon_label = match self.lang {
+                                horae_core::i18n::Lang::Zh => window.label_zh,
+                                horae_core::i18n::Lang::En => window.label_en,
+                            };
+                            let desc = if earlier_checkins > 0 {
+                                tr!(
+                                    self.lang,
+                                    "{}前历史沉淀: 累计履约打卡 {} 次 (共 {} 项历史 · 按 Z 展开全量)",
+                                    "Prior to {}: {} check-ins completed ({} earlier events · press Z for full log)",
+                                    horizon_label,
+                                    earlier_checkins,
+                                    earlier_events.len()
+                                )
+                            } else if earlier_pomos > 0 {
+                                tr!(
+                                    self.lang,
+                                    "{}前历史沉淀: 累计专注 {} 个番茄钟 (共 {} 项历史 · 按 Z 展开全量)",
+                                    "Prior to {}: {} pomodoros completed ({} earlier events · press Z for full log)",
+                                    horizon_label,
+                                    earlier_pomos,
+                                    earlier_events.len()
+                                )
+                            } else {
+                                tr!(
+                                    self.lang,
+                                    "{}前历史沉淀: 共 {} 项历史记录 (按 Z 展开全量)",
+                                    "Prior to {}: {} earlier events (press Z for full log)",
+                                    horizon_label,
+                                    earlier_events.len()
+                                )
+                            };
+                            active_agg.insert(
+                                0,
+                                AggregatedTimelineEntry {
+                                    id: 0,
+                                    at: root_at,
+                                    end_at: None,
+                                    event_type: "earlier_history".to_string(),
+                                    badge: tr!(self.lang, "更早", "Past").to_string(),
+                                    description: desc,
+                                    is_milestone: true,
+                                    count: earlier_events.len(),
+                                },
+                            );
+                        }
+                        active_agg
+                    } else {
+                        // 单次任务紧凑模式直接使用 raw_agg
+                        horae_core::repo::tasks::aggregate_timeline_events(&d.events, self.lang)
+                    }
+                }
+            };
+
             // Available vertical space in detail pane
             let used_so_far = lines.len();
             let inner_height = (height.saturating_sub(2)) as usize;
             let available = inner_height.saturating_sub(used_so_far);
 
-            // d.events is chronological: index 0 is root, last is HEAD.
-            let total = d.events.len();
+            let total = display_items.len();
 
-            // When total > 6 and space is limited and not expanded: show newest 3, collapsed summary, and 1 root
-            let (display_groups, collapsed_count) =
-                if total > 6 && available < total * 2 && !self.timeline_expanded {
-                    let newest = d.events.iter().rev().take(3).cloned().collect::<Vec<_>>();
-                    let root = d.events.first().cloned().unwrap();
-                    let collapsed = total - 4;
-                    (vec![(newest, true), (vec![root], false)], collapsed)
-                } else {
-                    let all_rev = d.events.iter().rev().cloned().collect::<Vec<_>>();
-                    (vec![(all_rev, true)], 0)
-                };
+            // When total > 6 and space is limited and in Compact mode: show newest 3, collapsed summary, and 1 root
+            let (display_groups, collapsed_count) = if total > 6
+                && available < total * 2
+                && self.timeline_mode == crate::tui::app::TimelineViewMode::Compact
+            {
+                let newest = display_items
+                    .iter()
+                    .rev()
+                    .take(3)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let root = display_items.first().cloned().unwrap();
+                let collapsed = total - 4;
+                (vec![(newest, true), (vec![root], false)], collapsed)
+            } else {
+                let all_rev = display_items.iter().rev().cloned().collect::<Vec<_>>();
+                (vec![(all_rev, true)], 0)
+            };
 
             let total_displayed = if collapsed_count > 0 { 4 } else { total };
             let show_rail_lines = available > total_displayed * 2;
 
             for (group_idx, (group_events, is_first_group)) in display_groups.iter().enumerate() {
-                for (item_idx, event) in group_events.iter().enumerate() {
+                for (item_idx, entry) in group_events.iter().enumerate() {
                     let is_head = *is_first_group && item_idx == 0;
                     let is_root = (!is_first_group && item_idx == group_events.len() - 1)
                         || (*is_first_group
                             && collapsed_count == 0
                             && item_idx == group_events.len() - 1);
 
-                    let entry = describe_event(event, self.lang);
-                    let time_str = if inner_width < 28 {
-                        // 紧凑模式下仅显示时:分，留出空间展示事件徽章与描述
-                        match Utc.timestamp_millis_opt(entry.at).single() {
-                            Some(dt) => dt.with_timezone(&Local).format("%H:%M").to_string(),
-                            None => "-".to_string(),
-                        }
-                    } else {
-                        format_compact_time(entry.at)
-                    };
+                    let time_str = format_timeline_time(entry.at, entry.end_at, inner_width);
 
                     let (node_glyph, node_color) = if is_head {
                         let color = if entry.event_type == event::EV_COMPLETED
@@ -640,6 +863,8 @@ impl<'a> App<'a> {
                         || entry.event_type == event::EV_POMODORO_STARTED
                     {
                         (node_other, self.theme.rrule_fg)
+                    } else if entry.event_type == "earlier_history" {
+                        (node_other, self.theme.accent)
                     } else {
                         (node_other, self.theme.text_dim)
                     };
@@ -658,6 +883,7 @@ impl<'a> App<'a> {
                             (self.theme.accent, false)
                         }
                         event::EV_CHECKLIST => (self.theme.hl_fg, false),
+                        "earlier_history" => (self.theme.accent, true),
                         _ => (self.theme.text_dim, false),
                     };
 
@@ -715,7 +941,7 @@ impl<'a> App<'a> {
                             line_spans.push(Span::styled(format!("{} ", tag_str), tag_style));
                         }
                         line_spans.push(Span::styled(
-                            entry.description,
+                            entry.description.clone(),
                             Style::default().fg(self.theme.fg),
                         ));
                         lines.push(Line::from(line_spans));
@@ -729,9 +955,9 @@ impl<'a> App<'a> {
                             if let Some((tag_str, tag_style)) = ref_badge {
                                 line_spans.push(Span::styled(format!("{} ", tag_str), tag_style));
                             }
-                            (None, entry.description)
+                            (None, entry.description.clone())
                         } else {
-                            (ref_badge, entry.description)
+                            (ref_badge, entry.description.clone())
                         };
                         lines.push(Line::from(line_spans));
 
@@ -787,8 +1013,8 @@ impl<'a> App<'a> {
                     }
                     let collapse_msg = tr!(
                         self.lang,
-                        "... (折叠 {} 项更早记录 · 按 Z 展开时间线)",
-                        "... (collapsed {} earlier events · press Z to expand)",
+                        "... (折叠 {} 项更早记录 · 按 Z 查看里程碑)",
+                        "... (collapsed {} earlier events · press Z for milestones)",
                         collapsed_count
                     );
                     let prefix_str = format!("  {} ", collapsed_rail);
@@ -818,18 +1044,36 @@ impl<'a> App<'a> {
                 }
             }
 
-            if self.timeline_expanded && total > 6 && available < total * 2 {
-                let collapse_hint = tr!(
-                    self.lang,
-                    "  ┊ ▲ (已展开全部时间线 · 按 Z 收起)",
-                    "  ┊ ▲ (all events expanded · press Z to collapse)"
-                );
-                lines.push(Line::from(Span::styled(
-                    collapse_hint,
-                    Style::default()
-                        .fg(self.theme.text_dim)
-                        .add_modifier(Modifier::ITALIC),
-                )));
+            match self.timeline_mode {
+                crate::tui::app::TimelineViewMode::Milestones => {
+                    let hint = tr!(
+                        self.lang,
+                        "  ┊ ★ [里程碑视图] 关键节点共 {} 项 · 按 Z 展开全量明细",
+                        "  ┊ ★ [Milestones] {} key events · press Z for full log",
+                        total
+                    );
+                    lines.push(Line::from(Span::styled(
+                        hint,
+                        Style::default()
+                            .fg(self.theme.accent)
+                            .add_modifier(Modifier::ITALIC),
+                    )));
+                }
+                crate::tui::app::TimelineViewMode::Full => {
+                    let hint = tr!(
+                        self.lang,
+                        "  ┊ ▲ [全量明细] 历史记录共 {} 项 · 按 Z 收起折叠",
+                        "  ┊ ▲ [Full Details] {} total events · press Z to collapse",
+                        total
+                    );
+                    lines.push(Line::from(Span::styled(
+                        hint,
+                        Style::default()
+                            .fg(self.theme.text_dim)
+                            .add_modifier(Modifier::ITALIC),
+                    )));
+                }
+                crate::tui::app::TimelineViewMode::Compact => {}
             }
         }
 

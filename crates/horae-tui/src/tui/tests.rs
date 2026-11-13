@@ -6518,8 +6518,11 @@ fn test_detail_timeline_folding_and_expansion_toggle() {
     app.selected = idx;
     app.load_detail();
 
-    // 1. 默认状态：timeline_expanded = false，在有限高度下时间线应自动折叠更早记录
-    assert!(!app.timeline_expanded);
+    // 1. 默认状态：timeline_mode = TimelineViewMode::Compact，在有限高度下时间线应自动折叠更早记录
+    assert_eq!(
+        app.timeline_mode,
+        crate::tui::app::TimelineViewMode::Compact
+    );
     let folded_strings: Vec<String> = {
         let d = app.detail.as_ref().expect("detail should be loaded");
         app.detail_lines(d, 50, 15)
@@ -6537,15 +6540,18 @@ fn test_detail_timeline_folding_and_expansion_toggle() {
     assert!(
         folded_strings
             .iter()
-            .any(|s| s.contains("折叠") && s.contains("按 Z 展开时间线")),
-        "默认应折叠部分历史事件并提示按 Z 展开时间线"
+            .any(|s| s.contains("折叠") && s.contains("按 Z 查看里程碑")),
+        "默认应折叠部分历史事件并提示按 Z 查看里程碑"
     );
 
-    // 2. 按 'Z' 展开时间线
+    // 2. 按 'Z' 切换到里程碑视图 (Milestones)
     app.handle_key(key('Z')).unwrap();
-    assert!(app.timeline_expanded);
+    assert_eq!(
+        app.timeline_mode,
+        crate::tui::app::TimelineViewMode::Milestones
+    );
 
-    let expanded_strings: Vec<String> = {
+    let milestone_strings: Vec<String> = {
         let d = app.detail.as_ref().expect("detail should be loaded");
         app.detail_lines(d, 50, 15)
             .iter()
@@ -6560,21 +6566,106 @@ fn test_detail_timeline_folding_and_expansion_toggle() {
     };
 
     assert!(
-        !expanded_strings
+        milestone_strings
             .iter()
-            .any(|s| s.contains("按 Z 展开时间线")),
-        "展开后不应再有折叠提示"
-    );
-    assert!(
-        expanded_strings
-            .iter()
-            .any(|s| s.contains("已展开全部时间线 · 按 Z 收起")),
-        "展开后应显示收起提示"
+            .any(|s| s.contains("[里程碑视图]") && s.contains("按 Z 展开全量明细")),
+        "里程碑视图应提示按 Z 展开全量明细"
     );
 
-    // 3. 再次按 'Z' 收起时间线
+    // 3. 再次按 'Z' 切换到全量明细视图 (Full)
     app.handle_key(key('Z')).unwrap();
-    assert!(!app.timeline_expanded);
+    assert_eq!(app.timeline_mode, crate::tui::app::TimelineViewMode::Full);
+
+    let full_strings: Vec<String> = {
+        let d = app.detail.as_ref().expect("detail should be loaded");
+        app.detail_lines(d, 50, 15)
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .collect()
+    };
+
+    assert!(
+        full_strings
+            .iter()
+            .any(|s| s.contains("[全量明细]") && s.contains("按 Z 收起折叠")),
+        "全量明细应显示完整历史并提示按 Z 收起折叠"
+    );
+
+    // 4. 再次按 'Z' 循环回到紧凑折叠视图
+    app.handle_key(key('Z')).unwrap();
+    assert_eq!(
+        app.timeline_mode,
+        crate::tui::app::TimelineViewMode::Compact
+    );
+}
+
+#[test]
+fn test_detail_timeline_aggregation_in_tui() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    let task = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "pomodoro aggregate test".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // 模拟连续完成 3 次番茄钟
+    for _ in 0..3 {
+        horae_core::repo::mutate(&conn, |tx, now| {
+            horae_core::repo::log_event(
+                tx,
+                &task.id,
+                horae_core::model::event::EV_POMODORO,
+                None,
+                None,
+                Some("1500"),
+                now,
+            )
+        })
+        .unwrap();
+    }
+
+    app.set_view(View::Inbox);
+    let idx = app
+        .items
+        .iter()
+        .position(|r| r.id == task.id)
+        .expect("Inbox should have task");
+    app.selected = idx;
+    app.load_detail();
+
+    let d = app.detail.as_ref().expect("detail should be loaded");
+    let strings: Vec<String> = app
+        .detail_lines(d, 60, 40)
+        .iter()
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .collect();
+
+    // 验证连续番茄钟已被智能聚合为包含“连续完成 3 个番茄钟 (共 1h 15m)”单行
+    assert!(
+        strings
+            .iter()
+            .any(|s| s.contains("连续完成 3 个番茄钟 (共 1h 15m)")),
+        "TUI 详情时间线中连续 3 个番茄钟应聚合为单行摘要"
+    );
 }
 
 #[test]
@@ -6646,4 +6737,266 @@ fn test_detail_pane_scrolling_and_navigation() {
     app.handle_key(key('j')).unwrap();
     assert_eq!(app.selected, 1);
     assert_eq!(app.detail_scroll, 0);
+}
+
+#[test]
+fn test_cadence_sliding_window_and_historical_anchor() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    let now = horae_core::time::now_ms();
+    let one_day = 86_400_000i64;
+
+    // 创建一个每日习惯任务（FREQ=DAILY）
+    let task = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "每日晨跑".into(),
+            rrule: Some("FREQ=DAILY".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // 模拟历史时间线：
+    // 40 天前创建任务 (沉淀历史)
+    // 35 天前连续打卡 3 次 (沉淀历史)
+    // 30 天前连续打卡 2 次 (沉淀历史)
+    // 5 天前打卡 1 次 (活跃视窗内)
+    // 今天打卡 1 次 (活跃视窗内)
+    let t_create = now - 40 * one_day;
+    horae_core::repo::mutate(&conn, |tx, _| {
+        horae_core::repo::log_event(
+            tx,
+            &task.id,
+            horae_core::model::event::EV_CAPTURED,
+            None,
+            Some("inbox"),
+            None,
+            t_create,
+        )
+    })
+    .unwrap();
+
+    for k in 0..3 {
+        let t = now - 35 * one_day + k * 1000;
+        horae_core::repo::mutate(&conn, |tx, _| {
+            horae_core::repo::log_event(
+                tx,
+                &task.id,
+                horae_core::model::event::EV_HABIT_COMPLETED,
+                None,
+                None,
+                None,
+                t,
+            )
+        })
+        .unwrap();
+    }
+
+    for k in 0..2 {
+        let t = now - 30 * one_day + k * 1000;
+        horae_core::repo::mutate(&conn, |tx, _| {
+            horae_core::repo::log_event(
+                tx,
+                &task.id,
+                horae_core::model::event::EV_HABIT_COMPLETED,
+                None,
+                None,
+                None,
+                t,
+            )
+        })
+        .unwrap();
+    }
+
+    let t_5d = now - 5 * one_day;
+    horae_core::repo::mutate(&conn, |tx, _| {
+        horae_core::repo::log_event(
+            tx,
+            &task.id,
+            horae_core::model::event::EV_HABIT_COMPLETED,
+            None,
+            None,
+            None,
+            t_5d,
+        )
+    })
+    .unwrap();
+
+    let t_today = now - 60_000;
+    horae_core::repo::mutate(&conn, |tx, _| {
+        horae_core::repo::log_event(
+            tx,
+            &task.id,
+            horae_core::model::event::EV_HABIT_COMPLETED,
+            None,
+            None,
+            None,
+            t_today,
+        )
+    })
+    .unwrap();
+
+    app.set_view(View::Inbox);
+    let idx = app
+        .items
+        .iter()
+        .position(|r| r.id == task.id)
+        .expect("task should be in Inbox");
+    app.selected = idx;
+    app.load_detail();
+
+    // 1. 默认 Compact 模式下：
+    // 超出 21 天的 5 次打卡自动沉淀为基底根节点
+    let compact_lines: Vec<String> = {
+        let d = app.detail.as_ref().expect("detail loaded");
+        app.detail_lines(d, 80, 40)
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .collect()
+    };
+
+    assert!(
+        compact_lines
+            .iter()
+            .any(|s| s.contains("21天前历史沉淀: 累计履约打卡 5 次")),
+        "默认活跃视窗应沉淀更早历史为基底节点，并统计履约打卡次数"
+    );
+    assert!(
+        compact_lines
+            .iter()
+            .any(|s| s.contains("[更早]") && s.contains("(root)")),
+        "历史沉淀节点应具有[更早]徽章与(root)基底标签"
+    );
+
+    // 2. 按 'Z' 切换到里程碑视图 (Milestones)
+    app.handle_key(key('Z')).unwrap();
+    assert_eq!(
+        app.timeline_mode,
+        crate::tui::app::TimelineViewMode::Milestones
+    );
+
+    let milestone_lines: Vec<String> = {
+        let d = app.detail.as_ref().expect("detail loaded");
+        app.detail_lines(d, 80, 40)
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .collect()
+    };
+    assert!(
+        milestone_lines.iter().any(|s| s.contains("21天前历史沉淀")),
+        "里程碑视图下同样保留历史沉淀基底"
+    );
+
+    // 3. 再次按 'Z' 切换到全量明细视图 (Full)
+    app.handle_key(key('Z')).unwrap();
+    assert_eq!(app.timeline_mode, crate::tui::app::TimelineViewMode::Full);
+
+    let full_lines: Vec<String> = {
+        let d = app.detail.as_ref().expect("detail loaded");
+        app.detail_lines(d, 80, 40)
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .collect()
+    };
+    assert!(
+        full_lines
+            .iter()
+            .any(|s| s.contains("[全量明细]") && s.contains("按 Z 收起折叠")),
+        "全量视图应展开并提示按 Z 收起折叠"
+    );
+    assert!(
+        !full_lines.iter().any(|s| s.contains("21天前历史沉淀")),
+        "全量视图下不生成沉淀折叠节点，展示全生命周期真实明细"
+    );
+}
+
+#[test]
+fn test_timeline_time_span_rendering() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+
+    let now = horae_core::time::now_ms();
+    let one_day = 86_400_000i64;
+
+    let task = horae_core::repo::tasks::create_capture(
+        &conn,
+        &horae_core::repo::tasks::CaptureInput {
+            title: "阅读".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // 模拟跨天连续打卡：从 3 天前持续到今天
+    let t_start = now - 3 * one_day;
+    for k in 0..3 {
+        let t = t_start + k * one_day;
+        horae_core::repo::mutate(&conn, |tx, _| {
+            horae_core::repo::log_event(
+                tx,
+                &task.id,
+                horae_core::model::event::EV_HABIT_COMPLETED,
+                None,
+                None,
+                None,
+                t,
+            )
+        })
+        .unwrap();
+    }
+
+    app.set_view(View::Inbox);
+    let idx = app
+        .items
+        .iter()
+        .position(|r| r.id == task.id)
+        .expect("task in Inbox");
+    app.selected = idx;
+    app.load_detail();
+
+    let lines: Vec<String> = {
+        let d = app.detail.as_ref().expect("detail loaded");
+        app.detail_lines(d, 80, 40)
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .collect()
+    };
+
+    // 跨天连续打卡的时间列应该包含 '~' 时间区间
+    assert!(
+        lines
+            .iter()
+            .any(|s| s.contains("连续打卡完成 3 次") && s.contains('~')),
+        "跨天连续打卡应在时间列中正确呈现真实起止时间区间(~)"
+    );
 }

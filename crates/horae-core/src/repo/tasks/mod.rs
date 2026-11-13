@@ -17,7 +17,10 @@ pub use query::{
     list_stale_waiting, list_timed_candidates, resolve_id, ListFilter,
 };
 pub use quotes::{count_quotes, count_quotes_in_status, list_quotes, quote_task_ids, QUOTE_TAG};
-pub use timeline::{describe_event, TimelineEntry};
+pub use timeline::{
+    aggregate_timeline_events, cadence_window, describe_event, AggregatedTimelineEntry,
+    CadenceWindow, TimelineEntry,
+};
 pub use transition::{
     add_checklist_item, archive, create_capture, delete_checklist_item, ensure_ready_for_pomodoro,
     modify, move_checklist_item, purge, rename, rename_checklist_item, restore_snapshot, schedule,

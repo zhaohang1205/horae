@@ -512,8 +512,8 @@ pub(crate) const KEY_TABLE: &[KeyDef] = &[
     },
     KeyDef {
         keys: "Z",
-        zh: "折叠/展开时间线",
-        en: "fold/expand timeline",
+        zh: "时间线:折叠/里程碑/全量",
+        en: "timeline:fold/milestones/full",
         group: KeyGroup::Task,
         status: false,
         when: When::SelectionNot(NON_TASK_VIEWS),

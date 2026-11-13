@@ -137,6 +137,18 @@ pub(crate) enum Mode {
     RenamingChecklist,
 }
 
+/// 任务历史时间线展示模式（方案一里程碑过滤 + 方案二连续同类智能聚合 + 紧凑折叠）。
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(crate) enum TimelineViewMode {
+    /// 默认紧凑折叠模式（智能聚合 + 数量多时折叠更早记录）
+    #[default]
+    Compact,
+    /// 关键里程碑视图（方案 1：过滤琐碎流水，仅展示生命周期关键跃迁与阶段成就）
+    Milestones,
+    /// 全量明细视图（展示所有聚合历史，流水全开）
+    Full,
+}
+
 /// TUI 启动模式选择（正常主页面 vs 闪念录入即退出）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum LaunchMode {
@@ -319,8 +331,8 @@ pub(crate) struct App<'a> {
     pub(crate) detail_scroll: usize,
     /// 任务备注是否全量展开（为 false 时折叠长文本以保障首屏时间线可见性）。
     pub(crate) notes_expanded: bool,
-    /// 任务历史时间线是否全量展开（为 false 时当空间有限自动折叠更早记录）。
-    pub(crate) timeline_expanded: bool,
+    /// 任务历史时间线展示模式（方案一里程碑过滤 + 方案二智能聚合 + 紧凑折叠）。
+    pub(crate) timeline_mode: TimelineViewMode,
     pub(crate) should_quit: bool,
     pub(crate) search_query: String,
     pub(crate) tag_filter: Option<String>,
@@ -520,7 +532,7 @@ impl<'a> App<'a> {
             workflow_side_scroll: 0,
             detail_scroll: 0,
             notes_expanded: false,
-            timeline_expanded: false,
+            timeline_mode: TimelineViewMode::Compact,
             should_quit: false,
             search_query: String::new(),
             tag_filter: None,
@@ -822,7 +834,7 @@ impl<'a> App<'a> {
         self.workflow_side_scroll = 0;
         self.detail_scroll = 0;
         self.notes_expanded = false;
-        self.timeline_expanded = false;
+        self.timeline_mode = TimelineViewMode::Compact;
         self.toast = None;
         self.status_message.clear();
         if let Err(e) = self.refresh() {
@@ -871,7 +883,7 @@ impl<'a> App<'a> {
             self.selected = 0;
             self.detail_scroll = 0;
             self.notes_expanded = false;
-            self.timeline_expanded = false;
+            self.timeline_mode = TimelineViewMode::Compact;
             self.load_detail();
             return;
         }
@@ -886,7 +898,7 @@ impl<'a> App<'a> {
         if self.selected != s as usize {
             self.detail_scroll = 0;
             self.notes_expanded = false;
-            self.timeline_expanded = false;
+            self.timeline_mode = TimelineViewMode::Compact;
         }
         self.selected = s as usize;
         if self.mode == Mode::Visual {
