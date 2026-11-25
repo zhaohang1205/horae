@@ -16,6 +16,7 @@ pub mod repo;
 pub mod schedule;
 pub mod sound;
 pub mod time;
+pub mod todoist;
 
 #[cfg(any(test, feature = "test-util"))]
 pub mod testutil;

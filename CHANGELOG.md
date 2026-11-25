@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Optional bidirectional Todoist project sync**: import tasks from a selected project, opt Horae tasks in with `@todoist`, retain incremental sync state and idempotent retry commands, and detect concurrent edits. API tokens stay in environment variables. Recurring tasks are skipped where recurrence semantics do not match.
+- Include Todoist task mappings and sync cursors in database backups so restoring a profile does not create duplicate remote tasks.
+
 ## [0.2.6] - 2026-11-06
 
 ### Security

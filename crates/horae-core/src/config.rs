@@ -27,6 +27,30 @@ pub struct Profile {
     /// 飞书消息与提醒推送配置（可选；未配置则 watch 的 feishu stage 为空操作）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feishu: Option<FeishuConfig>,
+    /// Optional Todoist synchronization settings. The token is read from an
+    /// environment variable and is never written to config.json.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub todoist: Option<TodoistConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TodoistConfig {
+    pub project_id: String,
+    #[serde(default = "default_todoist_token_env")]
+    pub token_env: String,
+}
+
+fn default_todoist_token_env() -> String {
+    "TODOIST_API_TOKEN".to_string()
+}
+
+impl TodoistConfig {
+    pub fn resolve_token(&self) -> Option<String> {
+        std::env::var(self.token_env.trim())
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
 }
 
 /// ntfy 推送配置：桌面 `watch` 守护进程在任务到点前（默认 10 分钟）向手机发
@@ -307,6 +331,7 @@ impl Default for Config {
                 cloud: None,
                 ntfy: None,
                 feishu: None,
+                todoist: None,
             },
         );
         Self {
@@ -346,6 +371,7 @@ mod tests {
                 cloud: None,
                 ntfy: None,
                 feishu: None,
+                todoist: None,
             },
         );
         cfg.upsert_profile(
@@ -358,6 +384,7 @@ mod tests {
                 }),
                 ntfy: None,
                 feishu: None,
+                todoist: None,
             },
         );
         cfg.set_default("work").unwrap();
@@ -397,6 +424,7 @@ mod tests {
                     cloud: None,
                     ntfy: None,
                     feishu: None,
+                    todoist: None,
                 },
             );
             let path = config.db_path(config.profile("p").unwrap());

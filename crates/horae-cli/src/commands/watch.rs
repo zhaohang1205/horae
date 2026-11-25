@@ -898,6 +898,7 @@ mod tests {
                         tags: None,
                     }),
                     feishu: None,
+                    todoist: None,
                 },
             );
             cfg.save().unwrap();

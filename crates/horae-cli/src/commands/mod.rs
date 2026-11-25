@@ -75,6 +75,7 @@ pub mod sound;
 pub mod stats;
 mod status;
 mod tagging;
+mod todoist;
 mod watch;
 
 #[allow(dead_code)]
@@ -268,6 +269,7 @@ fn run_inner(
         Command::Stats => stats::run(conn),
         Command::Ntfy { action } => ntfy::run(&action, profile),
         Command::Feishu { action } => feishu::run(conn, action, profile),
+        Command::Todoist { action } => todoist::run(conn, action, profile),
         Command::Focus { start } => focus::run(conn, start),
         Command::Log { message } => log::run(conn, &message),
         Command::Completions { .. } => {

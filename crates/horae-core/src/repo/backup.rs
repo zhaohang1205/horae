@@ -1,8 +1,9 @@
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use std::collections::HashSet;
 
 use crate::model::backup::{
-    BackupData, BackupEvent, BackupTag, BackupTask, BackupTaskTag, BACKUP_FORMAT, BACKUP_VERSION,
+    BackupData, BackupEvent, BackupTag, BackupTask, BackupTaskTag, BackupTodoistLink,
+    BackupTodoistPending, BackupTodoistSync, BACKUP_FORMAT, BACKUP_VERSION,
 };
 use anyhow::{bail, Result};
 
@@ -31,35 +32,39 @@ pub fn export_all(conn: &Connection) -> Result<BackupData> {
         task_tags: export_task_tags(conn)?,
         settings: export_settings(conn)?,
         pomodoro: Some(crate::repo::pomodoro::get_state()?),
+        todoist_sync: export_todoist_sync(conn)?,
+        todoist_links: export_todoist_links(conn)?,
+        todoist_pending_commands: export_todoist_pending(conn)?,
     })
 }
 
 fn export_tasks(conn: &Connection) -> Result<Vec<BackupTask>> {
     let mut stmt = conn.prepare(
-        "SELECT id,title,notes,status,rrule,created_at,clarified_at,due_at,\
+        "SELECT id,title,notes,status,priority,rrule,created_at,clarified_at,due_at,\
          scheduled_start_at,scheduled_end_at,completed_at,archived_at,updated_at,\
          delegated_to,checklist,archive_reason \
          FROM tasks ORDER BY created_at, id",
     )?;
     let rows = stmt.query_map([], |r| {
-        let cl_str: String = r.get(14)?;
+        let cl_str: String = r.get(15)?;
         Ok(BackupTask {
             id: r.get(0)?,
             title: r.get(1)?,
             notes: r.get(2)?,
             status: r.get(3)?,
-            rrule: r.get(4)?,
-            created_at: r.get(5)?,
-            clarified_at: r.get(6)?,
-            due_at: r.get(7)?,
-            scheduled_start_at: r.get(8)?,
-            scheduled_end_at: r.get(9)?,
-            completed_at: r.get(10)?,
-            archived_at: r.get(11)?,
-            updated_at: r.get(12)?,
-            delegated_to: r.get(13)?,
+            priority: r.get(4)?,
+            rrule: r.get(5)?,
+            created_at: r.get(6)?,
+            clarified_at: r.get(7)?,
+            due_at: r.get(8)?,
+            scheduled_start_at: r.get(9)?,
+            scheduled_end_at: r.get(10)?,
+            completed_at: r.get(11)?,
+            archived_at: r.get(12)?,
+            updated_at: r.get(13)?,
+            delegated_to: r.get(14)?,
             checklist: serde_json::from_str(&cl_str).unwrap_or_default(),
-            archive_reason: r.get(15)?,
+            archive_reason: r.get(16)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -128,6 +133,54 @@ fn export_settings(conn: &Connection) -> Result<Vec<crate::model::backup::Backup
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+fn export_todoist_sync(conn: &Connection) -> Result<Option<BackupTodoistSync>> {
+    Ok(conn
+        .query_row(
+            "SELECT sync_token,completed_since_ms,updated_at FROM todoist_sync_state WHERE id=1",
+            [],
+            |row| {
+                Ok(BackupTodoistSync {
+                    sync_token: row.get(0)?,
+                    completed_since_ms: row.get(1)?,
+                    updated_at: row.get(2)?,
+                })
+            },
+        )
+        .optional()?)
+}
+
+fn export_todoist_links(conn: &Connection) -> Result<Vec<BackupTodoistLink>> {
+    let mut stmt = conn.prepare("SELECT task_id,todoist_id,local_hash,remote_hash,remote_checked,remote_deleted,out_of_scope,last_synced_at FROM task_todoist_links ORDER BY task_id")?;
+    let rows = stmt.query_map([], |row| {
+        Ok(BackupTodoistLink {
+            task_id: row.get(0)?,
+            todoist_id: row.get(1)?,
+            local_hash: row.get(2)?,
+            remote_hash: row.get(3)?,
+            remote_checked: row.get(4)?,
+            remote_deleted: row.get(5)?,
+            out_of_scope: row.get(6)?,
+            last_synced_at: row.get(7)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+fn export_todoist_pending(conn: &Connection) -> Result<Vec<BackupTodoistPending>> {
+    let mut stmt = conn.prepare("SELECT command_uuid,task_id,temp_id,command_json,local_hash,created_at FROM todoist_pending_commands ORDER BY created_at,rowid")?;
+    let rows = stmt.query_map([], |row| {
+        Ok(BackupTodoistPending {
+            command_uuid: row.get(0)?,
+            task_id: row.get(1)?,
+            temp_id: row.get(2)?,
+            command_json: row.get(3)?,
+            local_hash: row.get(4)?,
+            created_at: row.get(5)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 /// Restore `data` into the database.
 ///
 /// `replace` wipes all task data (tasks, events, tags, associations, settings)
@@ -168,6 +221,9 @@ pub fn import_all(conn: &Connection, data: &BackupData, replace: bool) -> Result
         let mut stats = ImportStats::default();
 
         if replace {
+            tx.execute("DELETE FROM todoist_pending_commands", [])?;
+            tx.execute("DELETE FROM task_todoist_links", [])?;
+            tx.execute("DELETE FROM todoist_sync_state", [])?;
             tx.execute("DELETE FROM task_tags", [])?;
             tx.execute("DELETE FROM task_events", [])?;
             tx.execute("DELETE FROM tasks", [])?;
@@ -212,15 +268,16 @@ pub fn import_all(conn: &Connection, data: &BackupData, replace: bool) -> Result
             let cl_str = serde_json::to_string(&t.checklist)?;
             tx.execute(
                 "INSERT INTO tasks \
-             (id,title,notes,status,rrule,created_at,clarified_at,due_at,\
+             (id,title,notes,status,priority,rrule,created_at,clarified_at,due_at,\
               scheduled_start_at,scheduled_end_at,completed_at,archived_at,updated_at,\
               delegated_to,checklist,archive_reason) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
                 rusqlite::params![
                     t.id,
                     t.title,
                     t.notes,
                     t.status,
+                    t.priority,
                     t.rrule,
                     t.created_at,
                     t.clarified_at,
@@ -285,6 +342,39 @@ pub fn import_all(conn: &Connection, data: &BackupData, replace: bool) -> Result
                 rusqlite::params![s.key, s.value],
             )?;
             stats.settings_imported += 1;
+        }
+
+        if let Some(sync) = &data.todoist_sync {
+            if replace {
+                tx.execute(
+                    "INSERT INTO todoist_sync_state(id,sync_token,completed_since_ms,updated_at) VALUES (1,?1,?2,?3)",
+                    rusqlite::params![sync.sync_token, sync.completed_since_ms, sync.updated_at],
+                )?;
+            } else {
+                tx.execute(
+                    "INSERT OR IGNORE INTO todoist_sync_state(id,sync_token,completed_since_ms,updated_at) VALUES (1,?1,?2,?3)",
+                    rusqlite::params![sync.sync_token, sync.completed_since_ms, sync.updated_at],
+                )?;
+            }
+        }
+        let available_ids: HashSet<String> = existing_ids.union(&imported).cloned().collect();
+        for link in &data.todoist_links {
+            if !available_ids.contains(&link.task_id) {
+                continue;
+            }
+            tx.execute(
+                "INSERT OR IGNORE INTO task_todoist_links(task_id,todoist_id,local_hash,remote_hash,remote_checked,remote_deleted,out_of_scope,last_synced_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                rusqlite::params![link.task_id, link.todoist_id, link.local_hash, link.remote_hash, link.remote_checked, link.remote_deleted, link.out_of_scope, link.last_synced_at],
+            )?;
+        }
+        for pending in &data.todoist_pending_commands {
+            if !available_ids.contains(&pending.task_id) {
+                continue;
+            }
+            tx.execute(
+                "INSERT OR IGNORE INTO todoist_pending_commands(command_uuid,task_id,temp_id,command_json,local_hash,created_at) VALUES (?1,?2,?3,?4,?5,?6)",
+                rusqlite::params![pending.command_uuid, pending.task_id, pending.temp_id, pending.command_json, pending.local_hash, pending.created_at],
+            )?;
         }
 
         Ok(stats)

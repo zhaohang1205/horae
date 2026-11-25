@@ -107,6 +107,7 @@ Cold-process wall-clock latency measured over 50 consecutive invocations per com
     <img src="assets/screenshots/en/themes-showcase.png" width="100%" alt="2x2 showcase of Tokyo Night, Catppuccin Latte, Jade Horse, and Gruvbox themes.">
   </p>
 - **Phone capture & push**: Reconcile a Syncthing folder (`horae watch`), push due-task alerts via `ntfy`, or chat with a Feishu / Lark bot over WebSocket (`horae feishu listen`) without needing a public IP.
+- **Optional Todoist sync**: Bidirectionally sync a dedicated Todoist project. Tasks in that project import into Horae; local tasks opt in with `@todoist`. The API token stays in an environment variable.
 
 For the **complete daily GTD workflow, quick-add syntax tables, full CLI & keybinding reference, and Hyprland / Waybar / Syncthing / ntfy / Feishu setup recipes**, see the **[User Manual](docs/USER_MANUAL.md)**.
 

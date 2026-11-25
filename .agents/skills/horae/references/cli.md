@@ -186,6 +186,20 @@ horae profile set-default work
 horae --profile work capture "写周报"   # 临时切库
 ```
 
+### todoist（可选双向同步）
+
+```sh
+horae todoist configure --project-id <PROJECT_ID> [--token-env TODOIST_API_TOKEN]
+horae todoist sync
+horae todoist status
+```
+
+Token 从指定环境变量读取，不写入 Horae 配置。配置一个专用 Todoist 项目后，该项目
+中的任务会导入当前 profile；Horae 任务需添加 `todoist` 标签才会推送。同步包括标题、
+备注、截止时间、优先级、标签和完成状态。循环任务会跳过；同时编辑会报告冲突并保留
+双方数据。Todoist 删除会归档 Horae 任务；Horae 归档会保留 Todoist 任务并在状态中报告。
+任务移出配置项目后暂停同步，但保留关联；移回后可继续同步，避免重复导入。
+
 配置存于 `~/.config/horae/config.json`；切换只影响后续命令，不影响已开会话。
 
 ### watch（手机同步桥）

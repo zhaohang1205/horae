@@ -396,6 +396,14 @@ pub enum Command {
         #[command(subcommand)]
         action: FeishuAction,
     },
+    /// Synchronize tasks with Todoist (requires a Todoist project and API token environment variable)
+    #[command(
+        after_help = "Examples:\n  horae todoist configure --project-id <ID>\n  TODOIST_API_TOKEN=... horae todoist sync\n  horae todoist status"
+    )]
+    Todoist {
+        #[command(subcommand)]
+        action: TodoistAction,
+    },
     /// Watch a Syncthing-shared folder (phone <-> computer bridge)
     #[command(
         long_about = "Watch a folder synced with the phone (e.g. via Syncthing) and reconcile \
@@ -544,6 +552,21 @@ pub enum FeishuAction {
         #[arg(long)]
         pull: bool,
     },
+}
+
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum TodoistAction {
+    /// Configure the dedicated Todoist project used for synchronization
+    Configure {
+        #[arg(long, value_name = "ID")]
+        project_id: String,
+        #[arg(long, default_value = "TODOIST_API_TOKEN", value_name = "ENV")]
+        token_env: String,
+    },
+    /// Run one bidirectional synchronization pass
+    Sync,
+    /// Show Todoist integration configuration without revealing credentials
+    Status,
 }
 
 #[derive(Subcommand, Debug, Clone, PartialEq, Eq)]

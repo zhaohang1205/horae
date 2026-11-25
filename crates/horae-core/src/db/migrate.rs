@@ -83,6 +83,11 @@ pub fn run(conn: &mut Connection) -> anyhow::Result<()> {
         conn.execute_batch(sql14)?;
         conn.pragma_update(None, "user_version", 13)?;
     }
+    if current_version < 14 {
+        let sql15 = include_str!("../../migrations/0015_todoist_sync.sql");
+        conn.execute_batch(sql15)?;
+        conn.pragma_update(None, "user_version", 14)?;
+    }
 
     Ok(())
 }
@@ -150,7 +155,7 @@ mod tests {
         let v: i32 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 13, "迁移版本推进到 13");
+        assert_eq!(v, 14, "迁移版本推进到 14");
 
         // 幂等：再次运行不改变任何值
         run(&mut conn).unwrap();
