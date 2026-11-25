@@ -87,12 +87,20 @@ impl<'a> App<'a> {
                     KeyCode::Char('h') | KeyCode::Char('H') => {
                         let id = self.todoist_panel.conflicts[selected].todoist_id.clone();
                         match self.resolve_todoist_conflict(&id, ConflictResolution::KeepHorae) {
-                            Ok(_) => self.flash(
+                            Ok(Some(_)) => self.flash(
                                 ToastKind::Success,
                                 tr!(
                                     self.lang,
-                                    "已保留 Horae 版本并尝试同步。",
-                                    "Kept Horae version and attempted sync."
+                                    "已保留 Horae 版本并完成同步。",
+                                    "Kept Horae version and synchronized."
+                                ),
+                            ),
+                            Ok(None) => self.flash(
+                                ToastKind::Info,
+                                tr!(
+                                    self.lang,
+                                    "已记录选择。请先处理剩余冲突，再同步。",
+                                    "Choice saved. Resolve the remaining conflicts, then sync."
                                 ),
                             ),
                             Err(error) => self.flash(
@@ -113,9 +121,21 @@ impl<'a> App<'a> {
                     KeyCode::Char('t') | KeyCode::Char('T') => {
                         let id = self.todoist_panel.conflicts[selected].todoist_id.clone();
                         match self.resolve_todoist_conflict(&id, ConflictResolution::KeepTodoist) {
-                            Ok(_) => self.flash(
+                            Ok(Some(_)) => self.flash(
                                 ToastKind::Success,
-                                tr!(self.lang, "已采用 Todoist 版本。", "Kept Todoist version."),
+                                tr!(
+                                    self.lang,
+                                    "已采用 Todoist 版本并完成同步。",
+                                    "Kept Todoist version and synchronized."
+                                ),
+                            ),
+                            Ok(None) => self.flash(
+                                ToastKind::Info,
+                                tr!(
+                                    self.lang,
+                                    "已记录选择。请先处理剩余冲突，再同步。",
+                                    "Choice saved. Resolve the remaining conflicts, then sync."
+                                ),
                             ),
                             Err(error) => self.flash(
                                 ToastKind::Error,

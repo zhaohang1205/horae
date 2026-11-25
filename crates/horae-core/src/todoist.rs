@@ -18,6 +18,28 @@ use crate::model::task::{Status, Task};
 use crate::repo::tasks::{self, CaptureInput, ListFilter, ModifyInput};
 
 const API_URL: &str = "https://api.todoist.com/api/v1/sync";
+
+/// Endpoint used for synchronization. Overridable through `HORAE_TODOIST_API_URL`
+/// so the sync flow can be exercised against a local test server.
+fn api_url() -> String {
+    std::env::var("HORAE_TODOIST_API_URL")
+        .ok()
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty())
+        .unwrap_or_else(|| API_URL.to_string())
+}
+
+/// Endpoint used to read completed tasks. Overridable for the same reason as
+/// `api_url`.
+fn completed_api_url() -> String {
+    std::env::var("HORAE_TODOIST_COMPLETED_API_URL")
+        .ok()
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty())
+        .unwrap_or_else(|| {
+            "https://api.todoist.com/api/v1/tasks/completed/by_completion_date".to_string()
+        })
+}
 const SYNC_TAG: &str = "todoist";
 
 #[derive(Debug, Default, Clone)]
@@ -395,8 +417,7 @@ fn fetch_completed(token: &str, project_id: &str, previous_ms: i64) -> Result<Co
     let until = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(until_ms)
         .context("invalid current timestamp")?
         .to_rfc3339();
-    let mut url =
-        url::Url::parse("https://api.todoist.com/api/v1/tasks/completed/by_completion_date")?;
+    let mut url = url::Url::parse(&completed_api_url())?;
     url.query_pairs_mut()
         .append_pair("project_id", project_id)
         .append_pair("since", &since)
@@ -473,6 +494,10 @@ fn apply_remote(
                 if resolution.as_deref() == Some("local") {
                     // Already resolved in favour of Horae: keep the local task
                     // alive so the queued push recreates it on the remote side.
+                    conn.execute(
+                        "UPDATE task_todoist_links SET remote_deleted=1,remote_hash=?1,last_synced_at=?2 WHERE task_id=?3",
+                        params![remote_hash, crate::time::now_ms(), id],
+                    )?;
                     conn.execute(
                         "DELETE FROM todoist_conflicts WHERE todoist_id=?1",
                         [&remote.id],
@@ -916,7 +941,7 @@ fn request(token: &str, cursor: &str, pending: &[Pending]) -> Result<Value> {
         .iter()
         .map(|(name, value)| (*name, value.as_str()))
         .collect();
-    let response = ureq::post(API_URL)
+    let response = ureq::post(&api_url())
         .timeout(std::time::Duration::from_secs(20))
         .set("Authorization", &format!("Bearer {token}"))
         .send_form(&form)
@@ -1480,5 +1505,406 @@ mod option_tests {
             0,
             "已移出项目的任务不应被删除"
         );
+    }
+}
+
+#[cfg(test)]
+mod sync_integration_tests {
+    use super::*;
+    use crate::config::TodoistConfig;
+    use crate::repo::tasks::CaptureInput;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::{Arc, Mutex, MutexGuard};
+
+    static API_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct ApiEnvGuard {
+        sync_url: Option<std::ffi::OsString>,
+        completed_url: Option<std::ffi::OsString>,
+    }
+
+    impl Drop for ApiEnvGuard {
+        fn drop(&mut self) {
+            match self.sync_url.take() {
+                Some(value) => std::env::set_var("HORAE_TODOIST_API_URL", value),
+                None => std::env::remove_var("HORAE_TODOIST_API_URL"),
+            }
+            match self.completed_url.take() {
+                Some(value) => std::env::set_var("HORAE_TODOIST_COMPLETED_API_URL", value),
+                None => std::env::remove_var("HORAE_TODOIST_COMPLETED_API_URL"),
+            }
+        }
+    }
+
+    /// A stand-in for the Todoist Sync API. It records every request body and
+    /// answers `/sync` and `/completed` with scripted payloads.
+    struct MockApi {
+        base: String,
+        bodies: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl MockApi {
+        fn start(sync_responses: Vec<String>) -> MockApi {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let bodies = Arc::new(Mutex::new(Vec::new()));
+            let sync_responses = Arc::new(Mutex::new(sync_responses.into_iter()));
+            let thread_bodies = bodies.clone();
+            let thread_sync = sync_responses.clone();
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(stream) = stream else { return };
+                    let bodies = thread_bodies.clone();
+                    let sync = thread_sync.clone();
+                    handle_request(stream, bodies, sync);
+                }
+            });
+            MockApi {
+                base: format!("http://{addr}"),
+                bodies,
+            }
+        }
+
+        fn config(&self, delete_on_archive: bool, prefer_remote: bool) -> TodoistConfig {
+            TodoistConfig {
+                project_id: "proj-1".to_string(),
+                token_env: "TODOIST_API_TOKEN".to_string(),
+                delete_remote_on_archive: delete_on_archive,
+                prefer_remote_on_conflict: prefer_remote,
+            }
+        }
+
+        fn sent_bodies(&self) -> Vec<String> {
+            self.bodies.lock().unwrap().clone()
+        }
+    }
+
+    fn handle_request(
+        mut stream: TcpStream,
+        bodies: Arc<Mutex<Vec<String>>>,
+        sync_responses: Arc<Mutex<std::vec::IntoIter<String>>>,
+    ) {
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut request_line = String::new();
+        if reader.read_line(&mut request_line).unwrap_or(0) == 0 {
+            return;
+        }
+        let is_completed = request_line.contains("/completed");
+        let mut content_length = 0usize;
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                break;
+            }
+            if line == "\r\n" || line == "\n" {
+                break;
+            }
+            let lower = line.to_ascii_lowercase();
+            if let Some(value) = lower.strip_prefix("content-length:") {
+                content_length = value.trim().parse().unwrap_or(0);
+            }
+        }
+        let mut payload = vec![0u8; content_length];
+        if content_length > 0 {
+            let _ = reader.read_exact(&mut payload);
+        }
+        bodies
+            .lock()
+            .unwrap()
+            .push(String::from_utf8_lossy(&payload).to_string());
+
+        let body = if is_completed {
+            // 已完成任务接口：空批次即可（无 next_cursor 表示结束）。
+            serde_json::json!({"items": []})
+        } else {
+            let response = sync_responses
+                .lock()
+                .unwrap()
+                .next()
+                .unwrap_or_else(|| sync_response());
+            let mut response: Value = serde_json::from_str(&response).unwrap();
+            let form: std::collections::HashMap<String, String> =
+                url::form_urlencoded::parse(&payload).into_owned().collect();
+            let commands: Vec<Value> = form
+                .get("commands")
+                .and_then(|s| serde_json::from_str(s).ok())
+                .unwrap_or_default();
+            let statuses: serde_json::Map<String, Value> = commands
+                .iter()
+                .filter_map(|command| {
+                    command["uuid"]
+                        .as_str()
+                        .map(|uuid| (uuid.to_string(), json!("ok")))
+                })
+                .collect();
+            response["sync_status"] = json!(statuses);
+            let mut temp_mapping = serde_json::Map::new();
+            for command in &commands {
+                if let Some(temp_id) = command["temp_id"].as_str() {
+                    temp_mapping.insert(temp_id.to_string(), json!("td-real"));
+                }
+            }
+            response["temp_id_mapping"] = json!(temp_mapping);
+            response
+        };
+        let body = body.to_string();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let _ = stream.write_all(response.as_bytes());
+        let _ = stream.flush();
+    }
+
+    /// Run `f` with the API URLs pointed at the mock server.
+    fn with_api<T>(api: &MockApi, f: impl FnOnce() -> T) -> T {
+        let _lock: MutexGuard<'_, ()> = API_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _guard = ApiEnvGuard {
+            sync_url: std::env::var_os("HORAE_TODOIST_API_URL"),
+            completed_url: std::env::var_os("HORAE_TODOIST_COMPLETED_API_URL"),
+        };
+        std::env::set_var("HORAE_TODOIST_API_URL", format!("{}/sync", api.base));
+        std::env::set_var(
+            "HORAE_TODOIST_COMPLETED_API_URL",
+            format!("{}/completed", api.base),
+        );
+        f()
+    }
+
+    fn sync_response() -> String {
+        serde_json::json!({
+            "sync_token": "cursor-1",
+            "projects": [{"id": "proj-1", "is_deleted": false, "is_archived": false}],
+            "items": [],
+        })
+        .to_string()
+    }
+
+    /// A sync response that accepts every command in the request body.
+    fn accepting_response(sync_token: &str) -> String {
+        serde_json::json!({
+            "sync_token": sync_token,
+            "sync_status": {},
+            "items": [],
+        })
+        .to_string()
+    }
+
+    fn capture(conn: &Connection, title: &str, tags: &[&str]) -> String {
+        let task = tasks::create_capture(
+            conn,
+            &CaptureInput {
+                title: title.to_string(),
+                status: Status::Next,
+                tag_names: tags.iter().map(|t| t.to_string()).collect(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        task.id
+    }
+
+    #[test]
+    fn a_tagged_task_is_pushed_to_todoist() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let api = MockApi::start(vec![sync_response(), accepting_response("cursor-2")]);
+        capture(&conn, "Push me", &[SYNC_TAG]);
+
+        with_api(&api, || {
+            let stats = sync(&conn, &api.config(false, false), "token").unwrap();
+            assert_eq!(stats.pushed, 1, "带 @todoist 标签的任务应被推送");
+        });
+
+        let sent = api.sent_bodies();
+        let create = sent
+            .iter()
+            .find(|body| {
+                url::form_urlencoded::parse(body.as_bytes())
+                    .any(|(key, value)| key == "commands" && value.contains("item_add"))
+            })
+            .expect("应发送 item_add 命令");
+        let commands: Vec<Value> = url::form_urlencoded::parse(create.as_bytes())
+            .find(|(key, _)| key == "commands")
+            .and_then(|(_, value)| serde_json::from_str(&value).ok())
+            .unwrap();
+        assert!(
+            commands[0]["args"]["content"] == "Push me",
+            "推送内容应包含标题，实际: {commands:?}"
+        );
+        assert!(
+            commands[0]["args"]["project_id"] == "proj-1",
+            "推送应指定项目，实际: {sent:?}"
+        );
+    }
+
+    #[test]
+    fn an_untagged_task_is_not_pushed() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let api = MockApi::start(vec![sync_response()]);
+        capture(&conn, "Keep private", &["home"]);
+
+        with_api(&api, || {
+            let stats = sync(&conn, &api.config(false, false), "token").unwrap();
+            assert_eq!(stats.pushed, 0, "没有 @todoist 标签的任务不应推送");
+        });
+
+        let sent = api.sent_bodies();
+        assert!(
+            !sent.iter().any(|body| body.contains("item_add")),
+            "不应发送 item_add，实际: {sent:?}"
+        );
+    }
+
+    #[test]
+    fn a_task_in_the_configured_project_is_imported_from_todoist() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let api = MockApi::start(vec![serde_json::json!({
+            "sync_token": "cursor-import",
+            "projects": [{"id": "proj-1", "is_deleted": false, "is_archived": false}],
+            "items": [{
+                "id": "td-import",
+                "project_id": "proj-1",
+                "content": "Imported from Todoist",
+                "description": "remote notes",
+                "checked": false,
+                "priority": 3,
+                "labels": ["work"],
+            }],
+        })
+        .to_string()]);
+
+        with_api(&api, || {
+            let stats = sync(&conn, &api.config(false, false), "token").unwrap();
+            assert_eq!(stats.imported, 1);
+        });
+
+        let imported = tasks::list(
+            &conn,
+            &ListFilter {
+                status: None,
+                tags: Vec::new(),
+                query: Some("Imported from Todoist".to_string()),
+                review_stale: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(imported.len(), 1);
+        assert_eq!(imported[0].notes, "remote notes");
+        let tags = task_tags(&conn, &imported[0].id).unwrap();
+        assert!(tags.iter().any(|tag| tag == "todoist"));
+        assert!(tags.iter().any(|tag| tag == "work"));
+    }
+
+    #[test]
+    fn archiving_deletes_the_remote_task_when_the_option_is_on() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let api = MockApi::start(vec![
+            sync_response(),
+            accepting_response("cursor-2"),
+            sync_response(),
+            accepting_response("cursor-3"),
+        ]);
+        let id = capture(&conn, "Delete me", &[SYNC_TAG]);
+
+        with_api(&api, || {
+            sync(&conn, &api.config(true, false), "token").unwrap();
+            let linked: i64 = conn
+                .query_row("SELECT COUNT(*) FROM task_todoist_links", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(linked, 1, "首次同步应建立关联");
+
+            tasks::archive(&conn, &id).unwrap();
+            sync(&conn, &api.config(true, false), "token").unwrap();
+        });
+
+        let sent = api.sent_bodies();
+        assert!(
+            sent.iter().any(|body| body.contains("item_delete")),
+            "开启开关后归档应发送 item_delete，实际: {sent:?}"
+        );
+    }
+
+    #[test]
+    fn archiving_keeps_the_remote_task_when_the_option_is_off() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let api = MockApi::start(vec![
+            sync_response(),
+            accepting_response("cursor-2"),
+            sync_response(),
+        ]);
+        let id = capture(&conn, "Keep me", &[SYNC_TAG]);
+
+        with_api(&api, || {
+            sync(&conn, &api.config(false, false), "token").unwrap();
+            tasks::archive(&conn, &id).unwrap();
+            sync(&conn, &api.config(false, false), "token").unwrap();
+        });
+
+        let sent = api.sent_bodies();
+        assert!(
+            !sent.iter().any(|body| body.contains("item_delete")),
+            "关闭开关时归档不应发送 item_delete，实际: {sent:?}"
+        );
+    }
+
+    #[test]
+    fn a_remote_edit_overwrites_the_local_task_when_prefer_remote_is_on() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let api = MockApi::start(vec![
+            serde_json::json!({
+                "sync_token": "cursor-2",
+                "projects": [{"id": "proj-1", "is_deleted": false, "is_archived": false}],
+                "items": [{
+                    "id": "td-1",
+                    "project_id": "proj-1",
+                    "content": "Remote wins",
+                    "description": "",
+                    "checked": false,
+                    "priority": 1,
+                    "labels": [],
+                }],
+            })
+            .to_string(),
+            accepting_response("cursor-3"),
+        ]);
+        let id = capture(&conn, "Original", &[SYNC_TAG]);
+
+        // 先手工建立关联，模拟已同步过的任务。
+        conn.execute(
+            "INSERT INTO task_todoist_links(task_id,todoist_id,local_hash,remote_hash,remote_checked,remote_deleted,out_of_scope,last_synced_at) VALUES (?1,'td-1','h','h',0,0,0,0)",
+            params![id],
+        )
+        .unwrap();
+        tasks::modify(
+            &conn,
+            &id,
+            &ModifyInput {
+                title: Some("Local wins".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // 让基线哈希与改后的本地哈希不同，模拟"两端都改了"。
+        conn.execute(
+            "UPDATE task_todoist_links SET local_hash='baseline' WHERE task_id=?1",
+            params![id],
+        )
+        .unwrap();
+
+        with_api(&api, || {
+            let stats = sync(&conn, &api.config(false, true), "token").unwrap();
+            assert!(
+                stats.conflicts.is_empty(),
+                "prefer_remote 时不应报冲突，实际: {:?}",
+                stats.conflicts
+            );
+        });
+
+        let title = tasks::get(&conn, &id).unwrap().title;
+        assert_eq!(title, "Remote wins", "本地标题应被远端覆盖");
     }
 }

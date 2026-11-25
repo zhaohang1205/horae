@@ -82,8 +82,13 @@ impl<'a> super::App<'a> {
         &mut self,
         todoist_id: &str,
         resolution: ConflictResolution,
-    ) -> Result<todoist::SyncStats> {
+    ) -> Result<Option<todoist::SyncStats>> {
         todoist::resolve_conflict(self.conn, todoist_id, resolution)?;
-        self.run_todoist_sync()
+        self.refresh_todoist_panel()?;
+        if self.todoist_panel.conflicts.is_empty() {
+            self.run_todoist_sync().map(Some)
+        } else {
+            Ok(None)
+        }
     }
 }

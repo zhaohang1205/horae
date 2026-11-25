@@ -71,7 +71,10 @@ pub fn run(conn: &Connection, action: TodoistAction, profile: Option<&str>) -> R
                     );
                     match horae_core::todoist::sync_status(conn)? {
                         Some(status) if status.last_sync_at > 0 => {
-                            println!("Last sync: {}", status.last_sync_at);
+                            println!(
+                                "Last sync: {}",
+                                horae_core::time::format_local(Some(status.last_sync_at))
+                            );
                             if let Some(error) = &status.last_error {
                                 println!("Last sync error: {error}");
                             } else {
