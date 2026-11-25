@@ -36,6 +36,8 @@ pub struct BackupData {
     pub todoist_links: Vec<BackupTodoistLink>,
     #[serde(default)]
     pub todoist_pending_commands: Vec<BackupTodoistPending>,
+    #[serde(default)]
+    pub todoist_conflicts: Vec<BackupTodoistConflict>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +45,16 @@ pub struct BackupTodoistSync {
     pub sync_token: String,
     pub completed_since_ms: i64,
     pub updated_at: i64,
+    #[serde(default)]
+    pub last_sync_at: i64,
+    #[serde(default)]
+    pub last_imported: usize,
+    #[serde(default)]
+    pub last_updated: usize,
+    #[serde(default)]
+    pub last_pushed: usize,
+    #[serde(default)]
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +78,15 @@ pub struct BackupTodoistPending {
     pub command_json: String,
     pub local_hash: String,
     pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupTodoistConflict {
+    pub todoist_id: String,
+    pub task_id: String,
+    pub remote_json: String,
+    pub detected_at: i64,
+    pub resolution: Option<String>,
 }
 
 /// A task row with every live column of the `tasks` table. The dead columns

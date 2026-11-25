@@ -567,6 +567,14 @@ pub enum TodoistAction {
     Sync,
     /// Show Todoist integration configuration without revealing credentials
     Status,
+    /// Resolve a pending sync conflict by keeping either side
+    Resolve {
+        /// Todoist task id of the conflict to resolve
+        todoist_id: String,
+        /// Which side wins: `horae` keeps the local task, `todoist` keeps the remote task
+        #[arg(long, value_name = "SIDE")]
+        side: String,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone, PartialEq, Eq)]

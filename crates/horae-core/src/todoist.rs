@@ -30,6 +30,32 @@ pub struct SyncStats {
     pub archived_local_tasks: usize,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct SyncStatus {
+    pub last_sync_at: i64,
+    pub imported: usize,
+    pub updated: usize,
+    pub pushed: usize,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SyncConflict {
+    pub todoist_id: String,
+    pub task_id: String,
+    pub local_title: String,
+    pub remote_title: String,
+    pub remote_deleted: bool,
+    pub detected_at: i64,
+    pub resolution: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictResolution {
+    KeepHorae,
+    KeepTodoist,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RemoteTask {
     id: String,
@@ -72,6 +98,16 @@ struct Pending {
 /// One bidirectional pass. The caller supplies the token so secrets never
 /// enter Horae's config or database.
 pub fn sync(conn: &Connection, config: &TodoistConfig, token: &str) -> Result<SyncStats> {
+    let result = sync_pass(conn, config, token);
+    let status_result = record_sync_status(conn, &result);
+    match (result, status_result) {
+        (Ok(stats), Ok(())) => Ok(stats),
+        (Err(error), Ok(())) => Err(error),
+        (_, Err(error)) => Err(error),
+    }
+}
+
+fn sync_pass(conn: &Connection, config: &TodoistConfig, token: &str) -> Result<SyncStats> {
     if token.trim().is_empty() {
         bail!("Todoist API token is empty");
     }
@@ -159,6 +195,91 @@ pub fn sync(conn: &Connection, config: &TodoistConfig, token: &str) -> Result<Sy
             .len();
     }
     Ok(stats)
+}
+
+fn record_sync_status(conn: &Connection, result: &Result<SyncStats>) -> Result<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO todoist_sync_state(id,sync_token,completed_since_ms,updated_at) VALUES (1,'*',0,?1)",
+        [crate::time::now_ms()],
+    )?;
+    match result {
+        Ok(stats) => {
+            conn.execute(
+                "UPDATE todoist_sync_state SET last_sync_at=?1,last_imported=?2,last_updated=?3,last_pushed=?4,last_error=NULL WHERE id=1",
+                params![crate::time::now_ms(), stats.imported, stats.updated, stats.pushed],
+            )?;
+        }
+        Err(error) => {
+            conn.execute(
+                "UPDATE todoist_sync_state SET last_sync_at=?1,last_imported=0,last_updated=0,last_pushed=0,last_error=?2 WHERE id=1",
+                params![crate::time::now_ms(), error.to_string()],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+pub fn sync_status(conn: &Connection) -> Result<Option<SyncStatus>> {
+    Ok(conn
+        .query_row(
+            "SELECT last_sync_at,last_imported,last_updated,last_pushed,last_error FROM todoist_sync_state WHERE id=1",
+            [],
+            |row| {
+                Ok(SyncStatus {
+                    last_sync_at: row.get(0)?,
+                    imported: row.get(1)?,
+                    updated: row.get(2)?,
+                    pushed: row.get(3)?,
+                    last_error: row.get(4)?,
+                })
+            },
+        )
+        .optional()?)
+}
+
+pub fn sync_conflicts(conn: &Connection) -> Result<Vec<SyncConflict>> {
+    let mut stmt = conn.prepare(
+        "SELECT c.todoist_id,c.task_id,t.title,c.remote_json,c.detected_at,c.resolution FROM todoist_conflicts c JOIN tasks t ON t.id=c.task_id WHERE c.resolution IS NULL ORDER BY c.detected_at,c.todoist_id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        let remote_json: String = row.get(3)?;
+        let remote: RemoteTask = serde_json::from_str(&remote_json).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                3,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?;
+        Ok(SyncConflict {
+            todoist_id: row.get(0)?,
+            task_id: row.get(1)?,
+            local_title: row.get(2)?,
+            remote_title: remote.content,
+            remote_deleted: remote.is_deleted,
+            detected_at: row.get(4)?,
+            resolution: row.get(5)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+pub fn resolve_conflict(
+    conn: &Connection,
+    todoist_id: &str,
+    resolution: ConflictResolution,
+) -> Result<()> {
+    let value = match resolution {
+        ConflictResolution::KeepHorae => "local",
+        ConflictResolution::KeepTodoist => "remote",
+    };
+    let changed = conn.execute(
+        "UPDATE todoist_conflicts SET resolution=?1 WHERE todoist_id=?2",
+        params![value, todoist_id],
+    )?;
+    if changed == 0 {
+        bail!("Todoist conflict {todoist_id} no longer exists");
+    }
+    Ok(())
 }
 
 enum ApplyResult {
@@ -309,21 +430,38 @@ fn apply_remote(conn: &Connection, remote: &RemoteTask) -> Result<ApplyResult> {
     if remote.is_deleted {
         if let Some(id) = linked_id {
             let task = tasks::get(conn, &id)?;
-            let local_hash: String = conn.query_row(
-                "SELECT local_hash FROM task_todoist_links WHERE task_id=?1",
+            let (local_hash, resolution): (String, Option<String>) = conn.query_row(
+                "SELECT l.local_hash,c.resolution FROM task_todoist_links l LEFT JOIN todoist_conflicts c ON c.todoist_id=l.todoist_id WHERE l.task_id=?1",
                 [&id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
-            if local_hash_for(&task, &task_tags(conn, &id)?)? != local_hash {
+            let local_changed = local_hash_for(&task, &task_tags(conn, &id)?)? != local_hash;
+            if local_changed && resolution.as_deref() != Some("remote") {
+                if resolution.as_deref() == Some("local") {
+                    // Already resolved in favour of Horae: keep the local task
+                    // alive so the queued push recreates it on the remote side.
+                    conn.execute(
+                        "DELETE FROM todoist_conflicts WHERE todoist_id=?1",
+                        [&remote.id],
+                    )?;
+                    return Ok(ApplyResult::Unchanged);
+                }
+                save_conflict(conn, &id, remote)?;
                 return Ok(ApplyResult::Conflict);
             }
-            if task.archived_at.is_none() {
+            if task.archived_at.is_none() && resolution.as_deref() != Some("local") {
                 tasks::archive(conn, &id)?;
             }
             conn.execute(
-                "UPDATE task_todoist_links SET remote_deleted=1 WHERE task_id=?1",
-                [&id],
+                "UPDATE task_todoist_links SET remote_deleted=1,remote_hash=?1,last_synced_at=?2 WHERE task_id=?3",
+                params![remote_hash, crate::time::now_ms(), id],
             )?;
+            if resolution.is_some() {
+                conn.execute(
+                    "DELETE FROM todoist_conflicts WHERE todoist_id=?1",
+                    [&remote.id],
+                )?;
+            }
         }
         return Ok(ApplyResult::Unchanged);
     }
@@ -338,7 +476,45 @@ fn apply_remote(conn: &Connection, remote: &RemoteTask) -> Result<ApplyResult> {
         let current_local = local_hash_for(&task, &task_tags(conn, &id)?)?;
         let local_changed = current_local != baseline_local;
         let remote_changed = remote_hash != baseline_remote;
+        let resolution: Option<String> = conn
+            .query_row(
+                "SELECT resolution FROM todoist_conflicts WHERE todoist_id=?1",
+                [&remote.id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        if resolution.as_deref() == Some("local") {
+            conn.execute(
+                "UPDATE task_todoist_links SET remote_hash=?1,remote_deleted=0,last_synced_at=?2 WHERE task_id=?3",
+                params![remote_hash, crate::time::now_ms(), id],
+            )?;
+            // The user chose to keep the Horae side, so the remote edit is
+            // discarded. Drop the conflict record; the queued push below
+            // propagates the local edit back to Todoist.
+            conn.execute(
+                "DELETE FROM todoist_conflicts WHERE todoist_id=?1",
+                [&remote.id],
+            )?;
+            return Ok(ApplyResult::Unchanged);
+        }
+        if resolution.as_deref() == Some("remote") {
+            update_from_remote(conn, &id, remote)?;
+            let updated = tasks::get(conn, &id)?;
+            let tags = task_tags(conn, &id)?;
+            conn.execute(
+                "UPDATE task_todoist_links SET local_hash=?1,remote_hash=?2,remote_checked=?3,remote_deleted=0,out_of_scope=0,last_synced_at=?4 WHERE task_id=?5",
+                params![local_hash_for(&updated, &tags)?, remote_hash, remote.checked, crate::time::now_ms(), id],
+            )?;
+            // The user chose to keep the Todoist side; the conflict is settled.
+            conn.execute(
+                "DELETE FROM todoist_conflicts WHERE todoist_id=?1",
+                [&remote.id],
+            )?;
+            return Ok(ApplyResult::Updated);
+        }
         if local_changed && remote_changed && current_local != remote_hash {
+            save_conflict(conn, &id, remote)?;
             return Ok(ApplyResult::Conflict);
         }
         if local_changed && !remote_changed {
@@ -352,6 +528,10 @@ fn apply_remote(conn: &Connection, remote: &RemoteTask) -> Result<ApplyResult> {
         conn.execute(
                 "UPDATE task_todoist_links SET local_hash=?1,remote_hash=?2,remote_checked=?3,remote_deleted=0,out_of_scope=0,last_synced_at=?4 WHERE task_id=?5",
             params![local_hash_for(&updated, &tags)?, remote_hash, remote.checked, crate::time::now_ms(), id],
+        )?;
+        conn.execute(
+            "DELETE FROM todoist_conflicts WHERE todoist_id=?1",
+            [&remote.id],
         )?;
         return Ok(if remote_changed {
             ApplyResult::Updated
@@ -387,6 +567,14 @@ fn apply_remote(conn: &Connection, remote: &RemoteTask) -> Result<ApplyResult> {
     let task = tasks::get(conn, &task.id)?;
     save_link(conn, &task, &remote.id, &remote_hash)?;
     Ok(ApplyResult::Imported)
+}
+
+fn save_conflict(conn: &Connection, task_id: &str, remote: &RemoteTask) -> Result<()> {
+    conn.execute(
+        "INSERT INTO todoist_conflicts(todoist_id,task_id,remote_json,detected_at,resolution) VALUES (?1,?2,?3,?4,NULL) ON CONFLICT(todoist_id) DO UPDATE SET task_id=excluded.task_id,remote_json=excluded.remote_json,detected_at=excluded.detected_at",
+        params![remote.id, task_id, serde_json::to_string(remote)?, crate::time::now_ms()],
+    )?;
+    Ok(())
 }
 
 fn update_from_remote(conn: &Connection, id: &str, remote: &RemoteTask) -> Result<()> {
@@ -594,6 +782,12 @@ fn acknowledge_pending(conn: &Connection, pending: &[Pending], response: &Value)
                 "INSERT INTO task_todoist_links(task_id,todoist_id,local_hash,remote_hash,remote_checked,remote_deleted,out_of_scope,last_synced_at) VALUES (?1,?2,?3,?3,?4,0,0,?5) ON CONFLICT(task_id) DO UPDATE SET todoist_id=excluded.todoist_id,local_hash=excluded.local_hash,remote_hash=excluded.remote_hash,remote_checked=excluded.remote_checked,remote_deleted=0,out_of_scope=0,last_synced_at=excluded.last_synced_at",
                 params![p.task_id, remote_id, p.local_hash, checked.unwrap_or(false), crate::time::now_ms()],
             )?;
+            if p.temp_id.is_some() {
+                conn.execute(
+                    "DELETE FROM todoist_conflicts WHERE task_id=?1",
+                    [&p.task_id],
+                )?;
+            }
         } else {
             if let Some(deleted) = deleted {
                 conn.execute(
@@ -804,5 +998,218 @@ fn todoist_priority(priority: Option<&str>) -> u8 {
         Some("medium") => 3,
         Some("low") => 2,
         _ => 1,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::repo::tasks::CaptureInput;
+
+    /// 建一个本地任务并登记 Todoist 关联行，模拟"已同步过一次"的状态。
+    /// 返回本地任务 id（由 create_capture 生成）。
+    fn linked_task(conn: &Connection, todoist_id: &str, title: &str) -> String {
+        let task = tasks::create_capture(
+            conn,
+            &CaptureInput {
+                title: title.to_string(),
+                status: Status::Next,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let hash = local_hash_for(&task, &task_tags(conn, &task.id).unwrap()).unwrap();
+        conn.execute(
+            "INSERT INTO task_todoist_links(task_id,todoist_id,local_hash,remote_hash,remote_checked,remote_deleted,out_of_scope,last_synced_at) VALUES (?1,?2,?3,?3,0,0,0,?4)",
+            params![task.id, todoist_id, hash, crate::time::now_ms()],
+        )
+        .unwrap();
+        task.id
+    }
+
+    fn remote(id: &str, project: &str, content: &str) -> RemoteTask {
+        RemoteTask {
+            id: id.to_string(),
+            project_id: project.to_string(),
+            content: content.to_string(),
+            description: String::new(),
+            checked: false,
+            is_deleted: false,
+            priority: 1,
+            due: None,
+            labels: Vec::new(),
+            completed_at: None,
+        }
+    }
+
+    #[test]
+    fn conflicting_edits_are_recorded_and_reported() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let id = linked_task(&conn, "td-1", "Original");
+
+        // 远端改了标题，本地也改了标题 => 双方都变更，判定为冲突。
+        tasks::modify(
+            &conn,
+            &id,
+            &ModifyInput {
+                title: Some("Local edit".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let result = apply_remote(&conn, &remote("td-1", "proj", "Remote edit")).unwrap();
+        assert!(matches!(result, ApplyResult::Conflict));
+
+        let conflicts = sync_conflicts(&conn).unwrap();
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].todoist_id, "td-1");
+        assert_eq!(conflicts[0].local_title, "Local edit");
+        assert_eq!(conflicts[0].remote_title, "Remote edit");
+        assert!(conflicts[0].resolution.is_none());
+    }
+
+    #[test]
+    fn keeping_horae_side_clears_the_conflict_record() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let id = linked_task(&conn, "td-1", "Original");
+        tasks::modify(
+            &conn,
+            &id,
+            &ModifyInput {
+                title: Some("Local edit".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        apply_remote(&conn, &remote("td-1", "proj", "Remote edit")).unwrap();
+        assert_eq!(sync_conflicts(&conn).unwrap().len(), 1);
+
+        resolve_conflict(&conn, "td-1", ConflictResolution::KeepHorae).unwrap();
+        // 冲突已按"保留 Horae"裁决；再次应用远端时不得重新判定为冲突。
+        let result = apply_remote(&conn, &remote("td-1", "proj", "Remote edit")).unwrap();
+        assert!(matches!(result, ApplyResult::Unchanged));
+
+        // 裁决完成后冲突记录必须被清除，否则界面会一直显示待处理冲突。
+        assert!(
+            sync_conflicts(&conn).unwrap().is_empty(),
+            "resolved conflict should be removed from the conflict list"
+        );
+        // 本地标题保持不变。
+        assert_eq!(tasks::get(&conn, &id).unwrap().title, "Local edit");
+    }
+
+    #[test]
+    fn keeping_todoist_side_applies_remote_and_clears_the_conflict() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let id = linked_task(&conn, "td-1", "Original");
+        tasks::modify(
+            &conn,
+            &id,
+            &ModifyInput {
+                title: Some("Local edit".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        apply_remote(&conn, &remote("td-1", "proj", "Remote edit")).unwrap();
+        assert_eq!(sync_conflicts(&conn).unwrap().len(), 1);
+
+        resolve_conflict(&conn, "td-1", ConflictResolution::KeepTodoist).unwrap();
+        let result = apply_remote(&conn, &remote("td-1", "proj", "Remote edit")).unwrap();
+        assert!(matches!(result, ApplyResult::Updated));
+
+        assert!(sync_conflicts(&conn).unwrap().is_empty());
+        assert_eq!(tasks::get(&conn, &id).unwrap().title, "Remote edit");
+    }
+
+    #[test]
+    fn deleted_remote_task_keeps_local_task_when_horae_side_is_kept() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let id = linked_task(&conn, "td-1", "Original");
+        tasks::modify(
+            &conn,
+            &id,
+            &ModifyInput {
+                title: Some("Local edit".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let mut deleted = remote("td-1", "proj", "Original");
+        deleted.is_deleted = true;
+        let result = apply_remote(&conn, &deleted).unwrap();
+        assert!(matches!(result, ApplyResult::Conflict));
+
+        resolve_conflict(&conn, "td-1", ConflictResolution::KeepHorae).unwrap();
+        let result = apply_remote(&conn, &deleted).unwrap();
+        assert!(matches!(result, ApplyResult::Unchanged));
+
+        // 保留 Horae => 本地任务不被归档，且冲突记录被清除。
+        assert!(tasks::get(&conn, &id).unwrap().archived_at.is_none());
+        assert!(sync_conflicts(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn deleted_remote_task_archives_local_task_when_horae_side_is_unchanged() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let id = linked_task(&conn, "td-1", "Original");
+
+        let mut deleted = remote("td-1", "proj", "Original");
+        deleted.is_deleted = true;
+        let result = apply_remote(&conn, &deleted).unwrap();
+        assert!(matches!(result, ApplyResult::Unchanged));
+
+        // 本地没有改动 => 直接归档本地任务，不产生冲突。
+        assert!(tasks::get(&conn, &id).unwrap().archived_at.is_some());
+        assert!(sync_conflicts(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn resolving_an_unknown_conflict_errors() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        assert!(resolve_conflict(&conn, "missing", ConflictResolution::KeepHorae).is_err());
+    }
+
+    #[test]
+    fn a_resolved_conflict_is_no_longer_listed_as_pending() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let id = linked_task(&conn, "td-1", "Original");
+        tasks::modify(
+            &conn,
+            &id,
+            &ModifyInput {
+                title: Some("Local edit".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        apply_remote(&conn, &remote("td-1", "proj", "Remote edit")).unwrap();
+        assert_eq!(sync_conflicts(&conn).unwrap().len(), 1);
+
+        // 裁决后仍留有记录（等待下一轮同步真正落地），但不再出现在待处理列表里。
+        resolve_conflict(&conn, "td-1", ConflictResolution::KeepHorae).unwrap();
+        assert!(
+            sync_conflicts(&conn).unwrap().is_empty(),
+            "a resolved conflict must not stay in the pending list"
+        );
+        let stored: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM todoist_conflicts WHERE todoist_id='td-1' AND resolution='local'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, 1, "the resolution should still be recorded");
+    }
+
+    #[test]
+    fn sync_status_starts_empty_and_records_failures() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        assert!(sync_status(&conn).unwrap().is_none());
     }
 }

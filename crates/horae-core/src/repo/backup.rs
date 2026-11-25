@@ -2,8 +2,8 @@ use rusqlite::{Connection, OptionalExtension};
 use std::collections::HashSet;
 
 use crate::model::backup::{
-    BackupData, BackupEvent, BackupTag, BackupTask, BackupTaskTag, BackupTodoistLink,
-    BackupTodoistPending, BackupTodoistSync, BACKUP_FORMAT, BACKUP_VERSION,
+    BackupData, BackupEvent, BackupTag, BackupTask, BackupTaskTag, BackupTodoistConflict,
+    BackupTodoistLink, BackupTodoistPending, BackupTodoistSync, BACKUP_FORMAT, BACKUP_VERSION,
 };
 use anyhow::{bail, Result};
 
@@ -35,6 +35,7 @@ pub fn export_all(conn: &Connection) -> Result<BackupData> {
         todoist_sync: export_todoist_sync(conn)?,
         todoist_links: export_todoist_links(conn)?,
         todoist_pending_commands: export_todoist_pending(conn)?,
+        todoist_conflicts: export_todoist_conflicts(conn)?,
     })
 }
 
@@ -136,13 +137,18 @@ fn export_settings(conn: &Connection) -> Result<Vec<crate::model::backup::Backup
 fn export_todoist_sync(conn: &Connection) -> Result<Option<BackupTodoistSync>> {
     Ok(conn
         .query_row(
-            "SELECT sync_token,completed_since_ms,updated_at FROM todoist_sync_state WHERE id=1",
+            "SELECT sync_token,completed_since_ms,updated_at,last_sync_at,last_imported,last_updated,last_pushed,last_error FROM todoist_sync_state WHERE id=1",
             [],
             |row| {
                 Ok(BackupTodoistSync {
                     sync_token: row.get(0)?,
                     completed_since_ms: row.get(1)?,
                     updated_at: row.get(2)?,
+                    last_sync_at: row.get(3)?,
+                    last_imported: row.get(4)?,
+                    last_updated: row.get(5)?,
+                    last_pushed: row.get(6)?,
+                    last_error: row.get(7)?,
                 })
             },
         )
@@ -176,6 +182,22 @@ fn export_todoist_pending(conn: &Connection) -> Result<Vec<BackupTodoistPending>
             command_json: row.get(3)?,
             local_hash: row.get(4)?,
             created_at: row.get(5)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+fn export_todoist_conflicts(conn: &Connection) -> Result<Vec<BackupTodoistConflict>> {
+    let mut stmt = conn.prepare(
+        "SELECT todoist_id,task_id,remote_json,detected_at,resolution FROM todoist_conflicts ORDER BY detected_at,todoist_id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(BackupTodoistConflict {
+            todoist_id: row.get(0)?,
+            task_id: row.get(1)?,
+            remote_json: row.get(2)?,
+            detected_at: row.get(3)?,
+            resolution: row.get(4)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -223,6 +245,7 @@ pub fn import_all(conn: &Connection, data: &BackupData, replace: bool) -> Result
         if replace {
             tx.execute("DELETE FROM todoist_pending_commands", [])?;
             tx.execute("DELETE FROM task_todoist_links", [])?;
+            tx.execute("DELETE FROM todoist_conflicts", [])?;
             tx.execute("DELETE FROM todoist_sync_state", [])?;
             tx.execute("DELETE FROM task_tags", [])?;
             tx.execute("DELETE FROM task_events", [])?;
@@ -347,13 +370,13 @@ pub fn import_all(conn: &Connection, data: &BackupData, replace: bool) -> Result
         if let Some(sync) = &data.todoist_sync {
             if replace {
                 tx.execute(
-                    "INSERT INTO todoist_sync_state(id,sync_token,completed_since_ms,updated_at) VALUES (1,?1,?2,?3)",
-                    rusqlite::params![sync.sync_token, sync.completed_since_ms, sync.updated_at],
+                    "INSERT INTO todoist_sync_state(id,sync_token,completed_since_ms,updated_at,last_sync_at,last_imported,last_updated,last_pushed,last_error) VALUES (1,?1,?2,?3,?4,?5,?6,?7,?8)",
+                    rusqlite::params![sync.sync_token, sync.completed_since_ms, sync.updated_at, sync.last_sync_at, sync.last_imported, sync.last_updated, sync.last_pushed, sync.last_error],
                 )?;
             } else {
                 tx.execute(
-                    "INSERT OR IGNORE INTO todoist_sync_state(id,sync_token,completed_since_ms,updated_at) VALUES (1,?1,?2,?3)",
-                    rusqlite::params![sync.sync_token, sync.completed_since_ms, sync.updated_at],
+                    "INSERT OR IGNORE INTO todoist_sync_state(id,sync_token,completed_since_ms,updated_at,last_sync_at,last_imported,last_updated,last_pushed,last_error) VALUES (1,?1,?2,?3,?4,?5,?6,?7,?8)",
+                    rusqlite::params![sync.sync_token, sync.completed_since_ms, sync.updated_at, sync.last_sync_at, sync.last_imported, sync.last_updated, sync.last_pushed, sync.last_error],
                 )?;
             }
         }
@@ -374,6 +397,15 @@ pub fn import_all(conn: &Connection, data: &BackupData, replace: bool) -> Result
             tx.execute(
                 "INSERT OR IGNORE INTO todoist_pending_commands(command_uuid,task_id,temp_id,command_json,local_hash,created_at) VALUES (?1,?2,?3,?4,?5,?6)",
                 rusqlite::params![pending.command_uuid, pending.task_id, pending.temp_id, pending.command_json, pending.local_hash, pending.created_at],
+            )?;
+        }
+        for conflict in &data.todoist_conflicts {
+            if !available_ids.contains(&conflict.task_id) {
+                continue;
+            }
+            tx.execute(
+                "INSERT OR IGNORE INTO todoist_conflicts(todoist_id,task_id,remote_json,detected_at,resolution) VALUES (?1,?2,?3,?4,?5)",
+                rusqlite::params![conflict.todoist_id, conflict.task_id, conflict.remote_json, conflict.detected_at, conflict.resolution],
             )?;
         }
 

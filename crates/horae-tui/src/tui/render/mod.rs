@@ -1036,6 +1036,114 @@ impl<'a> AppRender for App<'a> {
 
             lines.push(Line::from(""));
             lines.push(Line::from(vec![Span::styled(
+                tr!(self.lang, "Todoist 双向同步", "Todoist Sync"),
+                Style::default()
+                    .fg(self.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            )]));
+            if let Some(todoist) = &self.todoist_panel.config {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        tr!(self.lang, "• 项目: ", "• Project: "),
+                        Style::default().fg(self.theme.text_dim),
+                    ),
+                    Span::styled(
+                        todoist.project_id.clone(),
+                        Style::default().fg(self.theme.fg),
+                    ),
+                ]));
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        tr!(self.lang, "• Token 环境变量: ", "• Token env: "),
+                        Style::default().fg(self.theme.text_dim),
+                    ),
+                    Span::styled(
+                        format!(
+                            "{} ({})",
+                            todoist.token_env,
+                            if self.todoist_panel.token_available {
+                                tr!(self.lang, "可用", "available")
+                            } else {
+                                tr!(self.lang, "未设置", "missing")
+                            }
+                        ),
+                        Style::default().fg(if self.todoist_panel.token_available {
+                            self.theme.text_success
+                        } else {
+                            self.theme.text_urgent
+                        }),
+                    ),
+                ]));
+                let status = self.todoist_panel.status.as_ref();
+                let last_sync = status
+                    .filter(|status| status.last_sync_at > 0)
+                    .map(|status| horae_core::time::format_local(Some(status.last_sync_at)))
+                    .unwrap_or_else(|| tr!(self.lang, "尚未同步", "Never synced").to_string());
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        tr!(self.lang, "• 最近同步: ", "• Last sync: "),
+                        Style::default().fg(self.theme.text_dim),
+                    ),
+                    Span::styled(last_sync, Style::default().fg(self.theme.fg)),
+                ]));
+                if let Some(status) = status {
+                    if status.last_sync_at > 0 {
+                        let result = if status.last_error.is_some() {
+                            tr!(self.lang, "失败（查看提示）", "Failed (see message)").to_string()
+                        } else {
+                            tr!(
+                                self.lang,
+                                "导入 {} · 更新 {} · 推送 {}",
+                                "{} imported · {} updated · {} pushed",
+                                status.imported,
+                                status.updated,
+                                status.pushed
+                            )
+                        };
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                tr!(self.lang, "• 结果: ", "• Result: "),
+                                Style::default().fg(self.theme.text_dim),
+                            ),
+                            Span::styled(
+                                result,
+                                Style::default().fg(if status.last_error.is_some() {
+                                    self.theme.text_urgent
+                                } else {
+                                    self.theme.text_success
+                                }),
+                            ),
+                        ]));
+                    }
+                }
+                let conflict_count = self.todoist_panel.conflicts.len();
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        tr!(self.lang, "• 待处理冲突: ", "• Open conflicts: "),
+                        Style::default().fg(self.theme.text_dim),
+                    ),
+                    Span::styled(
+                        conflict_count.to_string(),
+                        Style::default().fg(if conflict_count == 0 {
+                            self.theme.text_success
+                        } else {
+                            self.theme.text_urgent
+                        }),
+                    ),
+                ]));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    tr!(
+                        self.lang,
+                        "尚未配置。Token 只从环境变量读取。",
+                        "Not configured. Token is read from an environment variable."
+                    ),
+                    Style::default().fg(self.theme.text_dim),
+                )));
+            }
+
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![Span::styled(
                 tr!(self.lang, "系统偏好设置", "System Preferences"),
                 Style::default()
                     .fg(self.theme.accent)
@@ -1095,6 +1203,27 @@ impl<'a> AppRender for App<'a> {
                     .fg(self.theme.text_dim)
                     .add_modifier(Modifier::BOLD),
             )]));
+            lines.push(Line::from(vec![
+                Span::styled(" [o] ", Style::default().fg(self.theme.accent)),
+                Span::styled(
+                    tr!(self.lang, "配置 Todoist 项目", "Configure Todoist project"),
+                    Style::default().fg(self.theme.fg),
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled(" [y] ", Style::default().fg(self.theme.accent)),
+                Span::styled(
+                    tr!(self.lang, "立即同步", "Sync now"),
+                    Style::default().fg(self.theme.fg),
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled(" [c] ", Style::default().fg(self.theme.accent)),
+                Span::styled(
+                    tr!(self.lang, "查看/处理冲突", "View/resolve conflicts"),
+                    Style::default().fg(self.theme.fg),
+                ),
+            ]));
             lines.push(Line::from(vec![
                 Span::styled(" [b] ", Style::default().fg(self.theme.accent)),
                 Span::styled(

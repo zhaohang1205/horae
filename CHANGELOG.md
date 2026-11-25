@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Optional bidirectional Todoist project sync**: import tasks from a selected project, opt Horae tasks in with `@todoist`, retain incremental sync state and idempotent retry commands, and detect concurrent edits. API tokens stay in environment variables. Recurring tasks are skipped where recurrence semantics do not match.
 - Include Todoist task mappings and sync cursors in database backups so restoring a profile does not create duplicate remote tasks.
+- **Todoist sync in the TUI**: the Settings view now has a Todoist section — `o` configures the project and token environment variable, `y` runs a sync, and `c` opens a conflict list. The section shows the current project, whether the token is available, the last sync result, and the number of open conflicts. Conflicts can be resolved by keeping the Horae version (pushed back to Todoist) or the Todoist version.
+- Resolve Todoist conflicts from the TUI or CLI and record the decision, so a resolved conflict no longer blocks the next sync and disappears from the pending list.
+- `horae todoist status` now reports the last sync result and the open conflict list, and `horae todoist resolve <TODOIST_TASK_ID> --side horae|todoist` settles a conflict from the command line.
 
 ## [0.2.6] - 2026-11-06
 

@@ -30,6 +30,7 @@ pub fn run(conn: &Connection, action: TodoistAction, profile: Option<&str>) -> R
             config.save()?;
             if reset_sync {
                 conn.execute("DELETE FROM todoist_pending_commands", [])?;
+                conn.execute("DELETE FROM todoist_conflicts", [])?;
                 conn.execute("DELETE FROM task_todoist_links", [])?;
                 conn.execute("DELETE FROM todoist_sync_state", [])?;
                 println!("Todoist target changed; local sync mappings were reset. Existing tasks and old Todoist tasks were left untouched.");
@@ -56,9 +57,43 @@ pub fn run(conn: &Connection, action: TodoistAction, profile: Option<&str>) -> R
                             "missing"
                         }
                     );
+                    match horae_core::todoist::sync_status(conn)? {
+                        Some(status) if status.last_sync_at > 0 => {
+                            println!("Last sync: {}", status.last_sync_at);
+                            if let Some(error) = &status.last_error {
+                                println!("Last sync error: {error}");
+                            } else {
+                                println!(
+                                    "Last sync result: {} imported, {} updated, {} pushed.",
+                                    status.imported, status.updated, status.pushed
+                                );
+                            }
+                        }
+                        _ => println!("Last sync: never"),
+                    }
+                    let conflicts = horae_core::todoist::sync_conflicts(conn)?;
+                    println!("Open conflicts: {}", conflicts.len());
+                    for conflict in &conflicts {
+                        println!(
+                            "  {}  local: {}  remote: {}",
+                            conflict.todoist_id, conflict.local_title, conflict.remote_title
+                        );
+                    }
                 }
                 None => println!("Todoist is not configured for profile `{name}`."),
             }
+            Ok(())
+        }
+        TodoistAction::Resolve { todoist_id, side } => {
+            let resolution = match side.trim().to_ascii_lowercase().as_str() {
+                "horae" | "local" => horae_core::todoist::ConflictResolution::KeepHorae,
+                "todoist" | "remote" => horae_core::todoist::ConflictResolution::KeepTodoist,
+                other => bail!(
+                    "unknown side `{other}`; expected `horae` (keep the local task) or `todoist` (keep the remote task)"
+                ),
+            };
+            horae_core::todoist::resolve_conflict(conn, &todoist_id, resolution)?;
+            println!("Conflict {todoist_id} resolved as `{}`.", side.trim());
             Ok(())
         }
         TodoistAction::Sync => {

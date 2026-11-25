@@ -144,6 +144,7 @@ fn zh_about(path: &str) -> Option<&'static str> {
         "todoist configure" => "配置 Todoist 项目与 API Token 环境变量",
         "todoist sync" => "执行一轮双向任务同步",
         "todoist status" => "查看 Todoist 集成配置状态",
+        "todoist resolve" => "裁决一个待处理的同步冲突",
         "feishu test" => "发送测试卡片以验证飞书 Webhook 连接",
         "feishu due" => "立即扫描并推送当前临近/到期任务卡片",
         "feishu summary" => "立即推送今日任务摘要简报卡片",
@@ -206,7 +207,8 @@ fn zh_long_about(path: &str) -> Option<&'static str> {
         "todoist" => "与一个 Todoist 项目双向同步。项目内任务会导入 Horae；本地任务需显式添加 `@todoist` 标签才会推送。API Token 仅从环境变量读取。",
         "todoist configure" => "设置同步项目 ID 和保存个人 API Token 的环境变量名。Token 本身不会写入 config.json。",
         "todoist sync" => "执行增量双向同步。两端同时修改的任务会报告冲突，不会自动覆盖。重复任务会跳过，因为两边的循环语义不同。",
-        "todoist status" => "显示当前配置集的 Todoist 项目和 Token 环境变量状态，不显示 Token 内容。",
+        "todoist status" => "显示当前配置集的 Todoist 项目和 Token 环境变量状态，不显示 Token 内容。同时显示最近一次同步结果与待处理冲突列表。",
+        "todoist resolve" => "裁决一个待处理的同步冲突。`--side horae` 保留本地任务并回推 Todoist；`--side todoist` 采用远端版本。裁决后冲突记录被清除，下次同步不再阻塞。",
         "feishu test" => "向飞书 Webhook 发送一条示例测试卡片，便于确认群机器人连通性。",
         "feishu due" => "立即扫描本地数据库中的临近或到期任务，并向飞书推送提醒卡片。",
         "feishu summary" => "汇总今日待办、已完成与排程任务，立即向飞书推送富文本日报简报。",
@@ -255,7 +257,7 @@ fn zh_after_help(path: &str) -> Option<&'static str> {
         "flash" => "示例:\n  horae flash\n  horae f\n  horae -f",
         "ntfy" => "示例:\n  horae ntfy test\n  horae --profile work ntfy test",
         "feishu" => "示例:\n  horae feishu test\n  horae feishu due\n  horae feishu summary\n  horae feishu listen\n  horae feishu doctor\n  horae feishu sync\n  horae --profile work feishu test",
-        "todoist" => "示例:\n  horae todoist configure --project-id <ID>\n  export TODOIST_API_TOKEN=<token>\n  horae todoist sync\n  horae todoist status",
+        "todoist" => "示例:\n  horae todoist configure --project-id <ID>\n  export TODOIST_API_TOKEN=<token>\n  horae todoist sync\n  horae todoist status\n  horae todoist resolve <TODOIST_TASK_ID> --side horae",
         "feishu sync" => "示例:\n  horae feishu sync\n  horae feishu sync --push\n  horae feishu sync --pull",
         "watch" => "文件夹协议（手机写入，电脑消费）:\n    capture.txt   每行一条 quick-add 捕获：标题 @tag ~time *rrule !high\n    actions.txt   done <id|标题> | set <id|标题> status next | set <id|标题> due <时间>\n电脑回写:\n    today.md          活动任务快照（Next / Scheduled / Waiting / 逾期）\n    reminders/*.md    到期/逾期任务提醒（Syncthing 通过文件变更通知手机）\n    *.done            已消费行的回执",
         "export" => "示例:\n  horae export\n  horae export --file ~/backups/horae.json",
@@ -353,6 +355,8 @@ fn zh_arg_help(path: &str, arg: &str) -> Option<&'static str> {
         ("feishu sync", "pull") => "仅从飞书拉取任务到本地",
         ("todoist configure", "project_id") => "要同步的 Todoist 项目 ID",
         ("todoist configure", "token_env") => "读取个人 API Token 的环境变量名（默认 TODOIST_API_TOKEN）",
+        ("todoist resolve", "todoist_id") => "要裁决的冲突对应的 Todoist 任务 ID",
+        ("todoist resolve", "side") => "保留哪一侧：`horae` 保留本地任务并回推，`todoist` 采用远端版本",
         ("watch", "dir") => "要监视的同步文件夹（默认 ~/.config/horae/sync）",
         ("watch", "interval") => "轮询间隔（秒，默认 5）",
         ("watch", "once") => "只执行一轮后退出，而非一直运行",
@@ -487,6 +491,39 @@ mod tests {
         assert_eq!(
             cmd.get_about().map(|s| s.to_string()),
             Some("GTD terminal task manager".to_string())
+        );
+    }
+
+    #[test]
+    fn localize_translates_todoist_subcommands_and_args() {
+        let mut cmd = Cli::command();
+        localize(&mut cmd, Lang::Zh);
+
+        let todoist = cmd
+            .get_subcommands()
+            .find(|s| s.get_name() == "todoist")
+            .expect("todoist 子命令存在");
+        assert_eq!(
+            todoist.get_about().map(|s| s.to_string()),
+            Some("与指定 Todoist 项目同步任务".to_string())
+        );
+
+        let resolve = todoist
+            .get_subcommands()
+            .find(|s| s.get_name() == "resolve")
+            .expect("todoist resolve 子命令存在");
+        assert_eq!(
+            resolve.get_about().map(|s| s.to_string()),
+            Some("裁决一个待处理的同步冲突".to_string())
+        );
+
+        let side = resolve
+            .get_arguments()
+            .find(|a| a.get_id() == "side")
+            .expect("resolve --side 参数存在");
+        assert_eq!(
+            side.get_help().map(|s| s.to_string()),
+            Some("保留哪一侧：`horae` 保留本地任务并回推，`todoist` 采用远端版本".to_string())
         );
     }
 }
