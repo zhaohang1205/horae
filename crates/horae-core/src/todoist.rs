@@ -28,6 +28,9 @@ pub struct SyncStats {
     pub conflicts: Vec<String>,
     pub recurring_skipped: usize,
     pub archived_local_tasks: usize,
+    /// Number of linked Todoist tasks deleted because the Horae task was
+    /// archived and `delete_remote_on_archive` is enabled.
+    pub remote_deleted: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -123,7 +126,13 @@ fn sync_pass(conn: &Connection, config: &TodoistConfig, token: &str) -> Result<S
     if !existing.is_empty() {
         let response = request(token, &cursor, &existing)?;
         acknowledge_pending(conn, &existing, &response)?;
-        process_remote_items(conn, &response, &config.project_id, &mut stats)?;
+        process_remote_items(
+            conn,
+            &response,
+            &config.project_id,
+            &mut stats,
+            config.prefer_remote_on_conflict,
+        )?;
         cursor = response_cursor(&response)?;
         save_cursor(conn, &cursor)?;
         stats.pushed += existing
@@ -155,14 +164,20 @@ fn sync_pass(conn: &Connection, config: &TodoistConfig, token: &str) -> Result<S
             continue;
         }
         item.checked = true;
-        match apply_remote(conn, &item)? {
+        match apply_remote(conn, &item, config.prefer_remote_on_conflict)? {
             ApplyResult::Imported => stats.imported += 1,
             ApplyResult::Updated => stats.updated += 1,
             ApplyResult::Unchanged => {}
             ApplyResult::Conflict => stats.conflicts.push(item.id),
         }
     }
-    process_remote_items(conn, &response, &config.project_id, &mut stats)?;
+    process_remote_items(
+        conn,
+        &response,
+        &config.project_id,
+        &mut stats,
+        config.prefer_remote_on_conflict,
+    )?;
     if !stats.conflicts.is_empty() {
         bail!("Todoist task(s) changed on both sides: {}. No sync cursor was advanced; resolve each edit on one side and retry.", stats.conflicts.join(", "));
     }
@@ -173,6 +188,9 @@ fn sync_pass(conn: &Connection, config: &TodoistConfig, token: &str) -> Result<S
     // Queue local changes before sending. Todoist's command UUID idempotency
     // makes a retry safe even when a successful HTTP response was lost.
     stats.recurring_skipped += queue_local_changes(conn, &config.project_id)?;
+    if config.delete_remote_on_archive {
+        stats.remote_deleted = queue_remote_deletes(conn)?;
+    }
     stats.archived_local_tasks = conn.query_row(
         "SELECT COUNT(*) FROM task_todoist_links l JOIN tasks t ON t.id=l.task_id WHERE t.archived_at IS NOT NULL AND l.remote_deleted=0 AND l.out_of_scope=0",
         [],
@@ -182,7 +200,13 @@ fn sync_pass(conn: &Connection, config: &TodoistConfig, token: &str) -> Result<S
     if !pending.is_empty() {
         let response = request(token, &cursor, &pending)?;
         acknowledge_pending(conn, &pending, &response)?;
-        process_remote_items(conn, &response, &config.project_id, &mut stats)?;
+        process_remote_items(
+            conn,
+            &response,
+            &config.project_id,
+            &mut stats,
+            config.prefer_remote_on_conflict,
+        )?;
         if !stats.conflicts.is_empty() {
             bail!("Todoist task(s) changed on both sides: {}. The incoming cursor was not saved; resolve each edit on one side and retry.", stats.conflicts.join(", "));
         }
@@ -282,6 +306,7 @@ pub fn resolve_conflict(
     Ok(())
 }
 
+#[derive(Debug)]
 enum ApplyResult {
     Imported,
     Updated,
@@ -294,6 +319,7 @@ fn process_remote_items(
     response: &Value,
     project_id: &str,
     stats: &mut SyncStats,
+    prefer_remote: bool,
 ) -> Result<()> {
     for value in response["items"].as_array().cloned().unwrap_or_default() {
         let mut remote: RemoteTask = match serde_json::from_value(value) {
@@ -306,7 +332,10 @@ fn process_remote_items(
         }
         if remote.project_id != project_id {
             if remote.is_deleted {
-                if matches!(apply_remote(conn, &remote)?, ApplyResult::Conflict) {
+                if matches!(
+                    apply_remote(conn, &remote, prefer_remote)?,
+                    ApplyResult::Conflict
+                ) {
                     stats.conflicts.push(remote.id.clone());
                 }
             } else {
@@ -318,7 +347,7 @@ fn process_remote_items(
             stats.recurring_skipped += 1;
             continue;
         }
-        match apply_remote(conn, &remote)? {
+        match apply_remote(conn, &remote, prefer_remote)? {
             ApplyResult::Imported => stats.imported += 1,
             ApplyResult::Updated => stats.updated += 1,
             ApplyResult::Unchanged => {}
@@ -406,11 +435,15 @@ fn fetch_completed(token: &str, project_id: &str, previous_ms: i64) -> Result<Co
     })
 }
 
-fn apply_remote(conn: &Connection, remote: &RemoteTask) -> Result<ApplyResult> {
+fn apply_remote(
+    conn: &Connection,
+    remote: &RemoteTask,
+    prefer_remote: bool,
+) -> Result<ApplyResult> {
     if remote.is_deleted && remote.checked {
         let mut completed = remote.clone();
         completed.is_deleted = false;
-        return apply_remote(conn, &completed);
+        return apply_remote(conn, &completed, prefer_remote);
     }
     if !remote.is_deleted && remote.content.trim().is_empty() {
         bail!(
@@ -446,8 +479,12 @@ fn apply_remote(conn: &Connection, remote: &RemoteTask) -> Result<ApplyResult> {
                     )?;
                     return Ok(ApplyResult::Unchanged);
                 }
-                save_conflict(conn, &id, remote)?;
-                return Ok(ApplyResult::Conflict);
+                if !prefer_remote {
+                    save_conflict(conn, &id, remote)?;
+                    return Ok(ApplyResult::Conflict);
+                }
+                // The remote deletion wins: the local edit is dropped and the
+                // task is archived below.
             }
             if task.archived_at.is_none() && resolution.as_deref() != Some("local") {
                 tasks::archive(conn, &id)?;
@@ -514,8 +551,24 @@ fn apply_remote(conn: &Connection, remote: &RemoteTask) -> Result<ApplyResult> {
             return Ok(ApplyResult::Updated);
         }
         if local_changed && remote_changed && current_local != remote_hash {
-            save_conflict(conn, &id, remote)?;
-            return Ok(ApplyResult::Conflict);
+            if !prefer_remote {
+                save_conflict(conn, &id, remote)?;
+                return Ok(ApplyResult::Conflict);
+            }
+            // The remote edit wins: overwrite the local task with the Todoist
+            // version and re-baseline the hashes so the next pass is quiet.
+            update_from_remote(conn, &id, remote)?;
+            let updated = tasks::get(conn, &id)?;
+            let tags = task_tags(conn, &id)?;
+            conn.execute(
+                "UPDATE task_todoist_links SET local_hash=?1,remote_hash=?2,remote_checked=?3,remote_deleted=0,out_of_scope=0,last_synced_at=?4 WHERE task_id=?5",
+                params![local_hash_for(&updated, &tags)?, remote_hash, remote.checked, crate::time::now_ms(), id],
+            )?;
+            conn.execute(
+                "DELETE FROM todoist_conflicts WHERE todoist_id=?1",
+                [&remote.id],
+            )?;
+            return Ok(ApplyResult::Updated);
         }
         if local_changed && !remote_changed {
             return Ok(ApplyResult::Unchanged);
@@ -603,6 +656,42 @@ fn update_from_remote(conn: &Connection, id: &str, remote: &RemoteTask) -> Resul
     };
     tasks::modify(conn, id, &input)?;
     Ok(())
+}
+
+/// Queue a remote delete for every Horae task that was archived after the
+/// last sync, so archiving in Horae also removes the linked Todoist task.
+///
+/// Only tasks that are still linked to a live Todoist task are considered.
+/// The link is kept (with `remote_deleted` set) so a later pass does not
+/// recreate the task and the deletion is not sent twice.
+fn queue_remote_deletes(conn: &Connection) -> Result<usize> {
+    let mut stmt = conn.prepare(
+        "SELECT l.task_id,l.todoist_id,l.local_hash FROM task_todoist_links l JOIN tasks t ON t.id=l.task_id \
+         WHERE t.archived_at IS NOT NULL AND l.remote_deleted=0 AND l.out_of_scope=0",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut queued = 0usize;
+    for row in rows {
+        let (task_id, todoist_id, local_hash) = row?;
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let command = json!({
+            "type": "item_delete",
+            "uuid": uuid,
+            "args": {"id": todoist_id},
+        });
+        conn.execute(
+            "INSERT INTO todoist_pending_commands(command_uuid,task_id,temp_id,command_json,local_hash,created_at) VALUES (?1,?2,NULL,?3,?4,?5)",
+            params![uuid, task_id, serde_json::to_string(&command)?, local_hash, crate::time::now_ms()],
+        )?;
+        queued += 1;
+    }
+    Ok(queued)
 }
 
 fn queue_local_changes(conn: &Connection, project_id: &str) -> Result<usize> {
@@ -1058,7 +1147,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = apply_remote(&conn, &remote("td-1", "proj", "Remote edit")).unwrap();
+        let result = apply_remote(&conn, &remote("td-1", "proj", "Remote edit"), false).unwrap();
         assert!(matches!(result, ApplyResult::Conflict));
 
         let conflicts = sync_conflicts(&conn).unwrap();
@@ -1083,12 +1172,12 @@ mod tests {
         )
         .unwrap();
 
-        apply_remote(&conn, &remote("td-1", "proj", "Remote edit")).unwrap();
+        apply_remote(&conn, &remote("td-1", "proj", "Remote edit"), false).unwrap();
         assert_eq!(sync_conflicts(&conn).unwrap().len(), 1);
 
         resolve_conflict(&conn, "td-1", ConflictResolution::KeepHorae).unwrap();
         // 冲突已按"保留 Horae"裁决；再次应用远端时不得重新判定为冲突。
-        let result = apply_remote(&conn, &remote("td-1", "proj", "Remote edit")).unwrap();
+        let result = apply_remote(&conn, &remote("td-1", "proj", "Remote edit"), false).unwrap();
         assert!(matches!(result, ApplyResult::Unchanged));
 
         // 裁决完成后冲突记录必须被清除，否则界面会一直显示待处理冲突。
@@ -1114,11 +1203,11 @@ mod tests {
         )
         .unwrap();
 
-        apply_remote(&conn, &remote("td-1", "proj", "Remote edit")).unwrap();
+        apply_remote(&conn, &remote("td-1", "proj", "Remote edit"), false).unwrap();
         assert_eq!(sync_conflicts(&conn).unwrap().len(), 1);
 
         resolve_conflict(&conn, "td-1", ConflictResolution::KeepTodoist).unwrap();
-        let result = apply_remote(&conn, &remote("td-1", "proj", "Remote edit")).unwrap();
+        let result = apply_remote(&conn, &remote("td-1", "proj", "Remote edit"), false).unwrap();
         assert!(matches!(result, ApplyResult::Updated));
 
         assert!(sync_conflicts(&conn).unwrap().is_empty());
@@ -1141,11 +1230,11 @@ mod tests {
 
         let mut deleted = remote("td-1", "proj", "Original");
         deleted.is_deleted = true;
-        let result = apply_remote(&conn, &deleted).unwrap();
+        let result = apply_remote(&conn, &deleted, false).unwrap();
         assert!(matches!(result, ApplyResult::Conflict));
 
         resolve_conflict(&conn, "td-1", ConflictResolution::KeepHorae).unwrap();
-        let result = apply_remote(&conn, &deleted).unwrap();
+        let result = apply_remote(&conn, &deleted, false).unwrap();
         assert!(matches!(result, ApplyResult::Unchanged));
 
         // 保留 Horae => 本地任务不被归档，且冲突记录被清除。
@@ -1160,7 +1249,7 @@ mod tests {
 
         let mut deleted = remote("td-1", "proj", "Original");
         deleted.is_deleted = true;
-        let result = apply_remote(&conn, &deleted).unwrap();
+        let result = apply_remote(&conn, &deleted, false).unwrap();
         assert!(matches!(result, ApplyResult::Unchanged));
 
         // 本地没有改动 => 直接归档本地任务，不产生冲突。
@@ -1188,7 +1277,7 @@ mod tests {
         )
         .unwrap();
 
-        apply_remote(&conn, &remote("td-1", "proj", "Remote edit")).unwrap();
+        apply_remote(&conn, &remote("td-1", "proj", "Remote edit"), false).unwrap();
         assert_eq!(sync_conflicts(&conn).unwrap().len(), 1);
 
         // 裁决后仍留有记录（等待下一轮同步真正落地），但不再出现在待处理列表里。
@@ -1211,5 +1300,185 @@ mod tests {
     fn sync_status_starts_empty_and_records_failures() {
         let (_dir, conn) = crate::testutil::test_conn();
         assert!(sync_status(&conn).unwrap().is_none());
+    }
+}
+
+#[cfg(test)]
+mod option_tests {
+    use super::*;
+    use crate::repo::tasks::CaptureInput;
+
+    fn linked_task(conn: &Connection, todoist_id: &str, title: &str) -> String {
+        let task = tasks::create_capture(
+            conn,
+            &CaptureInput {
+                title: title.to_string(),
+                status: Status::Next,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let hash = local_hash_for(&task, &task_tags(conn, &task.id).unwrap()).unwrap();
+        conn.execute(
+            "INSERT INTO task_todoist_links(task_id,todoist_id,local_hash,remote_hash,remote_checked,remote_deleted,out_of_scope,last_synced_at) VALUES (?1,?2,?3,?3,0,0,0,?4)",
+            params![task.id, todoist_id, hash, crate::time::now_ms()],
+        )
+        .unwrap();
+        task.id
+    }
+
+    fn remote(id: &str, project: &str, content: &str) -> RemoteTask {
+        RemoteTask {
+            id: id.to_string(),
+            project_id: project.to_string(),
+            content: content.to_string(),
+            description: String::new(),
+            checked: false,
+            is_deleted: false,
+            priority: 1,
+            due: None,
+            labels: Vec::new(),
+            completed_at: None,
+        }
+    }
+
+    fn edit_title(conn: &Connection, id: &str, title: &str) {
+        tasks::modify(
+            conn,
+            id,
+            &ModifyInput {
+                title: Some(title.to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn prefer_remote_overwrites_the_local_edit_instead_of_conflicting() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let id = linked_task(&conn, "td-1", "Original");
+        edit_title(&conn, &id, "Local edit");
+
+        // 远端也改了标题。开启 prefer_remote 时不应报冲突，而应直接采用远端版本。
+        let result = apply_remote(&conn, &remote("td-1", "proj", "Remote edit"), true).unwrap();
+        assert!(
+            matches!(result, ApplyResult::Updated),
+            "prefer_remote 应直接更新而不是报冲突，实际: {result:?}"
+        );
+        assert_eq!(
+            tasks::get(&conn, &id).unwrap().title,
+            "Remote edit",
+            "本地标题应被远端覆盖"
+        );
+        assert!(
+            sync_conflicts(&conn).unwrap().is_empty(),
+            "prefer_remote 时不应留下待处理冲突"
+        );
+    }
+
+    #[test]
+    fn prefer_remote_archives_the_local_task_when_the_remote_task_was_deleted() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let id = linked_task(&conn, "td-1", "Original");
+        edit_title(&conn, &id, "Local edit");
+
+        let mut deleted = remote("td-1", "proj", "Original");
+        deleted.is_deleted = true;
+        let result = apply_remote(&conn, &deleted, true).unwrap();
+        assert!(matches!(result, ApplyResult::Unchanged));
+        assert!(
+            tasks::get(&conn, &id).unwrap().archived_at.is_some(),
+            "prefer_remote 时远端删除应归档本地任务"
+        );
+        assert!(sync_conflicts(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn prefer_remote_off_still_reports_the_conflict() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let id = linked_task(&conn, "td-1", "Original");
+        edit_title(&conn, &id, "Local edit");
+
+        let result = apply_remote(&conn, &remote("td-1", "proj", "Remote edit"), false).unwrap();
+        assert!(matches!(result, ApplyResult::Conflict));
+        assert_eq!(tasks::get(&conn, &id).unwrap().title, "Local edit");
+        assert_eq!(sync_conflicts(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn archiving_queues_a_remote_delete_when_enabled() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let id = linked_task(&conn, "td-1", "Original");
+        tasks::archive(&conn, &id).unwrap();
+
+        let queued = queue_remote_deletes(&conn).unwrap();
+        assert_eq!(queued, 1, "归档后应排队一条远端删除命令");
+
+        let command: String = conn
+            .query_row(
+                "SELECT command_json FROM todoist_pending_commands WHERE task_id=?1",
+                [&id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            command.contains("item_delete") && command.contains("td-1"),
+            "排队命令应是删除 td-1，实际: {command}"
+        );
+    }
+
+    #[test]
+    fn archiving_queues_nothing_when_disabled() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let id = linked_task(&conn, "td-1", "Original");
+        tasks::archive(&conn, &id).unwrap();
+
+        // 该函数本身只负责排队；调用方按配置决定是否调用它。
+        // 未启用时 sync_pass 不会调用它，因此这里断言任务仍被统计为"仍活跃"。
+        let still_active: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM task_todoist_links l JOIN tasks t ON t.id=l.task_id WHERE t.archived_at IS NOT NULL AND l.remote_deleted=0 AND l.out_of_scope=0",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(still_active, 1);
+    }
+
+    #[test]
+    fn a_task_already_deleted_remotely_is_not_queued_again() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let id = linked_task(&conn, "td-1", "Original");
+        tasks::archive(&conn, &id).unwrap();
+        conn.execute(
+            "UPDATE task_todoist_links SET remote_deleted=1 WHERE task_id=?1",
+            [&id],
+        )
+        .unwrap();
+
+        assert_eq!(
+            queue_remote_deletes(&conn).unwrap(),
+            0,
+            "已删除的远端任务不应重复排队"
+        );
+    }
+
+    #[test]
+    fn a_task_moved_out_of_the_project_is_not_deleted() {
+        let (_dir, conn) = crate::testutil::test_conn();
+        let id = linked_task(&conn, "td-1", "Original");
+        tasks::archive(&conn, &id).unwrap();
+        conn.execute(
+            "UPDATE task_todoist_links SET out_of_scope=1 WHERE task_id=?1",
+            [&id],
+        )
+        .unwrap();
+
+        assert_eq!(
+            queue_remote_deletes(&conn).unwrap(),
+            0,
+            "已移出项目的任务不应被删除"
+        );
     }
 }

@@ -25,7 +25,13 @@ impl<'a> super::App<'a> {
         Ok(())
     }
 
-    pub(crate) fn save_todoist_config(&mut self, project_id: &str, token_env: &str) -> Result<()> {
+    pub(crate) fn save_todoist_config(
+        &mut self,
+        project_id: &str,
+        token_env: &str,
+        delete_remote_on_archive: bool,
+        prefer_remote_on_conflict: bool,
+    ) -> Result<()> {
         let project_id = project_id.trim();
         let token_env = token_env.trim();
         if project_id.is_empty() || token_env.is_empty() {
@@ -41,6 +47,8 @@ impl<'a> super::App<'a> {
         updated.todoist = Some(TodoistConfig {
             project_id: project_id.to_string(),
             token_env: token_env.to_string(),
+            delete_remote_on_archive,
+            prefer_remote_on_conflict,
         });
         let name = name.to_string();
         config.upsert_profile(&name, updated);

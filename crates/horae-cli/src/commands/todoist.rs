@@ -11,6 +11,8 @@ pub fn run(conn: &Connection, action: TodoistAction, profile: Option<&str>) -> R
         TodoistAction::Configure {
             project_id,
             token_env,
+            delete_remote_on_archive,
+            prefer_remote_on_conflict,
         } => {
             if project_id.trim().is_empty() || token_env.trim().is_empty() {
                 bail!("project id and token environment variable must not be empty");
@@ -25,6 +27,8 @@ pub fn run(conn: &Connection, action: TodoistAction, profile: Option<&str>) -> R
             updated.todoist = Some(TodoistConfig {
                 project_id: project_id.trim().to_string(),
                 token_env: token_env.trim().to_string(),
+                delete_remote_on_archive,
+                prefer_remote_on_conflict,
             });
             config.upsert_profile(&name, updated);
             config.save()?;
@@ -56,6 +60,14 @@ pub fn run(conn: &Connection, action: TodoistAction, profile: Option<&str>) -> R
                         } else {
                             "missing"
                         }
+                    );
+                    println!(
+                        "Delete remote on archive: {}",
+                        todoist.delete_remote_on_archive
+                    );
+                    println!(
+                        "Prefer Todoist on conflict: {}",
+                        todoist.prefer_remote_on_conflict
                     );
                     match horae_core::todoist::sync_status(conn)? {
                         Some(status) if status.last_sync_at > 0 => {
@@ -110,13 +122,14 @@ pub fn run(conn: &Connection, action: TodoistAction, profile: Option<&str>) -> R
             })?;
             let stats = horae_core::todoist::sync(conn, todoist, &token)?;
             println!(
-                "Todoist sync complete for `{name}`: {} imported, {} updated, {} pushed, {} conflicts, {} recurring tasks skipped, {} archived Horae tasks still active in Todoist.",
+                "Todoist sync complete for `{name}`: {} imported, {} updated, {} pushed, {} conflicts, {} recurring tasks skipped, {} archived Horae tasks still active in Todoist, {} remote tasks deleted.",
                 stats.imported,
                 stats.updated,
                 stats.pushed,
                 stats.conflicts.len(),
                 stats.recurring_skipped,
-                stats.archived_local_tasks
+                stats.archived_local_tasks,
+                stats.remote_deleted
             );
             Ok(())
         }

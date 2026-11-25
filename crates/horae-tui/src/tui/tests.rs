@@ -7000,3 +7000,64 @@ fn test_timeline_time_span_rendering() {
         "跨天连续打卡应在时间列中正确呈现真实起止时间区间(~)"
     );
 }
+
+#[test]
+fn test_todoist_config_popup_toggles_the_two_optional_policies() {
+    horae_core::repo::state::set_test_override();
+    let mut conn = Connection::open(":memory:").unwrap();
+    migrate::run(&mut conn).unwrap();
+    let mut app = app_normal(&conn);
+    app.set_view(View::Settings);
+
+    // 1. 打开 Todoist 配置弹层。
+    app.handle_key(key('o')).unwrap();
+    match &app.popup {
+        Some(crate::tui::app::Popup::TodoistConfig {
+            delete_remote_on_archive,
+            prefer_remote_on_conflict,
+            ..
+        }) => {
+            assert!(!*delete_remote_on_archive, "默认不删除远端任务");
+            assert!(!*prefer_remote_on_conflict, "默认不以 Todoist 为准");
+        }
+        other => panic!("应打开 Todoist 配置弹层，实际: {other:?}"),
+    }
+
+    // 2. Tab 切到第三个字段（归档删除开关），空格切换。
+    app.handle_key(kc(KeyCode::Tab)).unwrap();
+    app.handle_key(kc(KeyCode::Tab)).unwrap();
+    app.handle_key(kc(KeyCode::Char(' '))).unwrap();
+    match &app.popup {
+        Some(crate::tui::app::Popup::TodoistConfig {
+            delete_remote_on_archive,
+            ..
+        }) => assert!(
+            *delete_remote_on_archive,
+            "在第三个字段按空格应打开归档删除开关"
+        ),
+        other => panic!("应仍打开 Todoist 配置弹层，实际: {other:?}"),
+    }
+
+    // 3. 再 Tab 到第四个字段（冲突策略），空格切换。
+    app.handle_key(kc(KeyCode::Tab)).unwrap();
+    app.handle_key(kc(KeyCode::Char(' '))).unwrap();
+    match &app.popup {
+        Some(crate::tui::app::Popup::TodoistConfig {
+            prefer_remote_on_conflict,
+            ..
+        }) => assert!(
+            *prefer_remote_on_conflict,
+            "在第四个字段按空格应打开冲突以 Todoist 为准开关"
+        ),
+        other => panic!("应仍打开 Todoist 配置弹层，实际: {other:?}"),
+    }
+
+    // 4. 回车保存：字段留空会报错，两个开关状态应保持。
+    app.handle_key(kc(KeyCode::Enter)).unwrap();
+    match &app.popup {
+        Some(crate::tui::app::Popup::TodoistConfig { error, .. }) => {
+            assert!(error.is_some(), "项目 ID 为空时应显示错误");
+        }
+        other => panic!("应仍打开 Todoist 配置弹层，实际: {other:?}"),
+    }
+}

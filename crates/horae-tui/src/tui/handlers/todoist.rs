@@ -11,33 +11,56 @@ impl<'a> App<'a> {
                 mut token_env,
                 mut focus,
                 mut error,
+                mut delete_remote_on_archive,
+                mut prefer_remote_on_conflict,
             } => {
                 match key.code {
                     KeyCode::Esc => return Ok(()),
-                    KeyCode::Tab | KeyCode::BackTab => focus = 1 - focus,
+                    KeyCode::Tab | KeyCode::BackTab => focus = (focus + 1) % 4,
                     KeyCode::Enter if focus == 0 => focus = 1,
-                    KeyCode::Enter => match self.save_todoist_config(&project_id, &token_env) {
-                        Ok(()) => {
-                            self.flash(
-                                ToastKind::Success,
-                                tr!(self.lang, "Todoist 配置已保存。", "Todoist settings saved."),
-                            );
-                            return Ok(());
+                    KeyCode::Enter if focus == 1 => focus = 2,
+                    KeyCode::Enter if focus == 2 => focus = 3,
+                    KeyCode::Enter => {
+                        match self.save_todoist_config(
+                            &project_id,
+                            &token_env,
+                            delete_remote_on_archive,
+                            prefer_remote_on_conflict,
+                        ) {
+                            Ok(()) => {
+                                self.flash(
+                                    ToastKind::Success,
+                                    tr!(
+                                        self.lang,
+                                        "Todoist 配置已保存。",
+                                        "Todoist settings saved."
+                                    ),
+                                );
+                                return Ok(());
+                            }
+                            Err(problem) => error = Some(problem.to_string()),
                         }
-                        Err(problem) => error = Some(problem.to_string()),
-                    },
+                    }
                     KeyCode::Backspace => {
                         if focus == 0 {
                             project_id.pop();
-                        } else {
+                        } else if focus == 1 {
                             token_env.pop();
+                        }
+                        error = None;
+                    }
+                    KeyCode::Char(' ') => {
+                        if focus == 2 {
+                            delete_remote_on_archive = !delete_remote_on_archive;
+                        } else if focus == 3 {
+                            prefer_remote_on_conflict = !prefer_remote_on_conflict;
                         }
                         error = None;
                     }
                     KeyCode::Char(c) if !c.is_control() => {
                         if focus == 0 {
                             project_id.push(c);
-                        } else {
+                        } else if focus == 1 {
                             token_env.push(c);
                         }
                         error = None;
@@ -49,6 +72,8 @@ impl<'a> App<'a> {
                     token_env,
                     focus,
                     error,
+                    delete_remote_on_archive,
+                    prefer_remote_on_conflict,
                 });
             }
             Popup::TodoistConflicts { mut selected } => {

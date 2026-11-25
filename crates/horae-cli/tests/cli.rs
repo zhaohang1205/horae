@@ -945,3 +945,52 @@ fn cli_todoist_status_and_conflict_resolution() {
         .unwrap();
     assert!(!out.status.success(), "裁决不存在的冲突应失败");
 }
+
+#[test]
+fn cli_todoist_configure_stores_the_optional_sync_policies() {
+    let env = env();
+
+    // 默认关闭两个可选行为。
+    let out = env
+        .cmd()
+        .args(["todoist", "configure", "--project-id", "1234"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let out = env.cmd().args(["todoist", "status"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Delete remote on archive: false")
+            && stdout.contains("Prefer Todoist on conflict: false"),
+        "默认应关闭两个可选行为，实际: {stdout}"
+    );
+
+    // 打开后 status 应反映出来。
+    let out = env
+        .cmd()
+        .args([
+            "todoist",
+            "configure",
+            "--project-id",
+            "1234",
+            "--delete-remote-on-archive",
+            "--prefer-remote-on-conflict",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let out = env.cmd().args(["todoist", "status"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Delete remote on archive: true")
+            && stdout.contains("Prefer Todoist on conflict: true"),
+        "开启后 status 应反映出来，实际: {stdout}"
+    );
+
+    // 配置应写入 config.json，重启后仍然保留。
+    let config = std::fs::read_to_string(env._dir.path().join("config.json")).unwrap();
+    assert!(
+        config.contains("delete_remote_on_archive") && config.contains("prefer_remote_on_conflict"),
+        "config.json 应记录两个开关，实际: {config}"
+    );
+}

@@ -181,6 +181,8 @@ pub(crate) enum Popup {
         token_env: String,
         focus: usize,
         error: Option<String>,
+        delete_remote_on_archive: bool,
+        prefer_remote_on_conflict: bool,
     },
     TodoistConflicts {
         selected: usize,

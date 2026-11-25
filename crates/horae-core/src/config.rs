@@ -38,6 +38,15 @@ pub struct TodoistConfig {
     pub project_id: String,
     #[serde(default = "default_todoist_token_env")]
     pub token_env: String,
+    /// When enabled, archiving a task in Horae also deletes the linked Todoist
+    /// task. Off by default: a deleted Todoist parent would otherwise take its
+    /// subtasks with it.
+    #[serde(default)]
+    pub delete_remote_on_archive: bool,
+    /// When enabled, a task edited on both sides is resolved in favour of
+    /// Todoist instead of stopping the sync for manual review.
+    #[serde(default)]
+    pub prefer_remote_on_conflict: bool,
 }
 
 fn default_todoist_token_env() -> String {
@@ -476,5 +485,62 @@ mod tests {
                 "config file must be 0600"
             );
         });
+    }
+}
+
+#[cfg(test)]
+mod todoist_config_tests {
+    use super::*;
+
+    /// 旧版 config.json 里没有这两个开关，加载时必须用默认值而不是报错。
+    #[test]
+    fn legacy_todoist_config_loads_with_both_policies_off() {
+        let json = r#"{
+            "default_profile": "default",
+            "profiles": {
+                "default": {
+                    "db": "horae.db",
+                    "todoist": {
+                        "project_id": "1234",
+                        "token_env": "TODOIST_API_TOKEN"
+                    }
+                }
+            }
+        }"#;
+        let cfg: Config = serde_json::from_str(json).unwrap();
+        let todoist = cfg.profile("default").unwrap().todoist.clone().unwrap();
+        assert_eq!(todoist.project_id, "1234");
+        assert_eq!(todoist.token_env, "TODOIST_API_TOKEN");
+        assert!(
+            !todoist.delete_remote_on_archive,
+            "旧配置应默认不删除远端任务"
+        );
+        assert!(
+            !todoist.prefer_remote_on_conflict,
+            "旧配置应默认不以 Todoist 为准"
+        );
+    }
+
+    /// 显式写出两个开关时必须按值加载。
+    #[test]
+    fn explicit_todoist_policies_are_loaded() {
+        let json = r#"{
+            "default_profile": "default",
+            "profiles": {
+                "default": {
+                    "db": "horae.db",
+                    "todoist": {
+                        "project_id": "1234",
+                        "token_env": "TODOIST_API_TOKEN",
+                        "delete_remote_on_archive": true,
+                        "prefer_remote_on_conflict": true
+                    }
+                }
+            }
+        }"#;
+        let cfg: Config = serde_json::from_str(json).unwrap();
+        let todoist = cfg.profile("default").unwrap().todoist.clone().unwrap();
+        assert!(todoist.delete_remote_on_archive);
+        assert!(todoist.prefer_remote_on_conflict);
     }
 }

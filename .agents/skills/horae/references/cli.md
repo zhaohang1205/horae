@@ -195,6 +195,13 @@ horae todoist status
 horae todoist resolve <TODOIST_TASK_ID> --side horae|todoist
 ```
 
+可选开关（默认关闭）：
+
+- `--delete-remote-on-archive` 归档本地任务时同时删除关联的 Todoist 任务。
+  关闭时归档只影响本地，Todoist 任务保留，命令报告仍活跃的已归档关联数。
+- `--prefer-remote-on-conflict` 两端同时修改同一任务时以 Todoist 为准。
+  关闭时同步暂停并报冲突，等人工裁决。
+
 Token 从指定环境变量读取，不写入 Horae 配置。配置一个专用 Todoist 项目后，该项目
 中的任务会导入当前 profile；Horae 任务需添加 `todoist` 标签才会推送。同步包括标题、
 备注、截止时间、优先级、标签和完成状态。循环任务会跳过；同时编辑会报告冲突并保留

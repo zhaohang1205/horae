@@ -562,6 +562,12 @@ pub enum TodoistAction {
         project_id: String,
         #[arg(long, default_value = "TODOIST_API_TOKEN", value_name = "ENV")]
         token_env: String,
+        /// Also delete the linked Todoist task when a Horae task is archived
+        #[arg(long)]
+        delete_remote_on_archive: bool,
+        /// Resolve simultaneous edits in favour of Todoist instead of stopping for review
+        #[arg(long)]
+        prefer_remote_on_conflict: bool,
     },
     /// Run one bidirectional synchronization pass
     Sync,

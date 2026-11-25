@@ -69,17 +69,33 @@ impl<'a> App<'a> {
                 }
             }
             KeyCode::Char('o') | KeyCode::Char('O') => {
-                let (project_id, token_env) = self
+                let (project_id, token_env, delete_remote_on_archive, prefer_remote_on_conflict) = self
                     .todoist_panel
                     .config
                     .as_ref()
-                    .map(|config| (config.project_id.clone(), config.token_env.clone()))
-                    .unwrap_or_else(|| (String::new(), "TODOIST_API_TOKEN".to_string()));
+                    .map(|config| {
+                        (
+                            config.project_id.clone(),
+                            config.token_env.clone(),
+                            config.delete_remote_on_archive,
+                            config.prefer_remote_on_conflict,
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        (
+                            String::new(),
+                            "TODOIST_API_TOKEN".to_string(),
+                            false,
+                            false,
+                        )
+                    });
                 self.popup = Some(crate::tui::app::Popup::TodoistConfig {
                     project_id,
                     token_env,
                     focus: 0,
                     error: None,
+                    delete_remote_on_archive,
+                    prefer_remote_on_conflict,
                 });
             }
             KeyCode::Char('y') | KeyCode::Char('Y') => {
@@ -88,12 +104,13 @@ impl<'a> App<'a> {
                         ToastKind::Success,
                         tr!(
                             self.lang,
-                            "Todoist 同步完成：导入 {}、更新 {}、推送 {}、跳过循环任务 {}。",
-                            "Todoist sync complete: {} imported, {} updated, {} pushed, {} recurring skipped.",
+                            "Todoist 同步完成：导入 {}、更新 {}、推送 {}、跳过循环任务 {}、删除远端 {}。",
+                            "Todoist sync complete: {} imported, {} updated, {} pushed, {} recurring skipped, {} remote deleted.",
                             stats.imported,
                             stats.updated,
                             stats.pushed,
-                            stats.recurring_skipped
+                            stats.recurring_skipped,
+                            stats.remote_deleted
                         ),
                     ),
                     Err(error) => self.flash(

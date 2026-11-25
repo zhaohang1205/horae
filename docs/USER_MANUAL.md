@@ -330,6 +330,13 @@ Tasks already in the selected Todoist project are imported into Horae. To send a
 
 `horae todoist status` also shows the result of the last sync and the list of open conflicts. Resolve a conflict with `horae todoist resolve <TODOIST_TASK_ID> --side horae` (keep the local task and push it back to Todoist) or `--side todoist` (keep the remote version). Once resolved, the conflict no longer blocks the next sync. The Settings view (`M`) has the same controls: `o` configures, `y` syncs, `c` lists and resolves conflicts.
 
+`configure` takes two optional switches (both off by default) that choose between two sync semantics:
+
+- `--delete-remote-on-archive`: **deletes the linked Todoist task when the Horae task is archived**. Off by default — with it off, archiving only affects the local side, the Todoist task stays, and the command reports how many archived links are still active in Todoist. With it on, deletion behaves the same way on both sides, but note that deleting a Todoist parent also removes its subtasks.
+- `--prefer-remote-on-conflict`: **resolves a task edited on both sides in favour of Todoist**. Off by default — with it off, the sync stops and reports a conflict for you to settle manually; with it on, the Todoist version overwrites the local one and no conflict is left pending.
+
+In the Settings Todoist setup popup, `Tab` moves to these two options and `Space` toggles them.
+
 Recurring tasks are skipped because the two products have different recurrence models. Horae GTD states other than Done map to Todoist's active state. Todoist's completed-task endpoint only accepts date windows up to three months, so run sync at least once within that period to reconcile completions that happened while offline. `horae purge` permanently removes local history and therefore cannot propagate a deletion to Todoist.
 
 ---

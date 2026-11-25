@@ -257,8 +257,10 @@ impl<'a> App<'a> {
                 token_env,
                 focus,
                 error,
+                delete_remote_on_archive,
+                prefer_remote_on_conflict,
             } => {
-                let area = self.centered_rect(68, 15, size);
+                let area = self.centered_rect(68, 19, size);
                 f.render_widget(ratatui::widgets::Clear, area);
                 let block = Block::default()
                     .title(tr!(
@@ -304,6 +306,43 @@ impl<'a> App<'a> {
                         Span::styled(token_env.clone(), field_style(*focus == 1)),
                     ]),
                     Line::from(""),
+                    Line::from(vec![
+                        Span::styled(
+                            tr!(
+                                self.lang,
+                                "归档时同步删除远端：",
+                                "Delete remote on archive: "
+                            ),
+                            Style::default().fg(self.theme.text_dim),
+                        ),
+                        Span::styled(
+                            if *delete_remote_on_archive {
+                                tr!(self.lang, "开", "on")
+                            } else {
+                                tr!(self.lang, "关", "off")
+                            },
+                            field_style(*focus == 2),
+                        ),
+                    ]),
+                    Line::from(vec![
+                        Span::styled(
+                            tr!(
+                                self.lang,
+                                "冲突时以 Todoist 为准：",
+                                "Prefer Todoist on conflict: "
+                            ),
+                            Style::default().fg(self.theme.text_dim),
+                        ),
+                        Span::styled(
+                            if *prefer_remote_on_conflict {
+                                tr!(self.lang, "开", "on")
+                            } else {
+                                tr!(self.lang, "关", "off")
+                            },
+                            field_style(*focus == 3),
+                        ),
+                    ]),
+                    Line::from(""),
                     Line::from(tr!(
                         self.lang,
                         "先在 shell 中设置 Token 环境变量，再按 y 执行同步。",
@@ -320,8 +359,8 @@ impl<'a> App<'a> {
                 lines.push(Line::from(Span::styled(
                     tr!(
                         self.lang,
-                        "[Tab] 切换字段  [Enter] 下一项/保存  [Esc] 取消",
-                        "[Tab] Switch field  [Enter] Next/Save  [Esc] Cancel"
+                        "[Tab] 切换字段  [空格] 切换开关  [Enter] 下一项/保存  [Esc] 取消",
+                        "[Tab] Switch field  [Space] Toggle  [Enter] Next/Save  [Esc] Cancel"
                     ),
                     Style::default().fg(self.theme.text_dim),
                 )));
