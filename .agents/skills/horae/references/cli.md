@@ -109,7 +109,7 @@ horae untag <id> focus
 horae tags                # 标签库：context 组 / priority 组，(sys) 为系统预设
 ```
 
-系统预设情境标签：`home work learning errands calls computer quick focus quote`；
+系统预设情境标签：`home work learning errands calls computer quick focus quote todoist`；
 优先级为独立字段（`high`/`medium`/`low`，经由 `!high`/`!medium`/`!low` 或 `--high`/`--medium`/`--low` 设置）。
 
 ## 执行与专注
