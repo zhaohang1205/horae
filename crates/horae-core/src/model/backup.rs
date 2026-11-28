@@ -9,9 +9,8 @@ use crate::model::task::ChecklistItem;
 pub const BACKUP_FORMAT: &str = "horae-backup";
 pub const BACKUP_VERSION: u32 = 2;
 
-/// Full-database backup: every `tasks` column the `Task` model maps, the
-/// append-only `task_events` timeline, the tag catalog + associations,
-/// settings, and the pomodoro state file.
+/// Full-database backup: tasks, event timeline, tags, settings, pomodoro state,
+/// and the optional Todoist cursor, identity map, and retry queue.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupData {
     pub format: String,
@@ -30,6 +29,64 @@ pub struct BackupData {
     /// Absent in backups from before the pomo state was included.
     #[serde(default)]
     pub pomodoro: Option<PomoState>,
+    /// Absent in backups created before optional Todoist sync was added.
+    #[serde(default)]
+    pub todoist_sync: Option<BackupTodoistSync>,
+    #[serde(default)]
+    pub todoist_links: Vec<BackupTodoistLink>,
+    #[serde(default)]
+    pub todoist_pending_commands: Vec<BackupTodoistPending>,
+    #[serde(default)]
+    pub todoist_conflicts: Vec<BackupTodoistConflict>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupTodoistSync {
+    pub sync_token: String,
+    pub completed_since_ms: i64,
+    pub updated_at: i64,
+    #[serde(default)]
+    pub last_sync_at: i64,
+    #[serde(default)]
+    pub last_imported: usize,
+    #[serde(default)]
+    pub last_updated: usize,
+    #[serde(default)]
+    pub last_pushed: usize,
+    #[serde(default)]
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupTodoistLink {
+    pub task_id: String,
+    pub todoist_id: String,
+    pub local_hash: String,
+    pub remote_hash: String,
+    pub remote_checked: bool,
+    pub remote_deleted: bool,
+    #[serde(default)]
+    pub out_of_scope: bool,
+    pub last_synced_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupTodoistPending {
+    pub command_uuid: String,
+    pub task_id: String,
+    pub temp_id: Option<String>,
+    pub command_json: String,
+    pub local_hash: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupTodoistConflict {
+    pub todoist_id: String,
+    pub task_id: String,
+    pub remote_json: String,
+    pub detected_at: i64,
+    pub resolution: Option<String>,
 }
 
 /// A task row with every live column of the `tasks` table. The dead columns
@@ -41,6 +98,8 @@ pub struct BackupTask {
     pub title: String,
     pub notes: String,
     pub status: String,
+    #[serde(default)]
+    pub priority: Option<String>,
     pub rrule: Option<String>,
     pub created_at: i64,
     pub clarified_at: Option<i64>,

@@ -844,3 +844,153 @@ fn cli_feedback_past_time_warning_and_recurring_done_hint() {
         "循环任务完成应提示推进到下一周期，实际: {done_stdout}"
     );
 }
+
+#[test]
+fn cli_todoist_status_and_conflict_resolution() {
+    let env = env();
+
+    // 1. 未配置时 status 应明确说明没有配置 Todoist。
+    let out = env.cmd().args(["todoist", "status"]).output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("not configured"),
+        "未配置时应提示未配置，实际: {stdout}"
+    );
+
+    // 2. 配置项目后 status 应显示项目、Token 环境变量与“从未同步”。
+    let out = env
+        .cmd()
+        .args([
+            "todoist",
+            "configure",
+            "--project-id",
+            "9999",
+            "--token-env",
+            "TODOIST_API_TOKEN",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let out = env.cmd().args(["todoist", "status"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("9999") && stdout.contains("TODOIST_API_TOKEN") && stdout.contains("never"),
+        "status 应显示项目与同步状态，实际: {stdout}"
+    );
+    assert!(
+        stdout.contains("Open conflicts: 0"),
+        "初次 status 不应有冲突，实际: {stdout}"
+    );
+
+    // 3. 造一个待处理冲突，确认 status 能列出它。
+    let task_id = capture(&env, &["Todoist conflict task @todoist"]);
+    let db = env._dir.path().join("horae.db");
+    {
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute(
+            "INSERT INTO task_todoist_links(task_id,todoist_id,local_hash,remote_hash,remote_checked,remote_deleted,out_of_scope,last_synced_at) VALUES (?1,'td-cli','h','h',0,0,0,0)",
+            [&task_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO todoist_conflicts(todoist_id,task_id,remote_json,detected_at,resolution) VALUES ('td-cli',?1,'{\"id\":\"td-cli\",\"content\":\"Remote title\"}',0,NULL)",
+            [&task_id],
+        )
+        .unwrap();
+    }
+    let out = env.cmd().args(["todoist", "status"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Open conflicts: 1") && stdout.contains("td-cli"),
+        "status 应列出待处理冲突，实际: {stdout}"
+    );
+
+    // 4. 未知 side 应报错且不静默接受。
+    let out = env
+        .cmd()
+        .args(["todoist", "resolve", "td-cli", "--side", "bogus"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "未知 side 应以非零码退出");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("unknown side"),
+        "未知 side 应给出明确错误，实际: {stderr}"
+    );
+
+    // 5. 裁决后冲突不再出现在待处理列表里。
+    let out = env
+        .cmd()
+        .args(["todoist", "resolve", "td-cli", "--side", "horae"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "裁决冲突应成功: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = env.cmd().args(["todoist", "status"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Open conflicts: 0"),
+        "裁决后不应再有待处理冲突，实际: {stdout}"
+    );
+
+    // 6. 裁决不存在的冲突应报错。
+    let out = env
+        .cmd()
+        .args(["todoist", "resolve", "missing", "--side", "todoist"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "裁决不存在的冲突应失败");
+}
+
+#[test]
+fn cli_todoist_configure_stores_the_optional_sync_policies() {
+    let env = env();
+
+    // 默认关闭两个可选行为。
+    let out = env
+        .cmd()
+        .args(["todoist", "configure", "--project-id", "1234"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let out = env.cmd().args(["todoist", "status"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Delete remote on archive: false")
+            && stdout.contains("Prefer Todoist on conflict: false"),
+        "默认应关闭两个可选行为，实际: {stdout}"
+    );
+
+    // 打开后 status 应反映出来。
+    let out = env
+        .cmd()
+        .args([
+            "todoist",
+            "configure",
+            "--project-id",
+            "1234",
+            "--delete-remote-on-archive",
+            "--prefer-remote-on-conflict",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let out = env.cmd().args(["todoist", "status"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Delete remote on archive: true")
+            && stdout.contains("Prefer Todoist on conflict: true"),
+        "开启后 status 应反映出来，实际: {stdout}"
+    );
+
+    // 配置应写入 config.json，重启后仍然保留。
+    let config = std::fs::read_to_string(env._dir.path().join("config.json")).unwrap();
+    assert!(
+        config.contains("delete_remote_on_archive") && config.contains("prefer_remote_on_conflict"),
+        "config.json 应记录两个开关，实际: {config}"
+    );
+}

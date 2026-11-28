@@ -163,6 +163,8 @@ Launch `horae` for the three-pane dashboard: **Guide** (left), **Task List** (ce
 
 In **Tags** (`9`): `c` creates a tag, `D` deletes one. In **Settings** (`M`): `n` creates a profile, `r` renames, `d` deletes, `s` sets default, `b` toggles sound effects, and `p` opens password settings.
 
+The **Todoist sync** section inside Settings: `o` configures the project and token environment variable, `y` syncs immediately, `c` views and resolves conflicts. The section shows the current project, whether the token is available, the result of the last sync, and the number of open conflicts. In the conflict list `j`/`k` select, `h` keeps the Horae version and pushes it back to Todoist, `t` keeps the Todoist version, and `Esc` closes the list. The token is only read from the environment variable and is never written to the config or the database; changing the project ID or variable name resets the local sync mappings (existing tasks and old Todoist tasks are left untouched).
+
 ### Feature Toggles (`F7`)
 
 Persisted per SQLite database:
@@ -194,6 +196,7 @@ Persisted per SQLite database:
 | `horae watch` | | Syncthing folder bridge + ntfy/Feishu push daemon (`--dir`, `--interval`, `--once`) |
 | `horae ntfy test` | | Send a test push via ntfy |
 | `horae feishu <test\|due\|summary\|listen\|doctor\|sync>` | | Feishu / Lark notifications, WebSocket bot, and Tasks v2 sync |
+| `horae todoist <configure\|sync\|status\|resolve>` | | Bidirectional sync with one Todoist project (`resolve` settles conflicts) |
 | `horae export` / `import <file>` | | Full JSON backup & restore (`--file`, `--replace`) |
 | `horae profile <list\|new\|rename\|rm\|set-default>` | | Manage isolated SQLite profiles |
 | `horae sound <status\|on\|off\|toggle\|test>` | `bell` | Acoustic chord sound effects |
@@ -313,6 +316,42 @@ Test with `horae ntfy test`, then keep `horae watch` running to receive pushes `
 
 Configure a `feishu` block in `config.json` for due-task cards and daily briefings. Run `horae feishu doctor` to verify credentials, `horae feishu listen` for a WebSocket long connection (capture tasks by messaging the bot and tap action cards from your phone without a public IP), and `horae feishu sync` to reconcile with Feishu Tasks v2.
 
+### Todoist
+
+Set the API token, then configure Todoist to use the Inbox automatically. You can also specify another project ID explicitly:
+
+```sh
+export TODOIST_API_TOKEN=<your-personal-api-token>
+horae todoist configure
+horae todoist sync
+```
+
+When `--project-id` is omitted, Horae uses the token to find the Todoist Inbox and saves its real project ID. To sync another project, use `horae todoist configure --project-id <TODOIST_PROJECT_ID>`. List project names and IDs with:
+
+```sh
+export TODOIST_API_TOKEN=<your-personal-api-token>
+curl -fsS https://api.todoist.com/api/v1/projects \
+  -H "Authorization: Bearer $TODOIST_API_TOKEN" |
+  jq -r '.results[] | "\(.name)\t\(.id)"'
+```
+
+Each `horae todoist sync` invocation performs one pass. Horae does not poll in the background. After completing a task on your phone, run the command again or press `y` in the TUI Settings view.
+
+Tasks already in the selected Todoist project are imported into Horae. To send an existing Horae task to Todoist, add the `todoist` tag (`@todoist` in quick-add). Linked tasks sync title, notes, due time, priority, labels, and completion. Todoist deletions archive the Horae task. Archiving a task in Horae leaves the Todoist task active; the sync command reports these archived links. This avoids deleting a Todoist parent together with its subtasks. Simultaneous edits are reported as conflicts and are not overwritten automatically. A Todoist task moved out of the selected project is paused but remains linked; moving it back resumes synchronization without creating a duplicate.
+
+Sync is scoped to one configured Todoist project: tasks in that project are imported, and Horae tasks tagged `@todoist` are pushed to that project. Tasks carrying a `todoist` label in other Todoist projects are not discovered automatically. When launching Horae from desktop shortcuts, the desktop session must also receive the token; Omarchy users can use the `horae-todoist-env` helper from horae-omarchy.
+
+`horae todoist status` also shows the result of the last sync and the list of open conflicts. Resolve a conflict with `horae todoist resolve <TODOIST_TASK_ID> --side horae` (keep the local task and push it back to Todoist) or `--side todoist` (keep the remote version). Once resolved, the conflict no longer blocks the next sync. The Settings view (`M`) has the same controls: `o` configures, `y` syncs, `c` lists and resolves conflicts.
+
+`configure` takes two optional switches (both off by default) that choose between two sync semantics:
+
+- `--delete-remote-on-archive`: **deletes the linked Todoist task when the Horae task is archived**. Off by default — with it off, archiving only affects the local side, the Todoist task stays, and the command reports how many archived links are still active in Todoist. With it on, deletion behaves the same way on both sides, but note that deleting a Todoist parent also removes its subtasks.
+- `--prefer-remote-on-conflict`: **resolves a task edited on both sides in favour of Todoist**. Off by default — with it off, the sync stops and reports a conflict for you to settle manually; with it on, the Todoist version overwrites the local one and no conflict is left pending.
+
+In the Settings Todoist setup popup, `Tab` moves to these two options and `Space` toggles them.
+
+Recurring tasks are skipped because the two products have different recurrence models. Horae GTD states other than Done map to Todoist's active state. Todoist's completed-task endpoint only accepts date windows up to three months, so run sync at least once within that period to reconcile completions that happened while offline. `horae purge` permanently removes local history and therefore cannot propagate a deletion to Todoist.
+
 ---
 
 ## 7. Security, Profiles & Backup
@@ -348,7 +387,7 @@ horae import --replace ~/horae-backup.json
 | Path | Contents |
 | --- | --- |
 | `~/.config/horae/horae.db` | Default SQLite database |
-| `~/.config/horae/config.json` | Profiles & ntfy/Feishu integration config |
+| `~/.config/horae/config.json` | Profiles & ntfy/Feishu/Todoist integration config |
 | `~/.config/horae/pomo.json` | Pomodoro runtime state |
 | `~/.config/horae/sync/` | Syncthing phone bridge directory |
 

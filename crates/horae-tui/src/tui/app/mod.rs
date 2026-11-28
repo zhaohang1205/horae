@@ -11,6 +11,7 @@ pub(crate) mod completion;
 mod data;
 mod ops;
 mod profiles;
+mod todoist;
 pub(crate) mod voice;
 pub(crate) use voice::VoiceRecording;
 
@@ -175,6 +176,17 @@ pub(crate) enum Pane {
 pub(crate) enum Popup {
     /// Prompt to enter Pomodoro mode for a scheduled task
     TaskDueNow(String, String), // task_id, task_title
+    TodoistConfig {
+        project_id: String,
+        token_env: String,
+        focus: usize,
+        error: Option<String>,
+        delete_remote_on_archive: bool,
+        prefer_remote_on_conflict: bool,
+    },
+    TodoistConflicts {
+        selected: usize,
+    },
     /// Feature toggles modal (current selected index)
     ModuleToggles(usize),
     /// Password setup modal (first password input or confirm input)
@@ -376,6 +388,7 @@ pub(crate) struct App<'a> {
     pub(crate) icon_style: crate::tui::icons::IconStyle,
     /// 当前会话使用的 profile 名（用于设置页标记与显示）。
     pub(crate) profile_name: String,
+    pub(crate) todoist_panel: todoist::TodoistPanel,
     /// 设置页待删除的 profile 名。
     pub(crate) pending_profile_delete: Option<String>,
     /// 检查单管理（ChecklistFocus）模式下的光标位置（指向当前任务的某一项）。
@@ -563,6 +576,7 @@ impl<'a> App<'a> {
             modules,
             icon_style,
             profile_name: String::new(),
+            todoist_panel: todoist::TodoistPanel::default(),
             pending_profile_delete: None,
             checklist_cursor: None,
             start_in_capture,

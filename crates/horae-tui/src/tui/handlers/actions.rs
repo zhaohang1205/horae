@@ -68,6 +68,72 @@ impl<'a> App<'a> {
                     });
                 }
             }
+            KeyCode::Char('o') | KeyCode::Char('O') => {
+                let (project_id, token_env, delete_remote_on_archive, prefer_remote_on_conflict) = self
+                    .todoist_panel
+                    .config
+                    .as_ref()
+                    .map(|config| {
+                        (
+                            config.project_id.clone(),
+                            config.token_env.clone(),
+                            config.delete_remote_on_archive,
+                            config.prefer_remote_on_conflict,
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        (
+                            String::new(),
+                            "TODOIST_API_TOKEN".to_string(),
+                            false,
+                            false,
+                        )
+                    });
+                self.popup = Some(crate::tui::app::Popup::TodoistConfig {
+                    project_id,
+                    token_env,
+                    focus: 0,
+                    error: None,
+                    delete_remote_on_archive,
+                    prefer_remote_on_conflict,
+                });
+            }
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                match self.run_todoist_sync() {
+                    Ok(stats) => self.flash(
+                        ToastKind::Success,
+                        tr!(
+                            self.lang,
+                            "Todoist 同步完成：导入 {}、更新 {}、推送 {}、跳过循环任务 {}、删除远端 {}。",
+                            "Todoist sync complete: {} imported, {} updated, {} pushed, {} recurring skipped, {} remote deleted.",
+                            stats.imported,
+                            stats.updated,
+                            stats.pushed,
+                            stats.recurring_skipped,
+                            stats.remote_deleted
+                        ),
+                    ),
+                    Err(error) => self.flash(
+                        ToastKind::Error,
+                        tr!(self.lang, "Todoist 同步失败：{}", "Todoist sync failed: {}", error),
+                    ),
+                }
+            }
+            KeyCode::Char('c') => {
+                if let Err(error) = self.refresh_todoist_panel() {
+                    self.flash(
+                        ToastKind::Error,
+                        tr!(self.lang, "读取 Todoist 冲突失败：{}", "Could not load Todoist conflicts: {}", error),
+                    );
+                } else if self.todoist_panel.conflicts.is_empty() {
+                    self.flash(
+                        ToastKind::Info,
+                        tr!(self.lang, "当前没有待处理冲突。", "No unresolved Todoist conflicts."),
+                    );
+                } else {
+                    self.popup = Some(crate::tui::app::Popup::TodoistConflicts { selected: 0 });
+                }
+            }
             _ => return Ok(false),
         }
         Ok(true)

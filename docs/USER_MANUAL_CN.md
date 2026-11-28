@@ -163,6 +163,8 @@ Token 顺序任意。自动兼容中文全角标点（`＠ ～ ＊ ！ ［ ］ �
 
 在**标签库**（`9`）按 `c` 新建标签、`D` 删除标签；在**设置页**（`M`）按 `n` 新建 Profile、`r` 重命名、`d` 删除、`s` 设为默认、`b` 开关提示音效、`p` 配置密码保护。
 
+设置页内的 **Todoist 双向同步**区块：`o` 配置项目与 Token 环境变量名、`y` 立即同步、`c` 查看并处理冲突。区块会显示当前项目、Token 是否可用、最近一次同步结果与待处理冲突数。冲突列表中 `j`/`k` 选择，`h` 保留 Horae 版本并回推 Todoist，`t` 采用 Todoist 版本，`Esc` 关闭。Token 只从环境变量读取，不会写入配置或数据库；修改项目 ID 或变量名会重置本地同步映射（已有任务与旧 Todoist 任务不受影响）。
+
 ### 模块开关（`F7`）
 
 按当前 SQLite 数据库持久化：可单独显隐侧栏模块（开屏页、参考资料、已完成、归档箱、标签库、金句、周回顾、设置），切换图标风格（`Nerd Font` / `ASCII`）、启动即快速录入、补全风格（语法参考 / 极速幽灵字）、纯净无干扰录入（默认开）、闪念录入即退出、农历节气提醒、提示音效与密码保护模式。
@@ -193,6 +195,7 @@ Token 顺序任意。自动兼容中文全角标点（`＠ ～ ＊ ！ ［ ］ �
 | `horae watch` | | Syncthing 手机桥 + ntfy/飞书推送守护进程（`--dir`、`--interval`、`--once`） |
 | `horae ntfy test` | | 发送测试推送到 ntfy |
 | `horae feishu <test\|due\|summary\|listen\|doctor\|sync>` | | 飞书 / Lark 卡片推送、WebSocket 机器人与 Tasks v2 双向同步 |
+| `horae todoist <configure\|sync\|status\|resolve>` | | 与一个 Todoist 项目双向同步（`resolve` 裁决冲突） |
 | `horae export` / `import <文件>` | | JSON 全量导出与导入（`--file`、`--replace`） |
 | `horae profile <list\|new\|rename\|rm\|set-default>` | | 管理多套独立 SQLite 数据集 |
 | `horae sound <status\|on\|off\|toggle\|test>` | `bell` | 声学建模和弦音效管理 |
@@ -312,6 +315,49 @@ omarchy plugin add https://github.com/zhaohang1205/horae_for_omarchy_shell.git -
 
 在 `config.json` 中配置 `feishu` 节点后，`horae watch` 会推送到期卡片与每日简报；执行 `horae feishu doctor` 检查配置连通性，`horae feishu listen` 可建立无需公网 IP 的 WebSocket 长连接，直接在手机飞书私聊机器人记任务、点卡片完成或改期；`horae feishu sync` 与飞书 Tasks v2 双向对账。
 
+### Todoist
+
+设置 API Token 后，可以直接配置并自动使用 Todoist Inbox。也可显式指定其他项目 ID：
+
+```sh
+export TODOIST_API_TOKEN=<你的个人 API Token>
+horae todoist configure
+horae todoist sync
+```
+
+省略 `--project-id` 时，Horae 会通过 Token 查找 Todoist 的 Inbox 项目并保存其真实 ID。要同步其他项目，可使用 `horae todoist configure --project-id <TODOIST_PROJECT_ID>`。可用以下命令列出项目名和 ID：
+
+```sh
+export TODOIST_API_TOKEN=<你的个人 API Token>
+curl -fsS https://api.todoist.com/api/v1/projects \
+  -H "Authorization: Bearer $TODOIST_API_TOKEN" |
+  jq -r '.results[] | "\(.name)\t\(.id)"'
+```
+
+每次执行 `horae todoist sync` 只同步一轮；Horae 不会在后台定时轮询。手机端完成任务后，需在终端再次运行该命令，或在 TUI 设置页按 `y`。
+
+指定项目中已有的任务会导入 Horae。要把 Horae 中的任务推送到 Todoist，给它添加 `todoist` 标签（快速录入可写 `@todoist`）。关联任务同步标题、备注、截止时间、优先级、标签和完成状态；Todoist 删除任务会归档 Horae 任务。Horae 归档任务会保留 Todoist 侧任务，命令会报告仍在 Todoist 中活动的已归档关联任务。这是为了避免删除 Todoist 父任务时连带删除其子任务。两端同时修改同一任务时会报告冲突，不会自动覆盖。Todoist 任务移出指定项目后会暂停同步但保留关联；移回后可继续同步，避免重复导入。
+
+同步范围是配置的单个 Todoist 项目：该项目中的任务会导入 Horae；Horae 中带 `@todoist` 的任务会推送到该项目。不会自动扫描 Todoist 其他项目中带 `todoist` 标签的任务。桌面快捷键启动 Horae 时，Token 也必须能被桌面会话读取；Omarchy 用户可使用 horae-omarchy 提供的 `horae-todoist-env` 配置启动环境。
+
+重复任务因两端的循环语义不同会跳过；Horae 的 Done 以外状态都映射为 Todoist 的进行中。Todoist 已完成任务接口一次最多查询三个月范围，因此离线期间的完成状态应在三个月内至少同步一次。`horae purge` 会永久删除本地历史，无法将删除同步到 Todoist。
+
+`horae todoist status` 还会显示最近一次同步结果与待处理冲突列表。用
+`horae todoist resolve <TODOIST_TASK_ID> --side horae`（保留本地任务并回推 Todoist）或
+`--side todoist`（采用远端版本）裁决冲突；裁决后冲突不再阻塞下一次同步。设置页（`M`）
+提供同样的入口：`o` 配置、`y` 同步、`c` 查看并处理冲突。
+
+`configure` 还有两个可选开关（默认关闭），用来在两种同步语义之间选择：
+
+- `--delete-remote-on-archive`：**在 Horae 归档任务时，同时删除关联的 Todoist 任务**。
+  默认关闭——关闭时归档只影响本地，Todoist 任务保持不变，命令会报告仍活跃的已归档关联
+  数量。开启后两端删除行为一致，但要注意删除 Todoist 父任务会连带删除其子任务。
+- `--prefer-remote-on-conflict`：**两端同时修改同一任务时，以 Todoist 为准**。默认关闭——
+  关闭时同步会暂停并报告冲突，等你手动裁决；开启后直接采用 Todoist 的版本覆盖本地，
+  不再产生待处理冲突。
+
+设置页的 Todoist 配置弹层里用 `Tab` 切换到这两项，按 `空格` 开关。
+
 ---
 
 ## 7. 安全加密、多数据集与备份
@@ -347,7 +393,7 @@ horae import --replace ~/horae-backup.json
 | 路径 | 内容 |
 | --- | --- |
 | `~/.config/horae/horae.db` | 默认 SQLite 数据库 |
-| `~/.config/horae/config.json` | Profile 与集成（ntfy / 飞书）配置 |
+| `~/.config/horae/config.json` | Profile 与集成（ntfy / 飞书 / Todoist）配置 |
 | `~/.config/horae/pomo.json` | 番茄钟运行时状态 |
 | `~/.config/horae/sync/` | Syncthing 手机桥同步目录 |
 

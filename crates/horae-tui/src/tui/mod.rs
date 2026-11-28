@@ -138,6 +138,19 @@ pub fn run_with_mode(
                 .map(|c| c.default_profile)
         })
         .unwrap_or_default();
+    if !app.locked {
+        if let Err(error) = app.refresh_todoist_panel() {
+            app.flash(
+                crate::tui::app::ToastKind::Warning,
+                tr!(
+                    app.lang,
+                    "Todoist 状态加载失败: {}",
+                    "Could not load Todoist status: {}",
+                    error
+                ),
+            );
+        }
+    }
     // 闪念模式或密码锁定模式下跳过开屏页，实现极速就绪与数据安全
     if app.modules.splash && launch_mode != LaunchMode::Flash && !app.locked {
         if let Ok((new_lang, new_theme, new_auto)) = splash::show_splash(

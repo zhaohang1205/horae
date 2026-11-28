@@ -27,6 +27,39 @@ pub struct Profile {
     /// 飞书消息与提醒推送配置（可选；未配置则 watch 的 feishu stage 为空操作）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feishu: Option<FeishuConfig>,
+    /// Optional Todoist synchronization settings. The token is read from an
+    /// environment variable and is never written to config.json.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub todoist: Option<TodoistConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TodoistConfig {
+    pub project_id: String,
+    #[serde(default = "default_todoist_token_env")]
+    pub token_env: String,
+    /// When enabled, archiving a task in Horae also deletes the linked Todoist
+    /// task. Off by default: a deleted Todoist parent would otherwise take its
+    /// subtasks with it.
+    #[serde(default)]
+    pub delete_remote_on_archive: bool,
+    /// When enabled, a task edited on both sides is resolved in favour of
+    /// Todoist instead of stopping the sync for manual review.
+    #[serde(default)]
+    pub prefer_remote_on_conflict: bool,
+}
+
+fn default_todoist_token_env() -> String {
+    "TODOIST_API_TOKEN".to_string()
+}
+
+impl TodoistConfig {
+    pub fn resolve_token(&self) -> Option<String> {
+        std::env::var(self.token_env.trim())
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
 }
 
 /// ntfy 推送配置：桌面 `watch` 守护进程在任务到点前（默认 10 分钟）向手机发
@@ -307,6 +340,7 @@ impl Default for Config {
                 cloud: None,
                 ntfy: None,
                 feishu: None,
+                todoist: None,
             },
         );
         Self {
@@ -346,6 +380,7 @@ mod tests {
                 cloud: None,
                 ntfy: None,
                 feishu: None,
+                todoist: None,
             },
         );
         cfg.upsert_profile(
@@ -358,6 +393,7 @@ mod tests {
                 }),
                 ntfy: None,
                 feishu: None,
+                todoist: None,
             },
         );
         cfg.set_default("work").unwrap();
@@ -397,6 +433,7 @@ mod tests {
                     cloud: None,
                     ntfy: None,
                     feishu: None,
+                    todoist: None,
                 },
             );
             let path = config.db_path(config.profile("p").unwrap());
@@ -448,5 +485,62 @@ mod tests {
                 "config file must be 0600"
             );
         });
+    }
+}
+
+#[cfg(test)]
+mod todoist_config_tests {
+    use super::*;
+
+    /// 旧版 config.json 里没有这两个开关，加载时必须用默认值而不是报错。
+    #[test]
+    fn legacy_todoist_config_loads_with_both_policies_off() {
+        let json = r#"{
+            "default_profile": "default",
+            "profiles": {
+                "default": {
+                    "db": "horae.db",
+                    "todoist": {
+                        "project_id": "1234",
+                        "token_env": "TODOIST_API_TOKEN"
+                    }
+                }
+            }
+        }"#;
+        let cfg: Config = serde_json::from_str(json).unwrap();
+        let todoist = cfg.profile("default").unwrap().todoist.clone().unwrap();
+        assert_eq!(todoist.project_id, "1234");
+        assert_eq!(todoist.token_env, "TODOIST_API_TOKEN");
+        assert!(
+            !todoist.delete_remote_on_archive,
+            "旧配置应默认不删除远端任务"
+        );
+        assert!(
+            !todoist.prefer_remote_on_conflict,
+            "旧配置应默认不以 Todoist 为准"
+        );
+    }
+
+    /// 显式写出两个开关时必须按值加载。
+    #[test]
+    fn explicit_todoist_policies_are_loaded() {
+        let json = r#"{
+            "default_profile": "default",
+            "profiles": {
+                "default": {
+                    "db": "horae.db",
+                    "todoist": {
+                        "project_id": "1234",
+                        "token_env": "TODOIST_API_TOKEN",
+                        "delete_remote_on_archive": true,
+                        "prefer_remote_on_conflict": true
+                    }
+                }
+            }
+        }"#;
+        let cfg: Config = serde_json::from_str(json).unwrap();
+        let todoist = cfg.profile("default").unwrap().todoist.clone().unwrap();
+        assert!(todoist.delete_remote_on_archive);
+        assert!(todoist.prefer_remote_on_conflict);
     }
 }

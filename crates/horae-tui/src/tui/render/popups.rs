@@ -252,6 +252,212 @@ impl<'a> App<'a> {
                     area,
                 );
             }
+            crate::tui::app::Popup::TodoistConfig {
+                project_id,
+                token_env,
+                focus,
+                error,
+                delete_remote_on_archive,
+                prefer_remote_on_conflict,
+            } => {
+                let area = self.centered_rect(68, 19, size);
+                f.render_widget(ratatui::widgets::Clear, area);
+                let block = Block::default()
+                    .title(tr!(
+                        self.lang,
+                        " Todoist 项目配置 ",
+                        " Todoist Project Setup "
+                    ))
+                    .borders(Borders::ALL)
+                    .border_set(border::ROUNDED)
+                    .border_style(Style::default().fg(self.theme.accent));
+                let field_style = |selected: bool| {
+                    if selected {
+                        Style::default()
+                            .fg(self.theme.accent)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(self.theme.fg)
+                    }
+                };
+                let mut lines = vec![
+                    Line::from(tr!(
+                        self.lang,
+                        "项目 ID 留空会自动选择 Inbox。",
+                        "Blank Project ID selects Inbox automatically."
+                    )),
+                    Line::from(tr!(
+                        self.lang,
+                        "Token 只从环境变量读取，不会保存。",
+                        "Token is read from the environment and never stored."
+                    )),
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled(
+                            tr!(self.lang, "项目 ID（可选）：", "Project ID (optional): "),
+                            Style::default().fg(self.theme.text_dim),
+                        ),
+                        Span::styled(project_id.clone(), field_style(*focus == 0)),
+                    ]),
+                    Line::from(vec![
+                        Span::styled(
+                            tr!(
+                                self.lang,
+                                "Token 环境变量：",
+                                "Token environment variable: "
+                            ),
+                            Style::default().fg(self.theme.text_dim),
+                        ),
+                        Span::styled(token_env.clone(), field_style(*focus == 1)),
+                    ]),
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled(
+                            tr!(
+                                self.lang,
+                                "归档时同步删除远端：",
+                                "Delete remote on archive: "
+                            ),
+                            Style::default().fg(self.theme.text_dim),
+                        ),
+                        Span::styled(
+                            if *delete_remote_on_archive {
+                                tr!(self.lang, "开", "on")
+                            } else {
+                                tr!(self.lang, "关", "off")
+                            },
+                            field_style(*focus == 2),
+                        ),
+                    ]),
+                    Line::from(vec![
+                        Span::styled(
+                            tr!(
+                                self.lang,
+                                "冲突时以 Todoist 为准：",
+                                "Prefer Todoist on conflict: "
+                            ),
+                            Style::default().fg(self.theme.text_dim),
+                        ),
+                        Span::styled(
+                            if *prefer_remote_on_conflict {
+                                tr!(self.lang, "开", "on")
+                            } else {
+                                tr!(self.lang, "关", "off")
+                            },
+                            field_style(*focus == 3),
+                        ),
+                    ]),
+                    Line::from(""),
+                    Line::from(tr!(
+                        self.lang,
+                        "先在 shell 中设置 Token 环境变量，再按 y 执行同步。",
+                        "Set the token in your shell, then press y in Settings to sync."
+                    )),
+                ];
+                if let Some(error) = error {
+                    lines.push(Line::from(Span::styled(
+                        format!("✗ {error}"),
+                        Style::default().fg(self.theme.text_urgent),
+                    )));
+                }
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    tr!(
+                        self.lang,
+                        "[Tab] 切换字段  [空格] 切换开关  [Enter] 下一项/保存  [Esc] 取消",
+                        "[Tab] Switch field  [Space] Toggle  [Enter] Next/Save  [Esc] Cancel"
+                    ),
+                    Style::default().fg(self.theme.text_dim),
+                )));
+                f.render_widget(Paragraph::new(lines).block(block), area);
+            }
+            crate::tui::app::Popup::TodoistConflicts { selected } => {
+                let height = size.height.saturating_sub(6).max(12);
+                let area = self.centered_rect(76, height, size);
+                f.render_widget(ratatui::widgets::Clear, area);
+                let conflicts = &self.todoist_panel.conflicts;
+                let title = tr!(
+                    self.lang,
+                    " 待处理的同步冲突（{}） ",
+                    " Unresolved Sync Conflicts ({}) ",
+                    conflicts.len()
+                );
+                let block = Block::default()
+                    .title(title)
+                    .borders(Borders::ALL)
+                    .border_set(border::ROUNDED)
+                    .border_style(Style::default().fg(self.theme.text_urgent));
+                let mut lines = Vec::new();
+                if conflicts.is_empty() {
+                    lines.push(Line::from(tr!(
+                        self.lang,
+                        "当前没有待处理冲突。",
+                        "No unresolved conflicts."
+                    )));
+                } else {
+                    let start = selected.saturating_sub(2);
+                    let end = (start + 5).min(conflicts.len());
+                    for (idx, conflict) in conflicts.iter().enumerate().take(end).skip(start) {
+                        let active = idx == *selected;
+                        let style = if active {
+                            Style::default()
+                                .fg(self.theme.bg)
+                                .bg(self.theme.accent)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(self.theme.fg)
+                        };
+                        lines.push(Line::from(Span::styled(
+                            format!(
+                                "{} {}",
+                                if active { "›" } else { " " },
+                                conflict.local_title
+                            ),
+                            style,
+                        )));
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                tr!(self.lang, "  Horae: ", "  Horae: "),
+                                Style::default().fg(self.theme.text_dim),
+                            ),
+                            Span::styled(
+                                conflict.local_title.clone(),
+                                Style::default().fg(self.theme.fg),
+                            ),
+                        ]));
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                tr!(self.lang, "  Todoist: ", "  Todoist: "),
+                                Style::default().fg(self.theme.text_dim),
+                            ),
+                            Span::styled(
+                                if conflict.remote_deleted {
+                                    tr!(self.lang, "远端任务已删除", "Task deleted in Todoist")
+                                        .to_string()
+                                } else {
+                                    conflict.remote_title.clone()
+                                },
+                                Style::default().fg(self.theme.text_success),
+                            ),
+                        ]));
+                        lines.push(Line::from(""));
+                    }
+                    lines.push(Line::from(Span::styled(
+                        tr!(
+                            self.lang,
+                            "[h] 保留 Horae 并推送  [t] 采用 Todoist  [j/k] 选择  [Esc] 关闭",
+                            "[h] Keep Horae and push  [t] Keep Todoist  [j/k] Select  [Esc] Close"
+                        ),
+                        Style::default().fg(self.theme.text_dim),
+                    )));
+                }
+                f.render_widget(
+                    Paragraph::new(lines)
+                        .block(block)
+                        .wrap(ratatui::widgets::Wrap { trim: true }),
+                    area,
+                );
+            }
             crate::tui::app::Popup::PasswordSet {
                 is_confirm,
                 input,

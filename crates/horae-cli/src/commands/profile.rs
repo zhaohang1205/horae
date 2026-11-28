@@ -61,6 +61,7 @@ fn new(config: &mut Config, name: &str, db: Option<&str>) -> anyhow::Result<()> 
             cloud: None,
             ntfy: None,
             feishu: None,
+            todoist: None,
         },
     );
     config.save()?;
@@ -127,6 +128,7 @@ mod tests {
                 }),
                 ntfy: None,
                 feishu: None,
+                todoist: None,
             },
         );
         assert!(config.profile("work").unwrap().cloud.is_some());
@@ -153,6 +155,7 @@ mod tests {
                     cloud: None,
                     ntfy: None,
                     feishu: None,
+                    todoist: None,
                 },
             );
             let path = config.db_path(config.profile("p").unwrap());

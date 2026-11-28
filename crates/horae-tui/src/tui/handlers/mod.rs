@@ -10,6 +10,7 @@
 //! 各子模块通过 `pub(super)` 方法供其调用。
 
 use super::app::{App, Mode, ToastKind, View};
+mod todoist;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use horae_core::repo::tasks;
@@ -258,6 +259,10 @@ impl<'a> AppHandlers for App<'a> {
                 }
                 // 其余按键（含 Esc）直接关闭到期提醒：popup 已被 take 走。
                 crate::tui::app::Popup::TaskDueNow(_, _) => {}
+                popup @ crate::tui::app::Popup::TodoistConfig { .. }
+                | popup @ crate::tui::app::Popup::TodoistConflicts { .. } => {
+                    self.handle_todoist_popup(key, popup)?;
+                }
                 crate::tui::app::Popup::PasswordSet {
                     mut is_confirm,
                     mut input,

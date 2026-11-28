@@ -396,6 +396,14 @@ pub enum Command {
         #[command(subcommand)]
         action: FeishuAction,
     },
+    /// Synchronize tasks with Todoist (requires a Todoist project and API token environment variable)
+    #[command(
+        after_help = "Examples:\n  TODOIST_API_TOKEN=... horae todoist configure  # auto-select Inbox\n  horae todoist configure --project-id <ID>\n  TODOIST_API_TOKEN=... horae todoist sync\n  horae todoist status"
+    )]
+    Todoist {
+        #[command(subcommand)]
+        action: TodoistAction,
+    },
     /// Watch a Syncthing-shared folder (phone <-> computer bridge)
     #[command(
         long_about = "Watch a folder synced with the phone (e.g. via Syncthing) and reconcile \
@@ -543,6 +551,39 @@ pub enum FeishuAction {
         /// Only pull remote tasks from Feishu
         #[arg(long)]
         pull: bool,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum TodoistAction {
+    /// Configure the dedicated Todoist project used for synchronization
+    Configure {
+        #[arg(
+            long,
+            value_name = "ID",
+            help = "Project ID (defaults to Inbox when omitted)"
+        )]
+        project_id: Option<String>,
+        #[arg(long, default_value = "TODOIST_API_TOKEN", value_name = "ENV")]
+        token_env: String,
+        /// Also delete the linked Todoist task when a Horae task is archived
+        #[arg(long)]
+        delete_remote_on_archive: bool,
+        /// Resolve simultaneous edits in favour of Todoist instead of stopping for review
+        #[arg(long)]
+        prefer_remote_on_conflict: bool,
+    },
+    /// Run one bidirectional synchronization pass
+    Sync,
+    /// Show Todoist integration configuration without revealing credentials
+    Status,
+    /// Resolve a pending sync conflict by keeping either side
+    Resolve {
+        /// Todoist task id of the conflict to resolve
+        todoist_id: String,
+        /// Which side wins: `horae` keeps the local task, `todoist` keeps the remote task
+        #[arg(long, value_name = "SIDE")]
+        side: String,
     },
 }
 

@@ -109,7 +109,7 @@ horae untag <id> focus
 horae tags                # 标签库：context 组 / priority 组，(sys) 为系统预设
 ```
 
-系统预设情境标签：`home work learning errands calls computer quick focus quote`；
+系统预设情境标签：`home work learning errands calls computer quick focus quote todoist`；
 优先级为独立字段（`high`/`medium`/`low`，经由 `!high`/`!medium`/`!low` 或 `--high`/`--medium`/`--low` 设置）。
 
 ## 执行与专注
@@ -185,6 +185,34 @@ horae profile rm prod1                 # 仅移出配置，数据库文件保留
 horae profile set-default work
 horae --profile work capture "写周报"   # 临时切库
 ```
+
+### todoist（可选双向同步）
+
+```sh
+horae todoist configure --project-id <PROJECT_ID> [--token-env TODOIST_API_TOKEN]
+horae todoist sync
+horae todoist status
+horae todoist resolve <TODOIST_TASK_ID> --side horae|todoist
+```
+
+可选开关（默认关闭）：
+
+- `--delete-remote-on-archive` 归档本地任务时同时删除关联的 Todoist 任务。
+  关闭时归档只影响本地，Todoist 任务保留，命令报告仍活跃的已归档关联数。
+- `--prefer-remote-on-conflict` 两端同时修改同一任务时以 Todoist 为准。
+  关闭时同步暂停并报冲突，等人工裁决。
+
+Token 从指定环境变量读取，不写入 Horae 配置。配置一个专用 Todoist 项目后，该项目
+中的任务会导入当前 profile；Horae 任务需添加 `todoist` 标签才会推送。同步包括标题、
+备注、截止时间、优先级、标签和完成状态。循环任务会跳过；同时编辑会报告冲突并保留
+双方数据。Todoist 删除会归档 Horae 任务；Horae 归档会保留 Todoist 任务并在状态中报告。
+任务移出配置项目后暂停同步，但保留关联；移回后可继续同步，避免重复导入。
+
+`horae todoist status` 还会显示最近一次同步结果与待处理冲突列表。冲突用
+`horae todoist resolve <TODOIST_TASK_ID> --side horae`（保留本地任务并回推 Todoist）或
+`--side todoist`（采用远端版本）裁决；裁决后冲突不再阻塞下一次同步。
+
+TUI 设置页（`M`）内也有 Todoist 区块：`o` 配置、`y` 立即同步、`c` 查看并处理冲突。
 
 配置存于 `~/.config/horae/config.json`；切换只影响后续命令，不影响已开会话。
 

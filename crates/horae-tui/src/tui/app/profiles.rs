@@ -32,6 +32,7 @@ impl<'a> App<'a> {
                 cloud: None,
                 ntfy: None,
                 feishu: None,
+                todoist: None,
             },
         );
         if config.save().is_err() {
