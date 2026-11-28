@@ -7011,6 +7011,9 @@ fn test_todoist_config_popup_toggles_the_two_optional_policies() {
 
     // 1. 打开 Todoist 配置弹层。
     app.handle_key(key('o')).unwrap();
+    if let Some(crate::tui::app::Popup::TodoistConfig { token_env, .. }) = &mut app.popup {
+        *token_env = "HORAE_TEST_TODOIST_TOKEN_UNSET".to_string();
+    }
     match &app.popup {
         Some(crate::tui::app::Popup::TodoistConfig {
             delete_remote_on_archive,
@@ -7052,11 +7055,16 @@ fn test_todoist_config_popup_toggles_the_two_optional_policies() {
         other => panic!("应仍打开 Todoist 配置弹层，实际: {other:?}"),
     }
 
-    // 4. 回车保存：字段留空会报错，两个开关状态应保持。
+    // 4. 项目 ID 可留空，但没有 Token 时无法查询 Inbox。
     app.handle_key(kc(KeyCode::Enter)).unwrap();
     match &app.popup {
         Some(crate::tui::app::Popup::TodoistConfig { error, .. }) => {
-            assert!(error.is_some(), "项目 ID 为空时应显示错误");
+            assert!(
+                error
+                    .as_deref()
+                    .is_some_and(|message| message.contains("HORAE_TEST_TODOIST_TOKEN_UNSET")),
+                "缺少 Token 时应提示环境变量名"
+            );
         }
         other => panic!("应仍打开 Todoist 配置弹层，实际: {other:?}"),
     }

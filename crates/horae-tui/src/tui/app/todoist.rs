@@ -34,9 +34,20 @@ impl<'a> super::App<'a> {
     ) -> Result<()> {
         let project_id = project_id.trim();
         let token_env = token_env.trim();
-        if project_id.is_empty() || token_env.is_empty() {
-            bail!("project id and token environment variable must not be empty");
+        if token_env.is_empty() {
+            bail!("token environment variable must not be empty");
         }
+        let project_id = if project_id.is_empty() {
+            let token = std::env::var(token_env)
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("{token_env} is required to discover the Todoist Inbox project")
+                })?;
+            todoist::discover_inbox_project_id(&token)?
+        } else {
+            project_id.to_string()
+        };
         let mut config = Config::load()?;
         let (name, profile) = config.resolve_profile(Some(&self.profile_name))?;
         let reset_sync = profile
@@ -45,7 +56,7 @@ impl<'a> super::App<'a> {
             .is_some_and(|old| old.project_id != project_id || old.token_env != token_env);
         let mut updated = profile.clone();
         updated.todoist = Some(TodoistConfig {
-            project_id: project_id.to_string(),
+            project_id,
             token_env: token_env.to_string(),
             delete_remote_on_archive,
             prefer_remote_on_conflict,

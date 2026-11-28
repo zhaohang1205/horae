@@ -283,13 +283,18 @@ impl<'a> App<'a> {
                 let mut lines = vec![
                     Line::from(tr!(
                         self.lang,
-                        "选择要同步的 Todoist 项目。个人 Token 不会写入 Horae。",
-                        "Choose a Todoist project. Your personal token is never stored by Horae."
+                        "项目 ID 留空会自动选择 Inbox。",
+                        "Blank Project ID selects Inbox automatically."
+                    )),
+                    Line::from(tr!(
+                        self.lang,
+                        "Token 只从环境变量读取，不会保存。",
+                        "Token is read from the environment and never stored."
                     )),
                     Line::from(""),
                     Line::from(vec![
                         Span::styled(
-                            tr!(self.lang, "项目 ID：", "Project ID: "),
+                            tr!(self.lang, "项目 ID（可选）：", "Project ID (optional): "),
                             Style::default().fg(self.theme.text_dim),
                         ),
                         Span::styled(project_id.clone(), field_style(*focus == 0)),

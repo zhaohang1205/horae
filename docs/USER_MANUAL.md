@@ -318,15 +318,28 @@ Configure a `feishu` block in `config.json` for due-task cards and daily briefin
 
 ### Todoist
 
-Choose a dedicated Todoist project, then configure its ID and the environment variable name used for the API token:
+Set the API token, then configure Todoist to use the Inbox automatically. You can also specify another project ID explicitly:
 
 ```sh
-horae todoist configure --project-id <TODOIST_PROJECT_ID> --token-env TODOIST_API_TOKEN
 export TODOIST_API_TOKEN=<your-personal-api-token>
+horae todoist configure
 horae todoist sync
 ```
 
+When `--project-id` is omitted, Horae uses the token to find the Todoist Inbox and saves its real project ID. To sync another project, use `horae todoist configure --project-id <TODOIST_PROJECT_ID>`. List project names and IDs with:
+
+```sh
+export TODOIST_API_TOKEN=<your-personal-api-token>
+curl -fsS https://api.todoist.com/api/v1/projects \
+  -H "Authorization: Bearer $TODOIST_API_TOKEN" |
+  jq -r '.results[] | "\(.name)\t\(.id)"'
+```
+
+Each `horae todoist sync` invocation performs one pass. Horae does not poll in the background. After completing a task on your phone, run the command again or press `y` in the TUI Settings view.
+
 Tasks already in the selected Todoist project are imported into Horae. To send an existing Horae task to Todoist, add the `todoist` tag (`@todoist` in quick-add). Linked tasks sync title, notes, due time, priority, labels, and completion. Todoist deletions archive the Horae task. Archiving a task in Horae leaves the Todoist task active; the sync command reports these archived links. This avoids deleting a Todoist parent together with its subtasks. Simultaneous edits are reported as conflicts and are not overwritten automatically. A Todoist task moved out of the selected project is paused but remains linked; moving it back resumes synchronization without creating a duplicate.
+
+Sync is scoped to one configured Todoist project: tasks in that project are imported, and Horae tasks tagged `@todoist` are pushed to that project. Tasks carrying a `todoist` label in other Todoist projects are not discovered automatically. When launching Horae from desktop shortcuts, the desktop session must also receive the token; Omarchy users can use the `horae-todoist-env` helper from horae-omarchy.
 
 `horae todoist status` also shows the result of the last sync and the list of open conflicts. Resolve a conflict with `horae todoist resolve <TODOIST_TASK_ID> --side horae` (keep the local task and push it back to Todoist) or `--side todoist` (keep the remote version). Once resolved, the conflict no longer blocks the next sync. The Settings view (`M`) has the same controls: `o` configures, `y` syncs, `c` lists and resolves conflicts.
 

@@ -107,7 +107,7 @@ horae                                                        # 5. 打开纯键�
     <img src="assets/screenshots/zh/themes-showcase.png" width="100%" alt="horae 主题展示：Tokyo Night、Catppuccin Latte 浅色、翡翠玉马 Jade Horse 与 Gruvbox。">
   </p>
 - **手机采集与消息推送**：通过 Syncthing 目录桥（`horae watch`）、`ntfy` 到期系统推送，或飞书 / Lark 机器人 WebSocket 长连接（`horae feishu listen`，无需公网 IP）在手机端随时记任务、点卡片处理待办。
-- **可选 Todoist 双向同步**：将一个指定 Todoist 项目与 Horae 同步；项目任务会导入 Horae，本地任务需显式添加 `@todoist` 标签才会推送。API Token 只从环境变量读取。
+- **可选 Todoist 双向同步**：同步一个 Todoist 项目。只配置 API Token 时会自动选择 Inbox，也可传项目 ID；项目任务会导入 Horae，本地任务需显式添加 `@todoist` 标签才会推送。通过 CLI 或 TUI 手动触发同步，API Token 只从环境变量读取。
 
 完整的 **每日/每周 GTD 实战节奏、语法速查表、全部 CLI 命令与 TUI 快捷键，以及 Hyprland / Waybar / Syncthing / ntfy / 飞书配置配方**，请阅读 **[实用操作手册](docs/USER_MANUAL_CN.md)**。
 

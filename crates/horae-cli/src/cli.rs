@@ -398,7 +398,7 @@ pub enum Command {
     },
     /// Synchronize tasks with Todoist (requires a Todoist project and API token environment variable)
     #[command(
-        after_help = "Examples:\n  horae todoist configure --project-id <ID>\n  TODOIST_API_TOKEN=... horae todoist sync\n  horae todoist status"
+        after_help = "Examples:\n  TODOIST_API_TOKEN=... horae todoist configure  # auto-select Inbox\n  horae todoist configure --project-id <ID>\n  TODOIST_API_TOKEN=... horae todoist sync\n  horae todoist status"
     )]
     Todoist {
         #[command(subcommand)]
@@ -558,8 +558,12 @@ pub enum FeishuAction {
 pub enum TodoistAction {
     /// Configure the dedicated Todoist project used for synchronization
     Configure {
-        #[arg(long, value_name = "ID")]
-        project_id: String,
+        #[arg(
+            long,
+            value_name = "ID",
+            help = "Project ID (defaults to Inbox when omitted)"
+        )]
+        project_id: Option<String>,
         #[arg(long, default_value = "TODOIST_API_TOKEN", value_name = "ENV")]
         token_env: String,
         /// Also delete the linked Todoist task when a Horae task is archived

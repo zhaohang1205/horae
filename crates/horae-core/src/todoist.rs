@@ -18,6 +18,7 @@ use crate::model::task::{Status, Task};
 use crate::repo::tasks::{self, CaptureInput, ListFilter, ModifyInput};
 
 const API_URL: &str = "https://api.todoist.com/api/v1/sync";
+const PROJECTS_API_URL: &str = "https://api.todoist.com/api/v1/projects";
 
 /// Endpoint used for synchronization. Overridable through `HORAE_TODOIST_API_URL`
 /// so the sync flow can be exercised against a local test server.
@@ -40,7 +41,166 @@ fn completed_api_url() -> String {
             "https://api.todoist.com/api/v1/tasks/completed/by_completion_date".to_string()
         })
 }
+
+fn projects_api_url() -> String {
+    std::env::var("HORAE_TODOIST_PROJECTS_API_URL")
+        .ok()
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty())
+        .unwrap_or_else(|| PROJECTS_API_URL.to_string())
+}
+
+/// Find the user's active Todoist Inbox project. Used when setup omits an
+/// explicit project ID, so a token alone can provide a safe default target.
+pub fn discover_inbox_project_id(token: &str) -> Result<String> {
+    discover_inbox_project_id_at(token, &projects_api_url())
+}
+
+fn discover_inbox_project_id_at(token: &str, endpoint: &str) -> Result<String> {
+    if token.trim().is_empty() {
+        bail!("Todoist API token is empty");
+    }
+
+    let mut cursor: Option<String> = None;
+    let mut seen_cursors = BTreeSet::new();
+    loop {
+        let mut url = url::Url::parse(endpoint).context("invalid Todoist projects API URL")?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("limit", "200");
+            if let Some(cursor) = &cursor {
+                query.append_pair("cursor", cursor);
+            }
+        }
+
+        let response = ureq::get(url.as_str())
+            .timeout(std::time::Duration::from_secs(20))
+            .set("Authorization", &format!("Bearer {}", token.trim()))
+            .call()
+            .map_err(|error| match error {
+                ureq::Error::Status(status, _) => {
+                    anyhow::anyhow!("Todoist project lookup failed with HTTP {status}")
+                }
+                other => anyhow::anyhow!("Todoist project lookup failed: {other}"),
+            })?;
+        let body = response
+            .into_string()
+            .context("read Todoist projects response")?;
+        let page: Value = serde_json::from_str(&body).context("parse Todoist projects response")?;
+
+        if let Some(projects) = page.get("results").and_then(Value::as_array) {
+            if let Some(id) = projects.iter().find_map(|project| {
+                let active = !project["is_archived"].as_bool().unwrap_or(false)
+                    && !project["is_deleted"].as_bool().unwrap_or(false);
+                (active && project["inbox_project"].as_bool() == Some(true))
+                    .then(|| project["id"].as_str())
+                    .flatten()
+                    .map(str::to_string)
+            }) {
+                return Ok(id);
+            }
+        }
+
+        let Some(next) = page
+            .get("next_cursor")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        else {
+            break;
+        };
+        if !seen_cursors.insert(next.to_string()) {
+            bail!("Todoist projects API repeated a pagination cursor");
+        }
+        cursor = Some(next.to_string());
+    }
+
+    bail!("Could not find an active Todoist Inbox project; pass --project-id explicitly")
+}
 const SYNC_TAG: &str = "todoist";
+
+#[cfg(test)]
+mod inbox_discovery_tests {
+    use super::discover_inbox_project_id_at;
+    use serde_json::{json, Value};
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+    use std::thread::JoinHandle;
+
+    fn mock_projects_api(pages: Vec<Value>) -> (String, JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for page in pages {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut request_line = String::new();
+                reader.read_line(&mut request_line).unwrap();
+                requests.push(request_line.trim().to_string());
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line == "\n" {
+                        break;
+                    }
+                }
+
+                let body = page.to_string();
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .unwrap();
+            }
+            requests
+        });
+        (format!("http://{address}/projects"), server)
+    }
+
+    #[test]
+    fn selects_active_inbox_from_a_later_page() {
+        let (endpoint, server) = mock_projects_api(vec![
+            json!({
+                "results": [
+                    {"id": "archived-inbox", "inbox_project": true, "is_archived": true},
+                    {"id": "regular", "inbox_project": false, "is_archived": false}
+                ],
+                "next_cursor": "cursor-2"
+            }),
+            json!({
+                "results": [
+                    {"id": "active-inbox", "inbox_project": true, "is_archived": false}
+                ],
+                "next_cursor": null
+            }),
+        ]);
+
+        assert_eq!(
+            discover_inbox_project_id_at("token", &endpoint).unwrap(),
+            "active-inbox"
+        );
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].contains("limit=200"));
+        assert!(requests[1].contains("cursor=cursor-2"));
+    }
+
+    #[test]
+    fn reports_when_no_active_inbox_exists() {
+        let (endpoint, server) = mock_projects_api(vec![json!({
+            "results": [
+                {"id": "archived-inbox", "inbox_project": true, "is_archived": true}
+            ],
+            "next_cursor": null
+        })]);
+
+        let error = discover_inbox_project_id_at("token", &endpoint).unwrap_err();
+        assert!(error.to_string().contains("pass --project-id"));
+        server.join().unwrap();
+    }
+}
 
 #[derive(Debug, Default, Clone)]
 pub struct SyncStats {
@@ -1082,6 +1242,12 @@ fn remote_due_ms(remote: &RemoteTask) -> Result<Option<i64>> {
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&due.date) {
         return Ok(Some(dt.timestamp_millis()));
     }
+    // Todoist may return a floating local datetime without an offset, e.g.
+    // `2026-11-22T12:00:00`. Treat it as local time, matching Horae's due-date
+    // parsing semantics. RFC3339 values above retain their explicit offset.
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&due.date, "%Y-%m-%dT%H:%M:%S%.f") {
+        return Ok(Some(crate::time::local_to_utc_ms(dt)?));
+    }
     Ok(Some(crate::time::parse_time(&due.date).with_context(
         || format!("parse Todoist due date {}", due.date),
     )?))
@@ -1154,6 +1320,41 @@ mod tests {
             labels: Vec::new(),
             completed_at: None,
         }
+    }
+
+    #[test]
+    fn parses_todoist_floating_local_due_datetime() {
+        let mut task = remote("td-1", "proj-1", "Due task");
+        task.due = Some(RemoteDue {
+            date: "2026-11-22T12:00:00".to_string(),
+            is_recurring: false,
+        });
+        let local =
+            chrono::NaiveDateTime::parse_from_str("2026-11-22T12:00:00", "%Y-%m-%dT%H:%M:%S")
+                .unwrap();
+
+        assert_eq!(
+            remote_due_ms(&task).unwrap(),
+            Some(crate::time::local_to_utc_ms(local).unwrap())
+        );
+    }
+
+    #[test]
+    fn preserves_explicit_todoist_due_datetime_offset() {
+        let mut task = remote("td-1", "proj-1", "Due task");
+        task.due = Some(RemoteDue {
+            date: "2026-11-22T12:00:00+08:00".to_string(),
+            is_recurring: false,
+        });
+
+        assert_eq!(
+            remote_due_ms(&task).unwrap(),
+            Some(
+                chrono::DateTime::parse_from_rfc3339("2026-11-22T12:00:00+08:00")
+                    .unwrap()
+                    .timestamp_millis()
+            )
+        );
     }
 
     #[test]

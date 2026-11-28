@@ -317,15 +317,28 @@ omarchy plugin add https://github.com/zhaohang1205/horae_for_omarchy_shell.git -
 
 ### Todoist
 
-选择一个专用 Todoist 项目，配置项目 ID 和读取 API Token 的环境变量名：
+设置 API Token 后，可以直接配置并自动使用 Todoist Inbox。也可显式指定其他项目 ID：
 
 ```sh
-horae todoist configure --project-id <TODOIST_PROJECT_ID> --token-env TODOIST_API_TOKEN
 export TODOIST_API_TOKEN=<你的个人 API Token>
+horae todoist configure
 horae todoist sync
 ```
 
+省略 `--project-id` 时，Horae 会通过 Token 查找 Todoist 的 Inbox 项目并保存其真实 ID。要同步其他项目，可使用 `horae todoist configure --project-id <TODOIST_PROJECT_ID>`。可用以下命令列出项目名和 ID：
+
+```sh
+export TODOIST_API_TOKEN=<你的个人 API Token>
+curl -fsS https://api.todoist.com/api/v1/projects \
+  -H "Authorization: Bearer $TODOIST_API_TOKEN" |
+  jq -r '.results[] | "\(.name)\t\(.id)"'
+```
+
+每次执行 `horae todoist sync` 只同步一轮；Horae 不会在后台定时轮询。手机端完成任务后，需在终端再次运行该命令，或在 TUI 设置页按 `y`。
+
 指定项目中已有的任务会导入 Horae。要把 Horae 中的任务推送到 Todoist，给它添加 `todoist` 标签（快速录入可写 `@todoist`）。关联任务同步标题、备注、截止时间、优先级、标签和完成状态；Todoist 删除任务会归档 Horae 任务。Horae 归档任务会保留 Todoist 侧任务，命令会报告仍在 Todoist 中活动的已归档关联任务。这是为了避免删除 Todoist 父任务时连带删除其子任务。两端同时修改同一任务时会报告冲突，不会自动覆盖。Todoist 任务移出指定项目后会暂停同步但保留关联；移回后可继续同步，避免重复导入。
+
+同步范围是配置的单个 Todoist 项目：该项目中的任务会导入 Horae；Horae 中带 `@todoist` 的任务会推送到该项目。不会自动扫描 Todoist 其他项目中带 `todoist` 标签的任务。桌面快捷键启动 Horae 时，Token 也必须能被桌面会话读取；Omarchy 用户可使用 horae-omarchy 提供的 `horae-todoist-env` 配置启动环境。
 
 重复任务因两端的循环语义不同会跳过；Horae 的 Done 以外状态都映射为 Todoist 的进行中。Todoist 已完成任务接口一次最多查询三个月范围，因此离线期间的完成状态应在三个月内至少同步一次。`horae purge` 会永久删除本地历史，无法将删除同步到 Todoist。
 

@@ -14,19 +14,36 @@ pub fn run(conn: &Connection, action: TodoistAction, profile: Option<&str>) -> R
             delete_remote_on_archive,
             prefer_remote_on_conflict,
         } => {
-            if project_id.trim().is_empty() || token_env.trim().is_empty() {
-                bail!("project id and token environment variable must not be empty");
+            if token_env.trim().is_empty() {
+                bail!("token environment variable must not be empty");
             }
+            let token_env = token_env.trim();
+            let project_id = match project_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+            {
+                Some(id) => id.to_string(),
+                None => {
+                    let token = std::env::var(token_env).ok().filter(|value| !value.trim().is_empty()).ok_or_else(|| {
+                        anyhow::anyhow!("{token_env} is required to discover the Todoist Inbox project; set it or pass --project-id")
+                    })?;
+                    let id = horae_core::todoist::discover_inbox_project_id(&token)?;
+                    println!("No project ID supplied; selected Todoist Inbox project {id}.");
+                    id
+                }
+            };
             let mut config = Config::load()?;
             let (name, profile_config) = config.resolve_profile(profile)?;
             let name = name.to_string();
-            let reset_sync = profile_config.todoist.as_ref().is_some_and(|old| {
-                old.project_id != project_id.trim() || old.token_env != token_env.trim()
-            });
+            let reset_sync = profile_config
+                .todoist
+                .as_ref()
+                .is_some_and(|old| old.project_id != project_id || old.token_env != token_env);
             let mut updated = profile_config.clone();
             updated.todoist = Some(TodoistConfig {
-                project_id: project_id.trim().to_string(),
-                token_env: token_env.trim().to_string(),
+                project_id: project_id.clone(),
+                token_env: token_env.to_string(),
                 delete_remote_on_archive,
                 prefer_remote_on_conflict,
             });
@@ -115,7 +132,7 @@ pub fn run(conn: &Connection, action: TodoistAction, profile: Option<&str>) -> R
             let config = Config::load()?;
             let (name, profile_config) = config.resolve_profile(profile)?;
             let todoist = profile_config.todoist.as_ref().ok_or_else(|| {
-                anyhow::anyhow!("Todoist is not configured. Run `horae todoist configure --project-id <ID>` first.")
+                anyhow::anyhow!("Todoist is not configured. Set the token environment variable, then run `horae todoist configure` (or pass `--project-id` for another project).")
             })?;
             let token = todoist.resolve_token().ok_or_else(|| {
                 anyhow::anyhow!(
